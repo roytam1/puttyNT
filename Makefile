@@ -49,12 +49,15 @@ DEFINES =
 # nmake 1.12 empties a macro that a definition uses when the two names
 # differ only in case (it takes it for a reference to itself): so no
 # CFLAGS = $(cflags) here.
-# On Win32s there is no registry, so the settings are stored in files
-# instead. Select the implementation that matches the build target.
+# On Win32s there is no registry either.
 !IF "$(WIN32S)" == "1"
 STORAGE_OBJ = windows\storage-file.obj
+REGISTRY_OBJ = windows\utils\no-registry.obj
+SECURITY_OBJ = windows\utils\no-security.obj
 !ELSE
 STORAGE_OBJ = windows\storage.obj
+REGISTRY_OBJ = windows\utils\registry.obj
+SECURITY_OBJ = windows\utils\security.obj
 !ENDIF
 
 COMPILE = $(cc) $(cflags) $(cvarsmt) $(OPTIMISE) $(DEFINES) -D_WINDOWS -I. -Iwindows -Iterminal
@@ -71,8 +74,19 @@ RES = rbj
 RES = res
 !ENDIF
 
-all: putty.exe puttytel.exe plink.exe pscp.exe psftp.exe psocks.exe \
+# For Win32s, build only the programs that work on that platform (the
+# reference port made the same restriction): the console tools have no
+# way to wait for handles, and Pageant cannot use the IPC channel a
+# single-threaded system provides. winsftp.exe is built for Win32s too
+# once it exists.
+!IF "$(WIN32S)" == "1"
+ALL_PROGS = putty.exe puttytel.exe puttygen.exe
+!ELSE
+ALL_PROGS = putty.exe puttytel.exe plink.exe pscp.exe psftp.exe psocks.exe \
 	pageant.exe puttygen.exe
+!ENDIF
+
+all: $(ALL_PROGS)
 
 .SUFFIXES: .rbj
 
@@ -222,8 +236,8 @@ PUTTY = \
 	windows\utils\open_for_write_would_lose_data.obj \
 	windows\utils\pgp_fingerprints_msgbox.obj \
 	windows\utils\platform_get_x_display.obj \
-	windows\utils\registry.obj windows\utils\request_file.obj \
-	windows\utils\security.obj windows\utils\shinydialogbox.obj \
+	$(REGISTRY_OBJ) windows\utils\request_file.obj \
+	$(SECURITY_OBJ) windows\utils\shinydialogbox.obj \
 	windows\utils\split_into_argv_w.obj \
 	windows\utils\subprocess_waiter.obj windows\utils\version.obj \
 	windows\utils\win_strerror.obj windows\window.obj windows\x11.obj \
@@ -296,8 +310,8 @@ PUTTYTEL = \
 	windows\utils\message_box.obj \
 	windows\utils\open_for_write_would_lose_data.obj \
 	windows\utils\pgp_fingerprints_msgbox.obj \
-	windows\utils\registry.obj windows\utils\request_file.obj \
-	windows\utils\security.obj windows\utils\shinydialogbox.obj \
+	$(REGISTRY_OBJ) windows\utils\request_file.obj \
+	$(SECURITY_OBJ) windows\utils\shinydialogbox.obj \
 	windows\utils\split_into_argv_w.obj \
 	windows\utils\subprocess_waiter.obj windows\utils\version.obj \
 	windows\utils\win_strerror.obj windows\window.obj
@@ -400,7 +414,7 @@ PLINK = \
 	windows\utils\make_spr_sw_abort_winerror.obj \
 	windows\utils\open_for_write_would_lose_data.obj \
 	windows\utils\platform_get_x_display.obj \
-	windows\utils\registry.obj windows\utils\security.obj \
+	$(REGISTRY_OBJ) $(SECURITY_OBJ) \
 	windows\utils\split_into_argv_w.obj \
 	windows\utils\subprocess_waiter.obj windows\utils\version.obj \
 	windows\utils\win_strerror.obj windows\x11.obj x11disp.obj
@@ -501,7 +515,7 @@ PSCP = \
 	windows\utils\make_spr_sw_abort_winerror.obj \
 	windows\utils\open_for_write_would_lose_data.obj \
 	windows\utils\platform_get_x_display.obj \
-	windows\utils\registry.obj windows\utils\security.obj \
+	$(REGISTRY_OBJ) $(SECURITY_OBJ) \
 	windows\utils\split_into_argv_w.obj \
 	windows\utils\subprocess_waiter.obj windows\utils\version.obj \
 	windows\utils\win_strerror.obj x11disp.obj
@@ -602,7 +616,7 @@ PSFTP = \
 	windows\utils\make_spr_sw_abort_winerror.obj \
 	windows\utils\open_for_write_would_lose_data.obj \
 	windows\utils\platform_get_x_display.obj \
-	windows\utils\registry.obj windows\utils\security.obj \
+	$(REGISTRY_OBJ) $(SECURITY_OBJ) \
 	windows\utils\split_into_argv_w.obj \
 	windows\utils\subprocess_waiter.obj windows\utils\version.obj \
 	windows\utils\win_strerror.obj x11disp.obj
@@ -712,8 +726,8 @@ PAGEANT = \
 	windows\utils\makedlgitemborderless.obj \
 	windows\utils\message_box.obj \
 	windows\utils\pgp_fingerprints_msgbox.obj \
-	windows\utils\registry.obj windows\utils\request_file.obj \
-	windows\utils\security.obj windows\utils\split_into_argv_w.obj \
+	$(REGISTRY_OBJ) windows\utils\request_file.obj \
+	$(SECURITY_OBJ) windows\utils\split_into_argv_w.obj \
 	windows\utils\version.obj windows\utils\win_strerror.obj
 
 windows\pageant.res: windows\pageant.rc
@@ -772,8 +786,8 @@ PUTTYGEN = \
 	windows\utils\makedlgitemborderless.obj \
 	windows\utils\message_box.obj \
 	windows\utils\pgp_fingerprints_msgbox.obj \
-	windows\utils\registry.obj windows\utils\request_file.obj \
-	windows\utils\security.obj windows\utils\shinydialogbox.obj \
+	$(REGISTRY_OBJ) windows\utils\request_file.obj \
+	$(SECURITY_OBJ) windows\utils\shinydialogbox.obj \
 	windows\utils\split_into_argv_w.obj windows\utils\version.obj \
 	windows\utils\win_strerror.obj
 

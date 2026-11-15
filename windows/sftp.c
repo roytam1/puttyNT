@@ -43,6 +43,11 @@ char *psftp_lcd(char *dir)
     char *ret = NULL;
 
     if (!SetCurrentDirectory(dir)) {
+#ifdef WIN32S_COMPAT
+        /* FormatMessage is not supported on Win32s */
+        ret = dupprintf("unable to change directory: %s",
+                        win_strerror(GetLastError()));
+#else
         LPVOID message;
         int i;
         FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER |
@@ -54,6 +59,7 @@ char *psftp_lcd(char *dir)
         i = strcspn((char *)message, "\n");
         ret = dupprintf("%.*s", i, (LPCTSTR)message);
         LocalFree(message);
+#endif
     }
 
     return ret;
