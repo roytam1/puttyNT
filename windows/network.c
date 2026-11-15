@@ -170,7 +170,7 @@ DECL_WINDOWS_FUNCTION(static, int, getpeername,
 DECL_WINDOWS_FUNCTION(static, int, getsockname,
                       (SOCKET, struct sockaddr FAR *, int FAR *));
 DECL_WINDOWS_FUNCTION(static, int, recv, (SOCKET, char FAR *, int, int));
-DECL_WINDOWS_FUNCTION(static, int, select,
+DECL_WINDOWS_FUNCTION(extern, int, select,
                       (int, fd_set FAR *, fd_set FAR *, fd_set FAR *,
                        const struct timeval FAR *));
 DECL_WINDOWS_FUNCTION(static, int, getsockopt,
@@ -199,6 +199,7 @@ static bool sk_startup(int hi, int lo)
 DEF_WINDOWS_FUNCTION(WSAAsyncSelect);
 DEF_WINDOWS_FUNCTION(WSAGetLastError);
 DEF_WINDOWS_FUNCTION(ioctlsocket);
+DEF_WINDOWS_FUNCTION(select);
 
 DECL_WINDOWS_FUNCTION(static, BOOL, SetHandleInformation,
                       (HANDLE, DWORD, DWORD));

@@ -9,6 +9,7 @@
 #include "ssh.h"
 #include "security-api.h"
 
+#ifndef WINSFTP_BUILD
 SeatPromptResult filexfer_get_userpass_input(Seat *seat, prompts_t *p)
 {
     /* The file transfer tools don't support Restart Session, so we
@@ -29,6 +30,7 @@ void platform_get_x11_auth(struct X11Display *display, Conf *conf)
     /* Do nothing, therefore no auth. */
 }
 const bool platform_uses_x11_unix_by_default = true;
+#endif /* !WINSFTP_BUILD */
 
 /* ----------------------------------------------------------------------
  * File access abstraction.
@@ -478,6 +480,7 @@ struct winsftp_cliloop_ctx {
     HANDLE other_event;
     int toret;
 };
+#ifndef WINSFTP_BUILD
 static bool winsftp_cliloop_pre(void *vctx, const HANDLE **extra_handles,
                                 size_t *n_extra_handles)
 {
@@ -609,3 +612,5 @@ int main(int argc, char *argv[])
 
     return ret;
 }
+
+#endif /* !WINSFTP_BUILD */

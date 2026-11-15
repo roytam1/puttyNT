@@ -80,7 +80,7 @@ RES = res
 # single-threaded system provides. winsftp.exe is built for Win32s too
 # once it exists.
 !IF "$(WIN32S)" == "1"
-ALL_PROGS = putty.exe puttytel.exe puttygen.exe
+ALL_PROGS = putty.exe puttytel.exe puttygen.exe winsftp.exe
 !ELSE
 ALL_PROGS = putty.exe puttytel.exe plink.exe pscp.exe psftp.exe psocks.exe \
 	pageant.exe puttygen.exe
@@ -115,6 +115,15 @@ be_pscp.obj: be_list.c
 
 be_psftp.obj: be_list.c
 	$(COMPILE) -DAPPNAME=PSFTP -DSSH=1 -DSERIAL=0 -DOTHERBACKENDS=0 -Fobe_psftp.obj be_list.c
+
+psftp_winsftp.obj: psftp.c
+	$(COMPILE) -DWINSFTP_BUILD=1 -Dprintf=winsftp_printf -Dfprintf=winsftp_fprintf -Fopsftp_winsftp.obj psftp.c
+
+windows\win_sftp_fileio.obj: windows\sftp.c
+	$(COMPILE) -DWINSFTP_BUILD=1 -Fowindows\win_sftp_fileio.obj windows\sftp.c
+
+windows\winsftp.obj: windows\winsftp.c
+	$(COMPILE) -DWINSFTP_BUILD=1 -Dprintf=winsftp_printf -Dfprintf=winsftp_fprintf -Fowindows\winsftp.obj windows\winsftp.c
 
 # The bignum, elliptic curve, NTRU, ML-KEM and Argon2 code does most of
 # the work when PuTTY connects or unlocks a key. It is optimised on
@@ -627,6 +636,110 @@ windows\psftp.rbj: windows\psftp.res
 psftp.exe: $(PSFTP) windows\psftp.$(RES)
 	$(link) $(conflags) $(ldebug) -out:psftp.exe @<<
 $(PSFTP) windows\psftp.$(RES) $(CONSOLE_LIBS)
+<<
+
+# winsftp.exe: a graphical SFTP client. Like psftp.exe, but with the
+# console layer compiled out and replaced by the GUI in winsftp.c.
+# Built only for Win32s (see ALL_PROGS).
+WINSFTP = \
+	be_psftp.obj callback.obj cmdline.obj \
+	crypto\aes-common.obj crypto\aes-select.obj crypto\aes-sw.obj \
+	crypto\aesgcm-select.obj crypto\aesgcm-sw.obj crypto\arcfour.obj \
+	crypto\argon2.obj crypto\blake2.obj crypto\blowfish.obj \
+	crypto\chacha20-poly1305.obj crypto\crc32.obj crypto\des.obj \
+	crypto\diffie-hellman.obj crypto\dsa.obj crypto\ecc-arithmetic.obj \
+	crypto\ecc-ssh.obj crypto\hash_simple.obj crypto\hmac.obj \
+	crypto\kex-hybrid.obj crypto\mac.obj crypto\mac_simple.obj \
+	crypto\md5.obj crypto\mlkem.obj crypto\mpint.obj crypto\ntru.obj \
+	crypto\openssh-certs.obj crypto\prng.obj crypto\pubkey-ppk.obj \
+	crypto\pubkey-ssh1.obj crypto\rfc6979.obj crypto\rsa.obj \
+	crypto\sha1-common.obj crypto\sha1-select.obj crypto\sha1-sw.obj \
+	crypto\sha256-common.obj crypto\sha256-select.obj \
+	crypto\sha256-sw.obj crypto\sha3.obj crypto\sha512-common.obj \
+	crypto\sha512-select.obj crypto\sha512-sw.obj crypto\xdmauth.obj \
+	errsock.obj logging.obj pinger.obj proxy\cproxy.obj proxy\http.obj \
+	proxy\interactor.obj proxy\local.obj proxy\newmain.obj \
+	proxy\proxy.obj proxy\socks4.obj proxy\socks5.obj \
+	proxy\sshproxy.obj proxy\telnet.obj psftp_winsftp.obj psftpcommon.obj \
+	settings.obj ssh\agentf.obj ssh\bpp-bare.obj ssh\bpp1.obj \
+	ssh\bpp2.obj ssh\censor1.obj ssh\censor2.obj ssh\common.obj \
+	ssh\connection1-client.obj ssh\connection1.obj \
+	ssh\connection2-client.obj ssh\connection2.obj \
+	ssh\crc-attack-detector.obj ssh\kex2-client.obj ssh\login1.obj \
+	ssh\mainchan.obj ssh\nocompress.obj ssh\portfwd.obj ssh\sftp.obj \
+	ssh\sftpcommon.obj ssh\sharing.obj ssh\ssh.obj \
+	ssh\transient-hostkey-cache.obj ssh\transport2.obj \
+	ssh\userauth2-client.obj ssh\verstring.obj ssh\x11fwd.obj \
+	ssh\zlib.obj sshpubk.obj sshrand.obj stubs\no-gss.obj \
+	stubs\null-cipher.obj stubs\null-key.obj stubs\null-lp.obj \
+	stubs\null-mac.obj stubs\null-opener.obj stubs\null-plug.obj \
+	stubs\null-seat.obj stubs\null-socket.obj timing.obj \
+	utils\antispoof.obj utils\backend_socket_log.obj \
+	utils\base64_decode.obj utils\base64_decode_atom.obj \
+	utils\base64_encode.obj utils\base64_encode_atom.obj \
+	utils\bufchain.obj utils\buildinfo.obj utils\burnstr.obj \
+	utils\burnwcs.obj utils\cert-expr.obj utils\chomp.obj \
+	utils\conf.obj utils\conf_data.obj utils\conf_dest.obj \
+	utils\conf_launchable.obj utils\ctrlparse.obj \
+	utils\decode_utf8.obj utils\decode_utf8_to_wchar.obj \
+	utils\decode_utf8_to_wide_string.obj utils\default_description.obj \
+	utils\dup_mb_to_wc.obj utils\dup_wc_to_mb.obj utils\dupcat.obj \
+	utils\dupprintf.obj utils\dupstr.obj utils\dupwcs.obj \
+	utils\encode_utf8.obj utils\encode_wide_string_as_utf8.obj \
+	utils\fgetline.obj utils\format_connection_setup_command.obj \
+	utils\host_ca_new_free.obj utils\host_strchr.obj \
+	utils\host_strchr_internal.obj utils\host_strcspn.obj \
+	utils\host_strduptrim.obj utils\host_strrchr.obj \
+	utils\key_components.obj utils\log_proxy_stderr.obj \
+	utils\logeventf.obj utils\make_spr_sw_abort_static.obj \
+	utils\marshal.obj utils\memory.obj utils\memxor.obj \
+	utils\nullstrcmp.obj utils\out_of_memory.obj \
+	utils\parse_blocksize.obj utils\percent_decode.obj \
+	utils\percent_encode.obj utils\prompts.obj utils\ptrlen.obj \
+	utils\seat_connection_fatal.obj utils\seat_dialog_text.obj \
+	utils\seat_nonfatal.obj utils\sessprep.obj \
+	utils\sk_free_peer_info.obj utils\smemclr.obj utils\smemeq.obj \
+	utils\spr_get_error_message.obj utils\ssh2_pick_fingerprint.obj \
+	utils\sshutils.obj utils\strbuf.obj \
+	utils\string_length_for_printf.obj utils\stripctrl.obj \
+	utils\tempseat.obj utils\tree234.obj utils\uint64.obj \
+	utils\validate_manual_hostkey.obj utils\version.obj \
+	utils\wcwidth.obj utils\wildcard.obj utils\wordwrap.obj \
+	utils\write_c_string_literal.obj utils\x11_dehexify.obj \
+	utils\x11_identify_auth_proto.obj utils\x11_make_greeting.obj \
+	utils\x11_parse_ip.obj utils\x11authnames.obj \
+	windows\agent-client.obj windows\commitid.obj \
+	windows\handle-io.obj windows\handle-socket.obj \
+	windows\handle-wait.obj windows\local-proxy.obj \
+	windows\named-pipe-client.obj windows\named-pipe-server.obj \
+	windows\network.obj windows\no-jump-list.obj windows\noise.obj \
+	windows\select-gui.obj windows\win_sftp_fileio.obj \
+	windows\sharing.obj windows\winsftp.obj \
+	$(STORAGE_OBJ) windows\unicode.obj \
+	windows\utils\agent_named_pipe_name.obj \
+	windows\utils\cmdline_arg.obj windows\utils\cryptoapi.obj \
+	windows\utils\defaults.obj \
+	windows\utils\dll_hijacking_protection.obj \
+	windows\utils\escape_registry_key.obj windows\utils\filename.obj \
+	windows\utils\fontspec.obj \
+	windows\utils\get_system_dir.obj windows\utils\get_username.obj \
+	windows\utils\interprocess_mutex.obj \
+	windows\utils\is_console_handle.obj windows\utils\ltime.obj \
+	windows\utils\load_system32_dll.obj windows\utils\message_box.obj \
+	windows\utils\make_spr_sw_abort_winerror.obj \
+	windows\utils\open_for_write_would_lose_data.obj \
+	windows\utils\platform_get_x_display.obj \
+	$(REGISTRY_OBJ) $(SECURITY_OBJ) \
+	windows\utils\split_into_argv_w.obj \
+	windows\utils\subprocess_waiter.obj windows\utils\version.obj \
+	windows\utils\win_strerror.obj x11disp.obj
+
+windows\winsftp.res: windows\winsftp.rc
+windows\winsftp.rbj: windows\winsftp.res
+
+winsftp.exe: $(WINSFTP) windows\winsftp.$(RES)
+	$(link) $(guiflags) $(ldebug) -out:winsftp.exe @<<
+$(WINSFTP) windows\winsftp.$(RES) $(GUI_LIBS)
 <<
 
 PSOCKS = \
