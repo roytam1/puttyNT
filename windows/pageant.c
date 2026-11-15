@@ -18,7 +18,7 @@
 #include "pageant.h"
 #include "licence.h"
 #include "pageant-rc.h"
-
+#include "storage.h"
 #include <shellapi.h>
 
 
@@ -831,41 +831,34 @@ static BOOL AddTrayIcon(HWND hwnd)
 static void update_sessions(void)
 {
     int num_entries;
-    HKEY hkey;
-    TCHAR buf[MAX_PATH + 1];
+    settings_e *handle;
     strbuf *sb;
 
-    int index_key, index_menu;
+    int index_menu;
 
     if (!putty_path)
         return;
 
-    if (ERROR_SUCCESS != RegOpenKey(HKEY_CURRENT_USER, PUTTY_REGKEY, &hkey))
-        return;
-
     for (num_entries = GetMenuItemCount(session_menu);
-        num_entries > initial_menuitems_count;
-        num_entries--)
+         num_entries > initial_menuitems_count;
+         num_entries--)
         RemoveMenu(session_menu, 0, MF_BYPOSITION);
 
-    index_key = 0;
     index_menu = 0;
 
     sb = strbuf_new();
-    while (ERROR_SUCCESS == RegEnumKey(hkey, index_key, buf, MAX_PATH)) {
-        if (strcmp(buf, PUTTY_DEFAULT) != 0) {
+    if ((handle = enum_settings_start()) != NULL) {
+        while (enum_settings_next(handle, sb)) {
+            if (strcmp(sb->s, DEFAULT_SESSION_NAME) != 0) {
+                InsertMenu(session_menu, index_menu, MF_BYPOSITION | MF_STRING,
+                           (index_menu * 16) + IDM_SESSIONS_BASE, sb->s);
+                index_menu++;
+            }
             strbuf_clear(sb);
-            unescape_registry_key(buf, sb);
-
-            InsertMenu(session_menu, index_menu, MF_BYPOSITION | MF_STRING,
-                       (index_menu * 16) + IDM_SESSIONS_BASE, sb->s);
-            index_menu++;
         }
-        index_key++;
+        enum_settings_finish(handle);
     }
     strbuf_free(sb);
-
-    RegCloseKey(hkey);
 
     if (index_menu == 0)
         InsertMenu(session_menu, index_menu,

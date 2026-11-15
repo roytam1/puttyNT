@@ -49,6 +49,14 @@ DEFINES =
 # nmake 1.12 empties a macro that a definition uses when the two names
 # differ only in case (it takes it for a reference to itself): so no
 # CFLAGS = $(cflags) here.
+# On Win32s there is no registry, so the settings are stored in files
+# instead. Select the implementation that matches the build target.
+!IF "$(WIN32S)" == "1"
+STORAGE_OBJ = windows\storage-file.obj
+!ELSE
+STORAGE_OBJ = windows\storage.obj
+!ENDIF
+
 COMPILE = $(cc) $(cflags) $(cvarsmt) $(OPTIMISE) $(DEFINES) -D_WINDOWS -I. -Iwindows -Iterminal
 COMPILE_OPT = $(cc) $(cflags) $(cvarsmt) $(cdebug) $(DEFINES) -D_WINDOWS -I. -Iwindows -Iterminal
 CONSOLE_LIBS = $(conlibsmt) advapi32.lib user32.lib
@@ -197,7 +205,7 @@ PUTTY = \
 	windows\network.obj windows\no-jump-list.obj windows\noise.obj \
 	windows\printing.obj windows\putty.obj windows\select-gui.obj \
 	windows\serial.obj windows\sharing.obj windows\sizetip.obj \
-	windows\storage.obj windows\unicode.obj \
+	$(STORAGE_OBJ) windows\unicode.obj \
 	windows\utils\agent_named_pipe_name.obj \
 	windows\utils\blink_time.obj windows\utils\centre_window.obj \
 	windows\utils\cmdline_arg.obj windows\utils\cryptoapi.obj \
@@ -275,7 +283,7 @@ PUTTYTEL = \
 	windows\handle-wait.obj windows\local-proxy.obj \
 	windows\network.obj windows\no-jump-list.obj windows\printing.obj \
 	windows\putty.obj windows\select-gui.obj windows\serial.obj \
-	windows\sizetip.obj windows\storage.obj windows\unicode.obj \
+	windows\sizetip.obj $(STORAGE_OBJ) windows\unicode.obj \
 	windows\utils\blink_time.obj windows\utils\centre_window.obj \
 	windows\utils\cmdline_arg.obj windows\utils\defaults.obj \
 	windows\utils\dll_hijacking_protection.obj \
@@ -378,7 +386,7 @@ PLINK = \
 	windows\named-pipe-client.obj windows\named-pipe-server.obj \
 	windows\network.obj windows\no-jump-list.obj windows\noise.obj \
 	windows\plink.obj windows\select-cli.obj windows\select-gui.obj \
-	windows\serial.obj windows\sharing.obj windows\storage.obj \
+	windows\serial.obj windows\sharing.obj $(STORAGE_OBJ) \
 	windows\unicode.obj windows\utils\agent_named_pipe_name.obj \
 	windows\utils\cmdline_arg.obj windows\utils\cryptoapi.obj \
 	windows\utils\defaults.obj \
@@ -479,7 +487,7 @@ PSCP = \
 	windows\named-pipe-server.obj windows\network.obj \
 	windows\no-jump-list.obj windows\noise.obj windows\select-cli.obj \
 	windows\select-gui.obj windows\sftp.obj windows\sharing.obj \
-	windows\storage.obj windows\unicode.obj \
+	$(STORAGE_OBJ) windows\unicode.obj \
 	windows\utils\agent_named_pipe_name.obj \
 	windows\utils\cmdline_arg.obj windows\utils\cryptoapi.obj \
 	windows\utils\defaults.obj \
@@ -580,7 +588,7 @@ PSFTP = \
 	windows\named-pipe-server.obj windows\network.obj \
 	windows\no-jump-list.obj windows\noise.obj windows\select-cli.obj \
 	windows\select-gui.obj windows\sftp.obj windows\sharing.obj \
-	windows\storage.obj windows\unicode.obj \
+	$(STORAGE_OBJ) windows\unicode.obj \
 	windows\utils\agent_named_pipe_name.obj \
 	windows\utils\cmdline_arg.obj windows\utils\cryptoapi.obj \
 	windows\utils\defaults.obj \
@@ -682,13 +690,15 @@ PAGEANT = \
 	utils\seat_dialog_text.obj utils\sk_free_peer_info.obj \
 	utils\smemclr.obj utils\smemeq.obj utils\ssh2_pick_fingerprint.obj \
 	utils\strbuf.obj utils\string_length_for_printf.obj \
-	utils\tree234.obj utils\uint64.obj utils\version.obj \
+	utils\base64_decode.obj utils\cert-expr.obj utils\host_ca_new_free.obj utils\percent_decode.obj utils\percent_encode.obj utils\wildcard.obj windows\no-jump-list.obj \
+	utils\fgetline.obj utils\tree234.obj utils\uint64.obj utils\version.obj \
 	utils\write_c_string_literal.obj windows\agent-client.obj \
 	windows\commitid.obj windows\handle-io.obj \
 	windows\handle-socket.obj windows\handle-wait.obj \
 	windows\named-pipe-client.obj windows\named-pipe-server.obj \
 	windows\network.obj windows\pageant.obj windows\select-gui.obj \
-	windows\unicode.obj windows\utils\agent_mutex_name.obj \
+	windows\unicode.obj $(STORAGE_OBJ) \
+	windows\utils\agent_mutex_name.obj \
 	windows\utils\agent_named_pipe_name.obj \
 	windows\utils\aux_match_opt.obj windows\utils\cmdline_arg.obj \
 	windows\utils\cryptoapi.obj \
@@ -747,12 +757,12 @@ PUTTYGEN = \
 	utils\out_of_memory.obj utils\percent_decode.obj \
 	utils\percent_encode.obj utils\ptrlen.obj \
 	utils\seat_dialog_text.obj utils\smemclr.obj utils\smemeq.obj \
-	utils\ssh_key_clone.obj utils\strbuf.obj \
+	utils\ssh_key_clone.obj utils\fgetline.obj utils\strbuf.obj \
 	utils\string_length_for_printf.obj utils\tree234.obj \
 	utils\uint64.obj utils\version.obj utils\wildcard.obj \
 	utils\write_c_string_literal.obj windows\commitid.obj \
 	windows\controls.obj windows\no-jump-list.obj windows\noise.obj \
-	windows\puttygen.obj windows\storage.obj windows\unicode.obj \
+	windows\puttygen.obj $(STORAGE_OBJ) windows\unicode.obj \
 	windows\utils\aux_match_opt.obj windows\utils\cmdline_arg.obj \
 	windows\utils\dll_hijacking_protection.obj \
 	windows\utils\escape_registry_key.obj windows\utils\filename.obj \
