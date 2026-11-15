@@ -81,7 +81,12 @@ CmdlineArgList *cmdline_arg_list_from_GetCommandLineW(void)
     CmdlineArgListWin *list = snew(CmdlineArgListWin);
     CmdlineArgList *listp = &list->listp;
 
+#ifdef WIN32S_COMPAT
+    /* Win32s has no GetCommandLineW; use ANSI version and convert */
+    list->cmdline = dup_mb_to_wc(CP_ACP, GetCommandLineA());
+#else
     list->cmdline = GetCommandLineW();
+#endif
 
     int argc;
     split_into_argv_w(list->cmdline, true,

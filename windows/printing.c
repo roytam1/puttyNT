@@ -43,7 +43,9 @@ static void init_winfuncs(void)
          * Nevertheless, we load spoolss.dll ourselves using our safe
          * loading method, against the possibility that winspool.drv
          * later loads it unsafely. */
+#ifndef WIN32S_COMPAT
         (void) load_system32_dll("spoolss.dll");
+#endif
         GET_WINDOWS_FUNCTION_PP(winspool_module, EnumPrinters);
         GET_WINDOWS_FUNCTION_PP(winspool_module, OpenPrinter);
         GET_WINDOWS_FUNCTION_PP(winspool_module, ClosePrinter);

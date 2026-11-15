@@ -84,6 +84,10 @@ int ShinyDialogBox(HINSTANCE hinst, LPCTSTR tmpl, const char *winclass,
 
     sdb_tempstate = state;
     HWND hwnd = CreateDialog(hinst, tmpl, hwndparent, ShinyRealDlgProc);
+    if (!hwnd) {
+        sdb_tempstate = NULL;
+        return 0;
+    }
     SetWindowLongPtr(hwnd, DLGWINDOWEXTRA, (LONG_PTR)state);
     sdb_tempstate = NULL;
 

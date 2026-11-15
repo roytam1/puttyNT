@@ -94,7 +94,8 @@ static ProgressPhase win_progress_add_linear(
 
     p->phases[phase].total = overall_cost;
 
-    ProgressPhase ph = { .n = phase };
+    ProgressPhase ph;
+    ph.n = phase;
     return ph;
 }
 
@@ -110,7 +111,8 @@ static ProgressPhase win_progress_add_probabilistic(
     /* Expected number of attempts = 1 / probability of attempt succeeding */
     p->phases[phase].total = cost_per_attempt / probability;
 
-    ProgressPhase ph = { .n = phase };
+    ProgressPhase ph;
+    ph.n = phase;
     return ph;
 }
 
@@ -1338,6 +1340,10 @@ static void start_generating_key(HWND hwnd, struct MainDlgState *state)
     params->key = &state->key;
     params->dsakey = &state->dsakey;
 
+#ifdef WIN32S_COMPAT
+    generate_key_thread(params);
+    state->generation_thread_exists = true;
+#else
     HANDLE hThread = CreateThread(NULL, 0, generate_key_thread,
                                   params, 0, &threadid);
     if (!hThread) {
@@ -1349,6 +1355,7 @@ static void start_generating_key(HWND hwnd, struct MainDlgState *state)
         CloseHandle(hThread);          /* we don't need the thread handle */
         state->generation_thread_exists = true;
     }
+#endif
 }
 
 /*
@@ -1506,6 +1513,68 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
         state->entropy = NULL;
         state->key_exists = false;
         SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR) state);
+#ifdef WIN32S_COMPAT
+        /*
+         * Win32s: dialog boxes don't reliably support SetMenu(),
+         * so append our commands to the system menu instead.
+         */
+        {
+            HMENU sysmenu = GetSystemMenu(hwnd, FALSE);
+
+            AppendMenu(sysmenu, MF_SEPARATOR, 0, 0);
+            AppendMenu(sysmenu, MF_ENABLED, IDC_LOAD, "&Load private key");
+            AppendMenu(sysmenu, MF_ENABLED, IDC_SAVEPUB, "Save p&ublic key");
+            AppendMenu(sysmenu, MF_ENABLED, IDC_SAVE, "&Save private key");
+            AppendMenu(sysmenu, MF_SEPARATOR, 0, 0);
+            AppendMenu(sysmenu, MF_ENABLED, IDC_GENERATE, "&Generate key pair");
+            AppendMenu(sysmenu, MF_ENABLED, IDC_ADDCERT,
+                       "Add certificate to key");
+            AppendMenu(sysmenu, MF_ENABLED, IDC_REMCERT,
+                       "Remove certificate from key");
+            AppendMenu(sysmenu, MF_SEPARATOR, 0, 0);
+            AppendMenu(sysmenu, MF_ENABLED, IDC_KEYSSH1, "SSH-1 key (RSA)");
+            AppendMenu(sysmenu, MF_ENABLED, IDC_KEYSSH2RSA, "SSH-2 RSA key");
+            AppendMenu(sysmenu, MF_ENABLED, IDC_KEYSSH2DSA, "SSH-2 DSA key");
+            AppendMenu(sysmenu, MF_ENABLED, IDC_KEYSSH2ECDSA,
+                       "SSH-2 ECDSA key");
+            AppendMenu(sysmenu, MF_ENABLED, IDC_KEYSSH2EDDSA,
+                       "SSH-2 EdDSA key");
+            AppendMenu(sysmenu, MF_SEPARATOR, 0, 0);
+            AppendMenu(sysmenu, MF_ENABLED, IDC_PRIMEGEN_PROB,
+                       "Use probable primes (fast)");
+            AppendMenu(sysmenu, MF_ENABLED, IDC_PRIMEGEN_MAURER_SIMPLE,
+                       "Use proven primes (slower)");
+            AppendMenu(sysmenu, MF_ENABLED, IDC_PRIMEGEN_MAURER_COMPLEX,
+                       "Use proven primes with even distribution (slowest)");
+            AppendMenu(sysmenu, MF_SEPARATOR, 0, 0);
+            AppendMenu(sysmenu, MF_ENABLED, IDC_RSA_STRONG,
+                       "Use strong primes as RSA key factors");
+            AppendMenu(sysmenu, MF_SEPARATOR, 0, 0);
+            AppendMenu(sysmenu, MF_ENABLED, IDC_PPK_PARAMS,
+                       "Parameters for saving key files...");
+            AppendMenu(sysmenu, MF_SEPARATOR, 0, 0);
+            AppendMenu(sysmenu, MF_ENABLED, IDC_FPTYPE_SHA256,
+                       "Show fingerprint as SHA256");
+            AppendMenu(sysmenu, MF_ENABLED, IDC_FPTYPE_MD5,
+                       "Show fingerprint as MD5");
+            AppendMenu(sysmenu, MF_SEPARATOR, 0, 0);
+            AppendMenu(sysmenu, MF_ENABLED, IDC_IMPORT, "&Import key");
+            AppendMenu(sysmenu, MF_ENABLED, IDC_EXPORT_OPENSSH_AUTO,
+                       "Export OpenSSH key");
+            AppendMenu(sysmenu, MF_ENABLED, IDC_EXPORT_OPENSSH_NEW,
+                       "Export OpenSSH key (new format)");
+            AppendMenu(sysmenu, MF_ENABLED, IDC_EXPORT_SSHCOM,
+                       "Export ssh.com key");
+            AppendMenu(sysmenu, MF_SEPARATOR, 0, 0);
+            AppendMenu(sysmenu, MF_ENABLED, IDC_ABOUT, "&About");
+            if (has_help())
+                AppendMenu(sysmenu, MF_ENABLED, IDC_GIVEHELP, "&Help");
+
+            state->filemenu = sysmenu;
+            state->keymenu = sysmenu;
+            state->cvtmenu = sysmenu;
+        }
+#else
         {
             HMENU menu, menu1;
 
@@ -1575,6 +1644,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
 
             SetMenu(hwnd, menu);
         }
+#endif /* WIN32S_COMPAT */
 
         /*
          * Centre the window.
@@ -1770,6 +1840,20 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
             }
         }
         break;
+#ifdef WIN32S_COMPAT
+      case WM_SYSCOMMAND:
+        /*
+         * Forward custom system menu items to WM_COMMAND handler.
+         */
+        {
+            UINT cmd = LOWORD(wParam);
+            if (cmd >= controlidstart && cmd <= IDC_REMCERT) {
+                SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(cmd, 0), 0);
+                return 0;
+            }
+        }
+        break;
+#endif
       case WM_COMMAND:
         switch (LOWORD(wParam)) {
           case IDC_KEYSSH1:

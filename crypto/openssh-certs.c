@@ -592,7 +592,9 @@ static void opensshcert_string_list_key_components(
     BinarySource src[1];
     BinarySource_BARE_INIT_PL(src, ptrlen_from_strbuf(input));
 
-    const char *titles[2] = { title, title2 };
+    const char *titles[2];
+    titles[0] = title;
+    titles[1] = title2;
     size_t ntitles = (title2 ? 2 : 1);
 
     unsigned index = 0;

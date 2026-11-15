@@ -1075,10 +1075,11 @@ static ScanKexinitsResult ssh2_scan_kexinits(
              * produce a reasonably useful message instead of an
              * assertion failure.
              */
-            ScanKexinitsResult skr = {
-                .success = false, .error = SKR_UNKNOWN_ID,
-                .kind = kexlist_descr[i], .desc = found,
-            };
+            ScanKexinitsResult skr;
+            skr.success = false;
+            skr.error = SKR_UNKNOWN_ID;
+            skr.kind = kexlist_descr[i];
+            skr.desc = found;
             return skr;
         }
 
@@ -1134,10 +1135,11 @@ static ScanKexinitsResult ssh2_scan_kexinits(
             /*
              * Otherwise, any match failure _is_ a fatal error.
              */
-            ScanKexinitsResult skr = {
-                .success = false, .error = SKR_NO_AGREEMENT,
-                .kind = kexlist_descr[i], .desc = slists[i],
-            };
+            ScanKexinitsResult skr;
+            skr.success = false;
+            skr.error = SKR_NO_AGREEMENT;
+            skr.kind = kexlist_descr[i];
+            skr.desc = slists[i];
             return skr;
         }
 

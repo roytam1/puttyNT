@@ -3,6 +3,7 @@
  */
 
 #include <assert.h>
+#include <string.h>
 
 #include "putty.h"
 #include "ssh.h"
@@ -893,7 +894,9 @@ void ssh2kex_coroutine(struct ssh2_transport_state *s, bool *aborted)
                 }
             }
 
-            ssh2_userkey uk = { .key = s->hkey, .comment = NULL };
+            ssh2_userkey uk;
+            uk.key = s->hkey;
+            uk.comment = NULL;
             char **fingerprints = ssh2_all_fingerprints(s->hkey);
 
             FingerprintType fptype_default =
@@ -927,7 +930,9 @@ void ssh2kex_coroutine(struct ssh2_transport_state *s, bool *aborted)
 
                 strbuf *ca_pub = strbuf_new();
                 ssh_key_ca_public_blob(s->hkey, BinarySink_UPCAST(ca_pub));
-                host_ca hca_search = { .ca_public_key = ca_pub };
+                host_ca hca_search;
+                memset(&hca_search, 0, sizeof(hca_search));
+                hca_search.ca_public_key = ca_pub;
                 host_ca *hca_found = find234(s->host_cas, &hca_search, NULL);
 
                 char *ca_fp = ssh2_fingerprint_blob(ptrlen_from_strbuf(ca_pub),

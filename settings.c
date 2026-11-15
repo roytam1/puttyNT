@@ -1062,12 +1062,12 @@ static int sessioncmp(const void *av, const void *bv)
     const char *b = *(const char *const *) bv;
 
     /*
-     * Alphabetical order, except that "Default Settings" is a
+     * Alphabetical order, except that the default session is a
      * special case and comes first.
      */
-    if (!strcmp(a, "Default Settings"))
+    if (!strcmp(a, DEFAULT_SESSION_NAME))
         return -1;                     /* a comes first */
-    if (!strcmp(b, "Default Settings"))
+    if (!strcmp(b, DEFAULT_SESSION_NAME))
         return +1;                     /* b comes first */
     /*
      * FIXME: perhaps we should ignore the first & in determining
@@ -1102,15 +1102,15 @@ void get_sesslist(struct sesslist *list, bool allocate)
         list->buffer = strbuf_to_str(sb);
 
         /*
-         * Now set up the list of sessions. Note that "Default
-         * Settings" must always be claimed to exist, even if it
+         * Now set up the list of sessions. Note that the default
+         * session must always be claimed to exist, even if it
          * doesn't really.
          */
 
         p = list->buffer;
-        list->nsessions = 1;           /* "Default Settings" counts as one */
+        list->nsessions = 1;           /* default session counts as one */
         while (*p) {
-            if (strcmp(p, "Default Settings"))
+            if (strcmp(p, DEFAULT_SESSION_NAME))
                 list->nsessions++;
             while (*p)
                 p++;
@@ -1118,11 +1118,11 @@ void get_sesslist(struct sesslist *list, bool allocate)
         }
 
         list->sessions = snewn(list->nsessions + 1, const char *);
-        list->sessions[0] = "Default Settings";
+        list->sessions[0] = DEFAULT_SESSION_NAME;
         p = list->buffer;
         i = 1;
         while (*p) {
-            if (strcmp(p, "Default Settings"))
+            if (strcmp(p, DEFAULT_SESSION_NAME))
                 list->sessions[i++] = p;
             while (*p)
                 p++;

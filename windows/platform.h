@@ -5,7 +5,11 @@
 #ifndef PUTTY_WINDOWS_PLATFORM_H
 #define PUTTY_WINDOWS_PLATFORM_H
 
+#ifdef WIN32S_COMPAT
+#include <winsock.h>
+#else
 #include <winsock2.h>
+#endif
 #include <windows.h>
 #include <stdio.h>                     /* for FILENAME_MAX */
 
@@ -37,11 +41,44 @@
 
 #if defined __GNUC__ || defined __clang__
 #define THREADLOCAL __thread
-#elif defined _MSC_VER
+#elif defined _MSC_VER || defined __WATCOMC__
 #define THREADLOCAL __declspec(thread)
 #else
 #error Do not know how to declare thread-local storage with this toolchain
 #endif
+
+/* OpenWatcom v2 doesn't define HMONITOR, MONITORINFO, or FLASHWINFO in its
+ * standard Windows headers.  Provide them here so window.c can compile. */
+#ifdef __WATCOMC__
+#ifndef HMONITOR_DECLARED
+DECLARE_HANDLE(HMONITOR);
+#define HMONITOR_DECLARED
+#endif
+#ifndef LPMONITORINFO
+typedef struct tagMONITORINFO {
+    DWORD cbSize;
+    RECT  rcMonitor;
+    RECT  rcWork;
+    DWORD dwFlags;
+} MONITORINFO, *LPMONITORINFO;
+#endif
+#ifndef FLASHWINFO
+typedef struct {
+    UINT  cbSize;
+    HWND  hwnd;
+    DWORD dwFlags;
+    UINT  uCount;
+    DWORD dwTimeout;
+} FLASHWINFO, *PFLASHWINFO;
+#define FLASHW_STOP      0
+#define FLASHW_CAPTION   0x00000001
+#define FLASHW_TRAY      0x00000002
+#define FLASHW_ALL       (FLASHW_CAPTION | FLASHW_TRAY)
+#define FLASHW_TIMER     0x00000004
+#define FLASHW_TIMERNOFG 0x0000000C
+WINUSERAPI BOOL WINAPI FlashWindowEx(PFLASHWINFO pfwi);
+#endif
+#endif /* __WATCOMC__ */
 
 /* Randomly-chosen dwData value identifying a WM_COPYDATA message as
  * being a Pageant transaction */
@@ -323,6 +360,17 @@ Socket *sk_newlistener_unix(const char *socketpath, Plug *plug);
  * that module must be exported from it as function pointers. So
  * here they are.
  */
+/*
+ * WSAEVENT and LPWSANETWORKEVENTS are WinSock 2 types not present in
+ * winsock.h.  Under WIN32S_COMPAT we define stubs so the
+ * DECL_WINDOWS_FUNCTION macros below still compile; the function
+ * pointers will simply remain NULL because sk_init() never loads them.
+ */
+#ifdef WIN32S_COMPAT
+typedef HANDLE WSAEVENT;
+typedef void * LPWSANETWORKEVENTS;
+#endif
+
 DECL_WINDOWS_FUNCTION(extern, int, WSAAsyncSelect,
                       (SOCKET, HWND, u_int, LONG));
 DECL_WINDOWS_FUNCTION(extern, int, WSAEventSelect,

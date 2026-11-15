@@ -8,6 +8,9 @@
 
 HMODULE load_system32_dll(const char *libname)
 {
+#ifdef WIN32S_COMPAT
+    return LoadLibrary(libname);
+#else
     char *fullpath;
     HMODULE ret;
 
@@ -15,4 +18,5 @@ HMODULE load_system32_dll(const char *libname)
     ret = LoadLibrary(fullpath);
     sfree(fullpath);
     return ret;
+#endif
 }

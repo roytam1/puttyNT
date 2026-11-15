@@ -10,6 +10,625 @@
 #include "putty.h"
 #include "storage.h"
 
+#ifdef WIN32S_COMPAT
+/* ================================================================
+ * Win32s file-based storage implementation.
+ * Sessions stored as flat files under $PUTTYDIR or $HOME\putty\.
+ * ================================================================ */
+
+#include <direct.h>
+#include <io.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <errno.h>
+#include "tree234.h"
+
+/* Index values for make_filename() */
+enum {
+    INDEX_DIR,        /* base putty directory */
+    INDEX_SESSIONDIR, /* sessions subdirectory */
+    INDEX_SESSION,    /* individual session file */
+    INDEX_HOSTKEYS,   /* host keys file */
+    INDEX_RANDSEED,   /* random seed file */
+};
+
+static void make_dir_path(const char *path)
+{
+    char *p, *buf = dupstr(path);
+    for (p = buf; *p; p++) {
+        if (*p == '\\' || *p == '/') {
+            char old = *p;
+            *p = '\0';
+            _mkdir(buf);
+            *p = old;
+        }
+    }
+    _mkdir(buf);
+    sfree(buf);
+}
+
+/*
+ * Convert a session name to an 8.3-compliant filename for FAT/Win32s.
+ * Other names: uppercase, keep only alphanumerics and underscore,
+ * truncate to 8 characters.
+ */
+static char *make_session_filename(const char *in)
+{
+    if (!strcmp(in, DEFAULT_SESSION_NAME))
+        return dupstr(DEFAULT_SESSION_NAME);
+
+    strbuf *sb = strbuf_new();
+    const char *p;
+    int count = 0;
+    for (p = in; *p && count < 8; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c >= 'a' && c <= 'z') {
+            put_byte(sb, c - 'a' + 'A');
+            count++;
+        } else if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+            put_byte(sb, c);
+            count++;
+        } else if (c == ' ' || c == '-' || c == '.') {
+            put_byte(sb, '_');
+            count++;
+        }
+        /* other characters are skipped */
+    }
+    if (sb->len == 0)
+        put_datapl(sb, PTRLEN_LITERAL("_SESS"));
+    return strbuf_to_str(sb);
+}
+
+/*
+ * Decode an 8.3 session filename back to a session name.
+ * The filename IS the session name on Win32s.
+ */
+static char *decode_session_filename(const char *in)
+{
+    return dupstr(in);
+}
+
+/*
+ * Construct a full pathname from a given index and optional subname.
+ */
+static char *make_filename(int index, const char *subname)
+{
+    char *env, *base;
+    char *ret;
+
+    env = getenv("PUTTYDIR");
+    if (env && *env) {
+        base = dupstr(env);
+    } else {
+        env = getenv("HOME");
+        if (!env || !*env)
+            env = getenv("HOMEDRIVE");
+        if (!env || !*env)
+            env = "C:";
+        base = dupcat(env, "\\putty");
+    }
+
+    switch (index) {
+      case INDEX_DIR:
+        ret = base;
+        break;
+      case INDEX_SESSIONDIR:
+        ret = dupcat(base, "\\sessions");
+        sfree(base);
+        break;
+      case INDEX_SESSION: {
+        char *enc = make_session_filename(subname);
+        ret = dupcat(base, "\\sessions\\", enc);
+        sfree(enc);
+        sfree(base);
+        break;
+      }
+      case INDEX_HOSTKEYS:
+        ret = dupcat(base, "\\HOSTKEYS");
+        sfree(base);
+        break;
+      case INDEX_RANDSEED:
+        ret = dupcat(base, "\\RNDSEED");
+        sfree(base);
+        break;
+      default:
+        sfree(base);
+        ret = NULL;
+        break;
+    }
+
+    return ret;
+}
+
+/* ---- settings_w (file-based) ---- */
+
+struct settings_w {
+    FILE *fp;
+};
+
+settings_w *open_settings_w(const char *sessionname, char **errmsg)
+{
+    char *dir, *filename;
+    FILE *fp;
+
+    *errmsg = NULL;
+
+    if (!sessionname || !*sessionname)
+        sessionname = DEFAULT_SESSION_NAME;
+
+    dir = make_filename(INDEX_SESSIONDIR, NULL);
+    make_dir_path(dir);
+    sfree(dir);
+
+    filename = make_filename(INDEX_SESSION, sessionname);
+    fp = fopen(filename, "w");
+    if (!fp) {
+        *errmsg = dupprintf("Unable to create session file\n%s", filename);
+        sfree(filename);
+        return NULL;
+    }
+    sfree(filename);
+
+    settings_w *handle = snew(settings_w);
+    handle->fp = fp;
+    return handle;
+}
+
+void write_setting_s(settings_w *handle, const char *key, const char *value)
+{
+    if (handle)
+        fprintf(handle->fp, "%s=%s\n", key, value);
+}
+
+void write_setting_i(settings_w *handle, const char *key, int value)
+{
+    if (handle)
+        fprintf(handle->fp, "%s=%d\n", key, value);
+}
+
+void close_settings_w(settings_w *handle)
+{
+    fclose(handle->fp);
+    sfree(handle);
+}
+
+/* ---- settings_r (file-based, tree234 lookup) ---- */
+
+struct skv {
+    char *key;
+    char *value;
+};
+
+static int skvcmp(void *av, void *bv)
+{
+    const struct skv *a = (const struct skv *)av;
+    const struct skv *b = (const struct skv *)bv;
+    return strcmp(a->key, b->key);
+}
+
+struct settings_r {
+    tree234 *t;
+};
+
+settings_r *open_settings_r(const char *sessionname)
+{
+    char *filename;
+    FILE *fp;
+    char *line;
+
+    if (!sessionname || !*sessionname)
+        sessionname = DEFAULT_SESSION_NAME;
+
+    filename = make_filename(INDEX_SESSION, sessionname);
+    fp = fopen(filename, "r");
+    sfree(filename);
+    if (!fp)
+        return NULL;
+
+    settings_r *handle = snew(settings_r);
+    handle->t = newtree234(skvcmp);
+
+    while ((line = fgetline(fp)) != NULL) {
+        char *eq = strchr(line, '=');
+        if (eq) {
+            *eq = '\0';
+            struct skv *kv = snew(struct skv);
+            kv->key = dupstr(line);
+            /* strip trailing newline from value */
+            char *val = eq + 1;
+            int len = strlen(val);
+            if (len > 0 && val[len-1] == '\n')
+                val[len-1] = '\0';
+            kv->value = dupstr(val);
+            struct skv *old = add234(handle->t, kv);
+            if (old != kv) {
+                /* duplicate key - replace */
+                sfree(old->value);
+                old->value = kv->value;
+                sfree(kv->key);
+                sfree(kv);
+            }
+        }
+        sfree(line);
+    }
+    fclose(fp);
+
+    return handle;
+}
+
+char *read_setting_s(settings_r *handle, const char *key)
+{
+    struct skv tmp, *found;
+    if (!handle)
+        return NULL;
+    tmp.key = (char *)key;
+    found = find234(handle->t, &tmp, NULL);
+    if (found)
+        return dupstr(found->value);
+    return NULL;
+}
+
+int read_setting_i(settings_r *handle, const char *key, int defvalue)
+{
+    struct skv tmp, *found;
+    if (!handle)
+        return defvalue;
+    tmp.key = (char *)key;
+    found = find234(handle->t, &tmp, NULL);
+    if (found)
+        return atoi(found->value);
+    return defvalue;
+}
+
+FontSpec *read_setting_fontspec(settings_r *handle, const char *name)
+{
+    char *settingname;
+    char *fontname;
+    FontSpec *ret;
+    int isbold, height, charset;
+
+    fontname = read_setting_s(handle, name);
+    if (!fontname)
+        return NULL;
+
+    settingname = dupcat(name, "IsBold");
+    isbold = read_setting_i(handle, settingname, -1);
+    sfree(settingname);
+    if (isbold == -1) {
+        sfree(fontname);
+        return NULL;
+    }
+
+    settingname = dupcat(name, "CharSet");
+    charset = read_setting_i(handle, settingname, -1);
+    sfree(settingname);
+    if (charset == -1) {
+        sfree(fontname);
+        return NULL;
+    }
+
+    settingname = dupcat(name, "Height");
+    height = read_setting_i(handle, settingname, INT_MIN);
+    sfree(settingname);
+    if (height == INT_MIN) {
+        sfree(fontname);
+        return NULL;
+    }
+
+    ret = fontspec_new(fontname, isbold, height, charset);
+    sfree(fontname);
+    return ret;
+}
+
+void write_setting_fontspec(settings_w *handle,
+                            const char *name, FontSpec *font)
+{
+    char *settingname;
+
+    write_setting_s(handle, name, font->name);
+    settingname = dupcat(name, "IsBold");
+    write_setting_i(handle, settingname, font->isbold);
+    sfree(settingname);
+    settingname = dupcat(name, "CharSet");
+    write_setting_i(handle, settingname, font->charset);
+    sfree(settingname);
+    settingname = dupcat(name, "Height");
+    write_setting_i(handle, settingname, font->height);
+    sfree(settingname);
+}
+
+Filename *read_setting_filename(settings_r *handle, const char *name)
+{
+    char *tmp = read_setting_s(handle, name);
+    if (tmp) {
+        Filename *ret = filename_from_str(tmp);
+        sfree(tmp);
+        return ret;
+    } else
+        return NULL;
+}
+
+void write_setting_filename(settings_w *handle,
+                            const char *name, Filename *result)
+{
+    write_setting_s(handle, name, result->cpath);
+}
+
+void close_settings_r(settings_r *handle)
+{
+    struct skv *kv;
+    if (handle) {
+        while ((kv = delpos234(handle->t, 0)) != NULL) {
+            sfree(kv->key);
+            sfree(kv->value);
+            sfree(kv);
+        }
+        freetree234(handle->t);
+        sfree(handle);
+    }
+}
+
+void del_settings(const char *sessionname)
+{
+    char *filename = make_filename(INDEX_SESSION, sessionname);
+    remove(filename);
+    sfree(filename);
+}
+
+/* ---- settings_e (session enumeration) ---- */
+
+struct settings_e {
+    HANDLE hFind;
+    WIN32_FIND_DATA fd;
+    bool first;
+};
+
+settings_e *enum_settings_start(void)
+{
+    char *dir = make_filename(INDEX_SESSIONDIR, NULL);
+    char *wildcard = dupcat(dir, "\\*");
+    sfree(dir);
+
+    settings_e *e = snew(settings_e);
+    e->hFind = FindFirstFile(wildcard, &e->fd);
+    sfree(wildcard);
+
+    if (e->hFind == INVALID_HANDLE_VALUE) {
+        sfree(e);
+        return NULL;
+    }
+    e->first = true;
+    return e;
+}
+
+bool enum_settings_next(settings_e *e, strbuf *sb)
+{
+    while (1) {
+        if (!e->first) {
+            if (!FindNextFile(e->hFind, &e->fd))
+                return false;
+        }
+        e->first = false;
+
+        /* Skip . and .. and directories */
+        if (e->fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            continue;
+
+        char *name = decode_session_filename(e->fd.cFileName);
+        put_datapl(sb, ptrlen_from_asciz(name));
+        sfree(name);
+        return true;
+    }
+}
+
+void enum_settings_finish(settings_e *e)
+{
+    FindClose(e->hFind);
+    sfree(e);
+}
+
+/* ---- Host key storage (flat file) ---- */
+
+static void hostkey_regname(strbuf *sb, const char *hostname,
+                            int port, const char *keytype)
+{
+    put_fmt(sb, "%s@%d:%s", keytype, port, hostname);
+}
+
+int check_stored_host_key(const char *hostname, int port,
+                          const char *keytype, const char *key)
+{
+    char *filename = make_filename(INDEX_HOSTKEYS, NULL);
+    FILE *fp = fopen(filename, "r");
+    sfree(filename);
+
+    if (!fp)
+        return 1; /* key does not exist */
+
+    strbuf *expected = strbuf_new();
+    hostkey_regname(expected, hostname, port, keytype);
+
+    char *line;
+    int ret = 1; /* not found */
+    while ((line = fgetline(fp)) != NULL) {
+        int len = strlen(line);
+        if (len > 0 && line[len-1] == '\n')
+            line[--len] = '\0';
+
+        /* Each line is: type@port:hostname keydata */
+        char *space = strchr(line, ' ');
+        if (space) {
+            *space = '\0';
+            if (!strcmp(line, expected->s)) {
+                /* Found the entry */
+                if (!strcmp(space + 1, key))
+                    ret = 0; /* key matches */
+                else
+                    ret = 2; /* key is different */
+                sfree(line);
+                break;
+            }
+        }
+        sfree(line);
+    }
+
+    fclose(fp);
+    strbuf_free(expected);
+    return ret;
+}
+
+bool have_ssh_host_key(const char *hostname, int port,
+                       const char *keytype)
+{
+    return check_stored_host_key(hostname, port, keytype, "") != 1;
+}
+
+void store_host_key(Seat *seat, const char *hostname, int port,
+                    const char *keytype, const char *key)
+{
+    char *filename = make_filename(INDEX_HOSTKEYS, NULL);
+    char *tmpfilename = dupcat(filename, ".tmp");
+
+    /*
+     * Read existing host keys, replacing any existing entry for
+     * this host+keytype, then write back.
+     */
+    strbuf *expected = strbuf_new();
+    hostkey_regname(expected, hostname, port, keytype);
+
+    FILE *rfp = fopen(filename, "r");
+    FILE *wfp = fopen(tmpfilename, "w");
+    if (!wfp) {
+        /* Ensure directory exists */
+        char *dir = make_filename(INDEX_DIR, NULL);
+        make_dir_path(dir);
+        sfree(dir);
+        wfp = fopen(tmpfilename, "w");
+    }
+
+    if (wfp) {
+        if (rfp) {
+            char *line;
+            while ((line = fgetline(rfp)) != NULL) {
+                char *space = strchr(line, ' ');
+                if (space) {
+                    /* Check if this line is for the same host key */
+                    char saved = *space;
+                    *space = '\0';
+                    if (strcmp(line, expected->s) != 0) {
+                        *space = saved;
+                        fputs(line, wfp);
+                    }
+                    /* else skip - we'll write the new one below */
+                } else {
+                    fputs(line, wfp);
+                }
+                sfree(line);
+            }
+        }
+        fprintf(wfp, "%s %s\n", expected->s, key);
+        fclose(wfp);
+
+        /* Must close rfp before remove/rename: Windows won't delete
+         * or rename over an open file handle. */
+        if (rfp) {
+            fclose(rfp);
+            rfp = NULL;
+        }
+
+        /* Atomic-ish replace */
+        remove(filename);
+        rename(tmpfilename, filename);
+    }
+
+    if (rfp)
+        fclose(rfp);
+    strbuf_free(expected);
+    sfree(tmpfilename);
+    sfree(filename);
+}
+
+/* ---- Host CA stubs (not supported on Win32s) ---- */
+
+struct host_ca_enum {
+    int dummy;
+};
+
+host_ca_enum *enum_host_ca_start(void) { return NULL; }
+bool enum_host_ca_next(host_ca_enum *e, strbuf *sb) { return false; }
+void enum_host_ca_finish(host_ca_enum *e) { }
+host_ca *host_ca_load(const char *name) { return NULL; }
+char *host_ca_save(host_ca *hca) {
+    return dupstr("Host CA storage not supported on Win32s");
+}
+char *host_ca_delete(const char *name) { return NULL; }
+
+/* ---- Random seed (file-based) ---- */
+
+void read_random_seed(noise_consumer_t consumer)
+{
+    char *fname = make_filename(INDEX_RANDSEED, NULL);
+    FILE *fp = fopen(fname, "rb");
+    sfree(fname);
+
+    if (fp) {
+        char buf[1024];
+        size_t len;
+        while ((len = fread(buf, 1, sizeof(buf), fp)) > 0)
+            consumer(buf, len);
+        fclose(fp);
+    }
+}
+
+void write_random_seed(void *data, int len)
+{
+    char *dir = make_filename(INDEX_DIR, NULL);
+    make_dir_path(dir);
+    sfree(dir);
+
+    char *fname = make_filename(INDEX_RANDSEED, NULL);
+    FILE *fp = fopen(fname, "wb");
+    sfree(fname);
+
+    if (fp) {
+        fwrite(data, 1, len, fp);
+        fclose(fp);
+    }
+}
+
+/* ---- Jump list stubs ---- */
+
+static int transform_jumplist_registry(
+    const char *add, const char *rem, char **out)
+{
+    if (out) {
+        *out = snewn(2, char);
+        (*out)[0] = '\0';
+        (*out)[1] = '\0';
+    }
+    return JUMPLISTREG_OK;
+}
+
+int add_to_jumplist_registry(const char *item) { return JUMPLISTREG_OK; }
+int remove_from_jumplist_registry(const char *item) { return JUMPLISTREG_OK; }
+
+char *get_jumplist_registry_entries(void)
+{
+    char *list = snewn(2, char);
+    list[0] = '\0';
+    list[1] = '\0';
+    return list;
+}
+
+/* ---- Cleanup (no-op for file-based storage) ---- */
+
+void cleanup_all(void) { }
+
+#else /* !WIN32S_COMPAT */
+/* ================================================================
+ * Standard registry-based storage implementation.
+ * ================================================================ */
+
 #include <shlobj.h>
 #ifndef CSIDL_APPDATA
 #define CSIDL_APPDATA 0x001a
@@ -866,3 +1485,5 @@ void cleanup_all(void)
      * Now we're done.
      */
 }
+
+#endif /* WIN32S_COMPAT */

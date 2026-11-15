@@ -836,9 +836,16 @@ struct ssh_kex {
     enum { KEXTYPE_DH, KEXTYPE_RSA, KEXTYPE_ECDH,
            KEXTYPE_GSS, KEXTYPE_GSS_ECDH } main_type;
     const ssh_hashalg *hash;
+#ifdef __WATCOMC__
+    /* OpenWatcom mishandles anonymous unions in designated initializers,
+     * writing the value to offset 0 instead of the union's actual offset.
+     * Use a plain member instead — same layout, no union wrapper. */
+    const ecdh_keyalg *ecdh_vt;
+#else
     union {                  /* publicly visible data for each type */
         const ecdh_keyalg *ecdh_vt;    /* for KEXTYPE_ECDH, KEXTYPE_GSS_ECDH */
     };
+#endif
     const void *extra;                 /* private to the kex methods */
 };
 
@@ -1515,10 +1522,17 @@ typedef struct ppk_save_parameters {
     Argon2Flavour argon2_flavour;
     uint32_t argon2_mem;               /* in Kbyte */
     bool argon2_passes_auto;
+#ifdef __WATCOMC__
+    /* OpenWatcom mishandles anonymous unions in designated initializers.
+     * Both members are uint32_t at the same offset, so just use one. */
+    uint32_t argon2_passes;
+#define argon2_milliseconds argon2_passes
+#else
     union {
         uint32_t argon2_passes;        /* if auto == false */
         uint32_t argon2_milliseconds;  /* if auto == true */
     };
+#endif
     uint32_t argon2_parallelism;
 
     /* The ability to choose a specific salt is only intended for the

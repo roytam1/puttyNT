@@ -810,7 +810,7 @@ static bool load_selected_session(
         dlg_beep(dlg);
         return false;
     }
-    isdef = !strcmp(ssd->sesslist.sessions[i], "Default Settings");
+    isdef = !strcmp(ssd->sesslist.sessions[i], DEFAULT_SESSION_NAME);
     load_settings(ssd->sesslist.sessions[i], conf);
     sfree(ssd->savedsession);
     ssd->savedsession = dupstr(isdef ? "" : ssd->sesslist.sessions[i]);
@@ -879,14 +879,14 @@ static void sessionsaver_handler(dlgcontrol *ctrl, dlgparam *dlg,
                 dlg_end(dlg, 1);       /* it's all over, and succeeded */
             }
         } else if (ctrl == ssd->savebutton) {
-            bool isdef = !strcmp(ssd->savedsession, "Default Settings");
+            bool isdef = !strcmp(ssd->savedsession, DEFAULT_SESSION_NAME);
             if (!ssd->savedsession[0]) {
                 int i = dlg_listbox_index(ssd->listbox, dlg);
                 if (i < 0) {
                     dlg_beep(dlg);
                     return;
                 }
-                isdef = !strcmp(ssd->sesslist.sessions[i], "Default Settings");
+                isdef = !strcmp(ssd->sesslist.sessions[i], DEFAULT_SESSION_NAME);
                 sfree(ssd->savedsession);
                 ssd->savedsession = dupstr(isdef ? "" :
                                            ssd->sesslist.sessions[i]);
@@ -2136,8 +2136,16 @@ void setup_config_box(struct controlbox *b, bool midsession,
                  HELPCTX(bell_overload),
                  conf_editbox_handler, I(CONF_bellovl_n), ED_INT);
 
+#ifdef __WATCOMC__
+    /* OW miscompiles designated initialisers when padding precedes a
+     * double member — the value lands at offset 0, clobbering .type.
+     * Use positional initialisation instead. */
+    static const struct conf_editbox_handler_type conf_editbox_tickspersec =
+        {EDIT_FIXEDPOINT, TICKSPERSEC};
+#else
     static const struct conf_editbox_handler_type conf_editbox_tickspersec = {
         .type = EDIT_FIXEDPOINT, .denominator = TICKSPERSEC};
+#endif
 
     ctrl_editbox(s, "... in this many seconds", 't', 20,
                  HELPCTX(bell_overload),
@@ -3256,8 +3264,13 @@ void setup_config_box(struct controlbox *b, bool midsession,
         /*
          * Stop bits come in units of one half.
          */
+#ifdef __WATCOMC__
+        static const struct conf_editbox_handler_type conf_editbox_stopbits =
+            {EDIT_FIXEDPOINT, 2};
+#else
         static const struct conf_editbox_handler_type conf_editbox_stopbits = {
             .type = EDIT_FIXEDPOINT, .denominator = 2};
+#endif
 
         ctrl_editbox(s, "Stop bits", 't', 40,
                      HELPCTX(serial_stopbits),

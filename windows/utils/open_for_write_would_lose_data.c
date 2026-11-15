@@ -38,6 +38,9 @@ static inline bool open_for_write_would_lose_data_impl(
 
 bool open_for_write_would_lose_data(const Filename *fn)
 {
+#ifdef WIN32S_COMPAT
+    return false;
+#else
     static HMODULE kernel32_module;
     DECL_WINDOWS_FUNCTION(static, BOOL, GetFileAttributesExW,
                           (LPCWSTR, GET_FILEEX_INFO_LEVELS, LPVOID));
@@ -73,4 +76,5 @@ bool open_for_write_would_lose_data(const Filename *fn)
         return open_for_write_would_lose_data_impl(
             fd.dwFileAttributes, fd.nFileSizeHigh, fd.nFileSizeLow);
     }
+#endif /* WIN32S_COMPAT */
 }

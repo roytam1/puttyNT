@@ -2475,6 +2475,14 @@ void conf_fontsel_handler(dlgcontrol *ctrl, dlgparam *dlg,
 struct conf_editbox_handler_type {
     /* Structure passed as context2 to conf_editbox_handler */
     enum { EDIT_STR, EDIT_INT, EDIT_FIXEDPOINT } type;
+#ifdef __WATCOMC__
+    /*
+     * OpenWatcom miscompiles anonymous unions in designated
+     * initialisers, writing the value at offset 0 of the struct
+     * instead of the union's actual offset.  Use a named member.
+     */
+    double denominator;
+#else
     union {
         /*
          * EDIT_STR means the edit box is connected to a string
@@ -2500,6 +2508,7 @@ struct conf_editbox_handler_type {
             double denominator;
         };
     };
+#endif
 };
 
 extern const struct conf_editbox_handler_type conf_editbox_str;

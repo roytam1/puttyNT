@@ -8,6 +8,12 @@
 
 #include "defs.h"
 
+#ifdef WIN32S_COMPAT
+#define DEFAULT_SESSION_NAME "DEFAULT"
+#else
+#define DEFAULT_SESSION_NAME "Default Settings"
+#endif
+
 /* ----------------------------------------------------------------------
  * Functions to save and restore PuTTY sessions. Note that this is
  * only the low-level code to do the reading and writing. The

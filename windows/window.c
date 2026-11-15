@@ -23,10 +23,20 @@
 #include "tree234.h"
 
 #ifdef NO_MULTIMON
+#ifndef __WATCOMC__
 #include <multimon.h>
 #endif
+/* MONITOR_DEFAULTTOPRIMARY etc. are from multimon.h; define if missing. */
+#ifndef MONITOR_DEFAULTTOPRIMARY
+#define MONITOR_DEFAULTTONULL    0
+#define MONITOR_DEFAULTTOPRIMARY 1
+#define MONITOR_DEFAULTTONEAREST 2
+#endif
+#endif
 
+#ifndef WIN32S_COMPAT
 #include <imm.h>
+#endif
 #include <commctrl.h>
 #include <richedit.h>
 #include <mmsystem.h>
@@ -127,6 +137,7 @@ static void conf_cache_data(WinGuiSeat *wgs);
 
 static struct sesslist sesslist;       /* for saved-session menu */
 
+#ifndef WIN32S_COMPAT
 enum MONITOR_DPI_TYPE { MDT_EFFECTIVE_DPI, MDT_ANGULAR_DPI, MDT_RAW_DPI, MDT_DEFAULT };
 DECL_WINDOWS_FUNCTION(static, BOOL, GetMonitorInfoA, (HMONITOR, LPMONITORINFO));
 DECL_WINDOWS_FUNCTION(static, HMONITOR, MonitorFromPoint, (POINT, DWORD));
@@ -134,6 +145,7 @@ DECL_WINDOWS_FUNCTION(static, HMONITOR, MonitorFromWindow, (HWND, DWORD));
 DECL_WINDOWS_FUNCTION(static, HRESULT, GetDpiForMonitor, (HMONITOR hmonitor, enum MONITOR_DPI_TYPE dpiType, UINT *dpiX, UINT *dpiY));
 DECL_WINDOWS_FUNCTION(static, HRESULT, GetSystemMetricsForDpi, (int nIndex, UINT dpi));
 DECL_WINDOWS_FUNCTION(static, HRESULT, AdjustWindowRectExForDpi, (LPRECT lpRect, DWORD dwStyle, BOOL bMenu, DWORD dwExStyle, UINT dpi));
+#endif /* WIN32S_COMPAT */
 
 static UINT wm_mousewheel = WM_MOUSEWHEEL;
 
@@ -444,7 +456,9 @@ HINSTANCE hinst;
 int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 {
     MSG msg;
+#ifndef WIN32S_COMPAT
     HRESULT hr;
+#endif
     int guess_width, guess_height;
 
     dll_hijacking_protection();
@@ -457,6 +471,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
     init_common_controls();
 
+#ifndef WIN32S_COMPAT
     /* Set Explicit App User Model Id so that jump lists don't cause
        PuTTY to hang on to removable media. */
 
@@ -465,6 +480,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     /* Ensure a Maximize setting in Explorer doesn't maximise the
      * config box. */
     defuse_showwindow();
+#endif
 
     init_winver();
 
@@ -496,6 +512,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
     wgs->conf = conf_new();
 
+#ifndef WIN32S_COMPAT
     /*
      * Initialize COM.
      */
@@ -507,6 +524,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         sfree(str);
         return 1;
     }
+#endif
 
     /*
      * Process the command line.
@@ -564,7 +582,17 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         if (conf_get_bool(wgs->conf, CONF_sunken_edge))
             exwinmode |= WS_EX_CLIENTEDGE;
 
-#ifdef TEST_ANSI_WINDOW
+#if defined WIN32S_COMPAT
+        /* Win32s: ANSI window only, skip Unicode attempt entirely */
+        unicode_window = false;
+        sw_PeekMessage = PeekMessageA;
+        sw_DispatchMessage = DispatchMessageA;
+        sw_DefWindowProc = DefWindowProcA;
+        wgs->term_hwnd = CreateWindowExA(
+            exwinmode, terminal_window_class_a(), appname,
+            winmode, CW_USEDEFAULT, CW_USEDEFAULT,
+            guess_width, guess_height, NULL, NULL, inst, NULL);
+#elif defined TEST_ANSI_WINDOW
         /* For developer testing of ANSI window support, pretend
          * CreateWindowExW failed */
         wgs->term_hwnd = NULL;
@@ -580,7 +608,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
             guess_width, guess_height, NULL, NULL, inst, NULL);
 #endif
 
-#if defined LEGACY_WINDOWS || defined TEST_ANSI_WINDOW
+#if (defined LEGACY_WINDOWS && !defined WIN32S_COMPAT) || defined TEST_ANSI_WINDOW
         if (!wgs->term_hwnd && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED) {
             /* Fall back to an ANSI window, swapping in all the ANSI
              * window message handling functions */
@@ -625,6 +653,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
      */
     wgs->term = term_init(wgs->conf, &wgs->ucsdata, &wgs->termwin);
     setup_clipboards(wgs->term, wgs->conf);
+
     wgs->logctx = log_init(&wgs->logpolicy, wgs->conf);
     term_provide_logctx(wgs->term, wgs->logctx);
     term_size(wgs->term, conf_get_int(wgs->conf, CONF_height),
@@ -779,9 +808,11 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         }
     }
 
+#ifndef WIN32S_COMPAT
     if (restricted_acl()) {
         lp_eventlog(&wgs->logpolicy, "Running with restricted process ACL");
     }
+#endif
 
     winselgui_set_hwnd(wgs->term_hwnd);
     start_backend(wgs);
@@ -803,6 +834,20 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     gui_terminal_ready(wgs->term_hwnd, &wgs->seat, wgs->backend);
 
     while (1) {
+
+#ifdef WIN32S_COMPAT
+        /*
+         * Win32s message loop: no MsgWaitForMultipleObjects (not
+         * available), no handle waits (no threads).  All I/O arrives
+         * as window messages via WSAAsyncSelect / WM_TIMER.
+         */
+        if (!toplevel_callback_pending() &&
+            !sw_PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE)) {
+            term_set_focus(wgs->term,
+                           GetForegroundWindow() == wgs->term_hwnd);
+            WaitMessage();
+        }
+#else
         int n;
         DWORD timeout;
 
@@ -840,6 +885,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         if ((unsigned)(n - WAIT_OBJECT_0) < (unsigned)hwl->nhandles)
             handle_wait_activate(hwl, n - WAIT_OBJECT_0);
         handle_wait_list_free(hwl);
+#endif /* WIN32S_COMPAT */
 
         while (sw_PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT)
@@ -1007,6 +1053,12 @@ void cleanup_exit(int code)
     while (wgslisthead.next != &wgslisthead) {
         WinGuiSeat *wgs = container_of(
             wgslisthead.next, WinGuiSeat, wgslistnode);
+#ifdef WIN32S_COMPAT
+        if (wgs->term_hwnd) {
+            DestroyWindow(wgs->term_hwnd);
+            wgs->term_hwnd = NULL;
+        }
+#endif
         wgs_cleanup(wgs);
     }
     sk_cleanup();
@@ -1389,6 +1441,7 @@ static int get_font_width(WinGuiSeat *wgs, HDC hdc, const TEXTMETRIC *tm)
 static void init_dpi_info(WinGuiSeat *wgs)
 {
     if (wgs->dpi_info.cur_dpi.x == 0 || wgs->dpi_info.cur_dpi.y == 0) {
+#ifndef WIN32S_COMPAT
         if (p_GetDpiForMonitor && p_MonitorFromWindow) {
             UINT dpiX, dpiY;
             HMONITOR currentMonitor = p_MonitorFromWindow(
@@ -1399,6 +1452,7 @@ static void init_dpi_info(WinGuiSeat *wgs)
                 wgs->dpi_info.cur_dpi.y = (int)dpiY;
             }
         }
+#endif /* WIN32S_COMPAT */
 
         /* Fall back to system DPI */
         if (wgs->dpi_info.cur_dpi.x == 0 || wgs->dpi_info.cur_dpi.y == 0) {
@@ -1485,10 +1539,19 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
 
     SelectObject(hdc, wgs->fonts[FONT_NORMAL]);
     GetTextMetrics(hdc, &tm);
+#ifdef WIN32S_COMPAT
+    /*
+     * Win32s: skip GetOutlineTextMetrics — on Win32s it can overflow
+     * the output buffer with font name strings, corrupting adjacent
+     * stack variables (including tm). Use the fallback calculation.
+     */
+    wgs->font_strikethrough_y = tm.tmAscent - (tm.tmAscent * 3 / 8);
+#else
     if (GetOutlineTextMetrics(hdc, sizeof(otm), &otm))
         wgs->font_strikethrough_y = tm.tmAscent - otm.otmsStrikeoutPosition;
     else
         wgs->font_strikethrough_y = tm.tmAscent - (tm.tmAscent * 3 / 8);
+#endif
 
     GetObject(wgs->fonts[FONT_NORMAL], sizeof(LOGFONT), &wgs->lfont);
 
@@ -1523,6 +1586,14 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
         wgs->ucsdata.dbcs_screenfont = (cpinfo.MaxCharSize > 1);
     }
 
+#ifdef WIN32S_COMPAT
+    /*
+     * Win32s: skip the bitmap-based underline detection (the
+     * CreateCompatibleDC / GetPixel probe hangs on Win32s).
+     * Always draw underlines by hand.
+     */
+    wgs->und_mode = UND_LINE;
+#else
     f(FONT_UNDERLINE, font->charset, fw_dontcare, true);
 
     /*
@@ -1574,6 +1645,7 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
             wgs->fonts[FONT_UNDERLINE] = 0;
         }
     }
+#endif /* WIN32S_COMPAT */
 
     if (wgs->bold_font_mode == BOLD_FONT) {
         f(FONT_BOLD, font->charset, fw_bold, false);
@@ -1864,6 +1936,7 @@ static void reset_window(WinGuiSeat *wgs, int reinit)
         return;
     }
 
+#ifndef WIN32S_COMPAT
     /* Resize window after DPI change */
     if (reinit == 3 && p_GetSystemMetricsForDpi && p_AdjustWindowRectExForDpi) {
         RECT rect;
@@ -1895,6 +1968,7 @@ static void reset_window(WinGuiSeat *wgs, int reinit)
         InvalidateRect(wgs->term_hwnd, NULL, true);
         return;
     }
+#endif /* WIN32S_COMPAT */
 
     /* Hmm, a force re-init means we should ignore the current window
      * so we resize to the default font size.
@@ -2272,10 +2346,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
             PROCESS_INFORMATION pi;
             HANDLE filemap = NULL;
 
+#ifdef WIN32S_COMPAT
+            argprefix = "";
+#else
             if (restricted_acl())
                 argprefix = "&R";
             else
                 argprefix = "";
+#endif
 
             if (wParam == IDM_DUPSESS) {
                 /*
@@ -3282,6 +3360,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
         set_input_locale(wgs, (HKL)lParam);
         sys_cursor_update(wgs);
         break;
+#ifndef WIN32S_COMPAT
       case WM_IME_STARTCOMPOSITION: {
         HIMC hImc = ImmGetContext(hwnd);
         ImmSetCompositionFont(hImc, &wgs->lfont);
@@ -3335,6 +3414,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
         ImmReleaseContext(hwnd, hIMC);
         return 1;
       }
+#endif /* WIN32S_COMPAT */
 
       case WM_IME_CHAR:
         if (wParam & 0xFF00) {
@@ -3483,9 +3563,6 @@ static void wintw_set_cursor_pos(TermWin *tw, int x, int y)
 
 static void sys_cursor_update(WinGuiSeat *wgs)
 {
-    COMPOSITIONFORM cf;
-    HIMC hIMC;
-
     if (!wgs->term->has_focus) return;
 
     if (wgs->caret_x < 0 || wgs->caret_y < 0)
@@ -3493,20 +3570,27 @@ static void sys_cursor_update(WinGuiSeat *wgs)
 
     SetCaretPos(wgs->caret_x, wgs->caret_y);
 
-    /* IMM calls on Win98 and beyond only */
-    if (osPlatformId == VER_PLATFORM_WIN32s) return; /* 3.11 */
+#ifndef WIN32S_COMPAT
+    {
+        COMPOSITIONFORM cf;
+        HIMC hIMC;
 
-    if (osPlatformId == VER_PLATFORM_WIN32_WINDOWS &&
-        osMinorVersion == 0) return; /* 95 */
+        /* IMM calls on Win98 and beyond only */
+        if (osPlatformId == VER_PLATFORM_WIN32s) return; /* 3.11 */
 
-    /* we should have the IMM functions */
-    hIMC = ImmGetContext(wgs->term_hwnd);
-    cf.dwStyle = CFS_POINT;
-    cf.ptCurrentPos.x = wgs->caret_x;
-    cf.ptCurrentPos.y = wgs->caret_y;
-    ImmSetCompositionWindow(hIMC, &cf);
+        if (osPlatformId == VER_PLATFORM_WIN32_WINDOWS &&
+            osMinorVersion == 0) return; /* 95 */
 
-    ImmReleaseContext(wgs->term_hwnd, hIMC);
+        /* we should have the IMM functions */
+        hIMC = ImmGetContext(wgs->term_hwnd);
+        cf.dwStyle = CFS_POINT;
+        cf.ptCurrentPos.x = wgs->caret_x;
+        cf.ptCurrentPos.y = wgs->caret_y;
+        ImmSetCompositionWindow(hIMC, &cf);
+
+        ImmReleaseContext(wgs->term_hwnd, hIMC);
+    }
+#endif /* WIN32S_COMPAT */
 }
 
 static void draw_horizontal_line_on_text(
@@ -4117,7 +4201,9 @@ static int wintw_char_width(TermWin *tw, int uc)
     return ibuf;
 }
 
+#ifndef WIN32S_COMPAT
 DECL_WINDOWS_FUNCTION(static, BOOL, FlashWindowEx, (PFLASHWINFO));
+#endif
 DECL_WINDOWS_FUNCTION(static, BOOL, ToUnicodeEx,
                       (UINT, UINT, const BYTE *, LPWSTR, int, UINT, HKL));
 DECL_WINDOWS_FUNCTION(static, BOOL, PlaySoundW, (LPCWSTR, HMODULE, DWORD));
@@ -4127,17 +4213,21 @@ static void init_winfuncs(void)
 {
     HMODULE user32_module = load_system32_dll("user32.dll");
     HMODULE winmm_module = load_system32_dll("winmm.dll");
+#ifndef WIN32S_COMPAT
     HMODULE shcore_module = load_system32_dll("shcore.dll");
     GET_WINDOWS_FUNCTION(user32_module, FlashWindowEx);
+#endif
     GET_WINDOWS_FUNCTION(user32_module, ToUnicodeEx);
     GET_WINDOWS_FUNCTION(winmm_module, PlaySoundW);
     GET_WINDOWS_FUNCTION(winmm_module, PlaySoundA);
+#ifndef WIN32S_COMPAT
     GET_WINDOWS_FUNCTION_NO_TYPECHECK(user32_module, GetMonitorInfoA);
     GET_WINDOWS_FUNCTION_NO_TYPECHECK(user32_module, MonitorFromPoint);
     GET_WINDOWS_FUNCTION_NO_TYPECHECK(user32_module, MonitorFromWindow);
     GET_WINDOWS_FUNCTION_NO_TYPECHECK(shcore_module, GetDpiForMonitor);
     GET_WINDOWS_FUNCTION_NO_TYPECHECK(user32_module, GetSystemMetricsForDpi);
     GET_WINDOWS_FUNCTION_NO_TYPECHECK(user32_module, AdjustWindowRectExForDpi);
+#endif
 }
 
 /*
@@ -4442,6 +4532,15 @@ static int TranslateKey(WinGuiSeat *wgs, UINT message, WPARAM wParam,
             }
             return 0;
         }
+#ifdef WIN32S_COMPAT
+        /*
+         * Win32s: Alt-Tab and Alt-Esc must reach DefWindowProc for
+         * task switching.  On Win95+/NT the system intercepts these
+         * before WndProc; on Win32s they arrive as WM_SYSKEYDOWN.
+         */
+        if (left_alt && (wParam == VK_TAB || wParam == VK_ESCAPE))
+            return -1;
+#endif
         if (left_alt && wParam == VK_F4 &&
             conf_get_bool(wgs->conf, CONF_alt_f4)) {
             return -1;
@@ -4690,6 +4789,29 @@ static int TranslateKey(WinGuiSeat *wgs, UINT message, WPARAM wParam,
         /* XXX how do we know what the max size of the keys array should
          * be is? There's indication on MS' website of an Inquire/InquireEx
          * functioning returning a KBINFO structure which tells us. */
+#ifdef WIN32S_COMPAT
+        /*
+         * Win32s: filter key-up events — ToAscii returns the character
+         * again on key release, which would produce a duplicate.
+         */
+        if (message == WM_KEYUP || message == WM_SYSKEYUP)
+            return 0;
+        {
+            WORD keys[3];
+            r = ToAscii(wParam, scan, keystate, keys, 0);
+            if (r > 0) {
+                /*
+                 * Return the raw bytes directly.  The caller sends
+                 * them via term_keyinput with the terminal's line
+                 * codepage, avoiding MultiByteToWideChar/ExtTextOutW
+                 * which are unreliable on Win32s.
+                 */
+                for (i = 0; i < r; i++)
+                    *p++ = (unsigned char)keys[i];
+                return p - output;
+            }
+        }
+#else
         if (osPlatformId == VER_PLATFORM_WIN32_NT && p_ToUnicodeEx) {
             r = p_ToUnicodeEx(wParam, scan, keystate, keys_unicode,
                               lenof(keys_unicode), 0, kbd_layout);
@@ -4716,6 +4838,7 @@ static int TranslateKey(WinGuiSeat *wgs, UINT message, WPARAM wParam,
                                     keys_unicode, lenof(keys_unicode));
             }
         }
+#endif
 #ifdef SHOW_TOASCII_RESULT
         if (r == 1 && !key_down) {
             if (wgs->alt_numberpad_accumulator) {
@@ -5475,11 +5598,15 @@ static void wintw_clip_request_paste(TermWin *tw, int clipboard)
      * message back to our main window when it terminates, and
      * that tells us it's OK to paste.
      */
+#ifdef WIN32S_COMPAT
+    clipboard_read_threadfunc(wgs->term_hwnd);
+#else
     DWORD in_threadid; /* required for Win9x */
     HANDLE hThread = CreateThread(NULL, 0, clipboard_read_threadfunc,
                                   wgs->term_hwnd, 0, &in_threadid);
     if (hThread)
         CloseHandle(hThread);          /* we don't need the thread handle */
+#endif
 }
 
 /*
@@ -5493,7 +5620,9 @@ void modalfatalbox(const char *fmt, ...)
     va_start(ap, fmt);
     message = dupvprintf(fmt, ap);
     va_end(ap);
+#ifndef WIN32S_COMPAT
     show_mouseptr(NULL, true);
+#endif
     title = dupprintf("%s Fatal Error", appname);
     MessageBox(find_window_for_msgbox(), message, title,
                MB_SYSTEMMODAL | MB_ICONERROR | MB_OK);
@@ -5513,7 +5642,9 @@ void nonfatal(const char *fmt, ...)
     va_start(ap, fmt);
     message = dupvprintf(fmt, ap);
     va_end(ap);
+#ifndef WIN32S_COMPAT
     show_mouseptr(NULL, true);
+#endif
     title = dupprintf("%s Error", appname);
     MessageBox(find_window_for_msgbox(), message, title, MB_ICONERROR | MB_OK);
     sfree(message);
@@ -5523,6 +5654,9 @@ void nonfatal(const char *fmt, ...)
 static bool flash_window_ex(WinGuiSeat *wgs, DWORD dwFlags,
                             UINT uCount, DWORD dwTimeout)
 {
+#ifdef WIN32S_COMPAT
+    return false;
+#else
     if (p_FlashWindowEx) {
         FLASHWINFO fi;
         fi.cbSize = sizeof(fi);
@@ -5534,6 +5668,7 @@ static bool flash_window_ex(WinGuiSeat *wgs, DWORD dwFlags,
     }
     else
         return false; /* shrug */
+#endif
 }
 
 /*
@@ -5559,16 +5694,24 @@ static void flash_window(WinGuiSeat *wgs, int mode)
         /* stop */
         if (wgs->flashing) {
             wgs->flashing = false;
+#ifdef WIN32S_COMPAT
+            FlashWindow(wgs->term_hwnd, false);
+#else
             if (p_FlashWindowEx)
                 flash_window_ex(wgs, FLASHW_STOP, 0, 0);
             else
                 FlashWindow(wgs->term_hwnd, false);
+#endif
         }
 
     } else if (mode == 2) {
         /* start */
         if (!wgs->flashing) {
             wgs->flashing = true;
+#ifdef WIN32S_COMPAT
+            FlashWindow(wgs->term_hwnd, true);
+            wgs->next_flash = schedule_timer(450, flash_window_timer, wgs);
+#else
             if (p_FlashWindowEx) {
                 /* For so-called "steady" mode, we use uCount=2, which
                  * seems to be the traditional number of flashes used
@@ -5584,11 +5727,16 @@ static void flash_window(WinGuiSeat *wgs, int mode)
                 FlashWindow(wgs->term_hwnd, true);
                 wgs->next_flash = schedule_timer(450, flash_window_timer, wgs);
             }
+#endif
         }
 
     } else if ((mode == 1) && (beep_ind == B_IND_FLASH)) {
         /* maintain */
+#ifdef WIN32S_COMPAT
+        if (wgs->flashing) {
+#else
         if (wgs->flashing && !p_FlashWindowEx) {
+#endif
             FlashWindow(wgs->term_hwnd, true);    /* toggle */
             wgs->next_flash = schedule_timer(450, flash_window_timer, wgs);
         }

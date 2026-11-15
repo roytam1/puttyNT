@@ -11,6 +11,9 @@
 
 char *get_username(void)
 {
+#ifdef WIN32S_COMPAT
+    return dupstr("win32s");
+#else
     DWORD namelen;
     char *user;
     bool got_username = false;
@@ -74,4 +77,5 @@ char *get_username(void)
     }
 
     return got_username ? user : NULL;
+#endif /* WIN32S_COMPAT */
 }

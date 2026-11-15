@@ -996,7 +996,9 @@ static void wm_copydata_got_response(
     PUT_32BIT_MSB_FIRST(wmct.length, response.len);
     memcpy(wmct.body, response.ptr, response.len);
 
+#ifndef WIN32S_COMPAT
     SetEvent(wmct.ev_reply_ready);
+#endif
 }
 
 static bool ask_passphrase_common(PageantClientDialogId *dlgid,
@@ -1203,8 +1205,13 @@ static char *answer_filemapping_message(const char *mapname)
         *wmct.body = SSH_AGENT_FAILURE;
     } else {
         wmct.bodylen = msglen;
+#ifdef WIN32S_COMPAT
+        /* No threads on Win32s: handle message synchronously */
+        wm_copydata_got_msg(NULL);
+#else
         SetEvent(wmct.ev_msg_ready);
         WaitForSingleObject(wmct.ev_reply_ready, INFINITE);
+#endif
     }
 
   cleanup:
@@ -1785,6 +1792,20 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         wmcpc.vt = &wmcpc_vtable;
         wmcpc.suppress_logging = true;
         pageant_register_client(&wmcpc);
+#ifdef WIN32S_COMPAT
+        /*
+         * Win32s: no threads. Create the IPC window on the main
+         * thread; WM_COPYDATA messages will be dispatched by the
+         * main message loop and handled synchronously.
+         */
+        {
+            HWND ipchwnd = CreateWindow(IPCCLASSNAME, IPCWINTITLE,
+                                        WS_OVERLAPPEDWINDOW | WS_VSCROLL,
+                                        CW_USEDEFAULT, CW_USEDEFAULT,
+                                        100, 100, NULL, NULL, inst, NULL);
+            ShowWindow(ipchwnd, SW_HIDE);
+        }
+#else
         DWORD wm_copydata_threadid;
         wmct.ev_msg_ready = CreateEvent(NULL, false, false, NULL);
         wmct.ev_reply_ready = CreateEvent(NULL, false, false, NULL);
@@ -1793,6 +1814,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         if (hThread)
             CloseHandle(hThread); /* we don't need the thread handle */
         add_handle_wait(wmct.ev_msg_ready, wm_copydata_got_msg, NULL);
+#endif
     }
 
     /*
@@ -1886,6 +1908,13 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
      * Main message loop.
      */
     while (true) {
+
+#ifdef WIN32S_COMPAT
+        if (!toplevel_callback_pending() &&
+            !sw_PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE)) {
+            WaitMessage();
+        }
+#else
         int n;
 
         HandleWaitList *hwl = get_handle_wait_list();
@@ -1897,6 +1926,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         if ((unsigned)(n - WAIT_OBJECT_0) < (unsigned)hwl->nhandles)
             handle_wait_activate(hwl, n - WAIT_OBJECT_0);
         handle_wait_list_free(hwl);
+#endif
 
         while (sw_PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT)

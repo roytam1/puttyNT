@@ -29,6 +29,15 @@
 /*
  * COM structures and functions.
  */
+#ifdef __WATCOMC__
+/* OW's wtypes.h defines PROPERTYKEY, OW's propidl.h defines PROPVARIANT,
+ * REFPROPVARIANT (as macro 'const PROPVARIANT *const'), and PropVariantInit.
+ * Pre-set all guards so the blocks below are skipped entirely. */
+#define PROPERTYKEY_DEFINED
+#define _REFPROPVARIANT_DEFINED
+#define _PROPVARIANTINIT_DEFINED_
+#define _PROPVARIANT_INIT_DEFINED_
+#endif
 #ifndef PROPERTYKEY_DEFINED
 #define PROPERTYKEY_DEFINED
 typedef struct _tagpropertykey {

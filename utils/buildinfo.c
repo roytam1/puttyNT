@@ -148,6 +148,15 @@ char *buildinfo(const char *newline)
 #ifdef STATIC_GSSAPI
     put_fmt(buf, "%sBuild option: STATIC_GSSAPI", newline);
 #endif
+#ifdef NO_MULTIMON
+    put_fmt(buf, "%sBuild option: NO_MULTIMON", newline);
+#endif
+#ifdef WIN32S_COMPAT
+    put_fmt(buf, "%sBuild option: WIN32S_COMPAT", newline);
+#endif
+#ifdef LEGACY_WINDOWS
+    put_fmt(buf, "%sBuild option: LEGACY_WINDOWS", newline);
+#endif
 #ifdef UNPROTECT
     put_fmt(buf, "%sBuild option: UNPROTECT", newline);
 #endif

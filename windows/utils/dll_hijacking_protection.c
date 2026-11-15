@@ -19,6 +19,9 @@
 
 void dll_hijacking_protection(void)
 {
+#ifdef WIN32S_COMPAT
+    return;
+#else
     static HMODULE kernel32_module;
     DECL_WINDOWS_FUNCTION(static, BOOL, SetDefaultDllDirectories, (DWORD));
 
@@ -40,4 +43,5 @@ void dll_hijacking_protection(void)
         p_SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 |
                                    LOAD_LIBRARY_SEARCH_USER_DIRS);
     }
+#endif /* WIN32S_COMPAT */
 }

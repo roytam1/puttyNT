@@ -32,6 +32,9 @@ static VOID CALLBACK message_box_help_callback(LPHELPINFO lpHelpInfo)
 int message_box(HWND owner, LPCTSTR text, LPCTSTR caption, DWORD style,
                 bool utf8, DWORD helpctxid)
 {
+#ifdef WIN32S_COMPAT
+    return MessageBoxA(owner, text, caption, style);
+#else
     MSGBOXPARAMSW mbox;
 
     /*
@@ -68,4 +71,5 @@ int message_box(HWND owner, LPCTSTR text, LPCTSTR caption, DWORD style,
     sfree(wcaption);
 
     return toret;
+#endif /* WIN32S_COMPAT */
 }

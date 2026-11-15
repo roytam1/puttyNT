@@ -20,3 +20,8 @@ void random_destroy_seed(void)
 void noise_ultralight(NoiseSourceId id, unsigned long data)
 {
 }
+
+uint64_t prng_reseed_time_ms(void)
+{
+    return 0;
+}

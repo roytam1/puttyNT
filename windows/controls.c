@@ -75,6 +75,13 @@ HWND doctl(struct ctlpos *cp, RECT r, const char *wclass, int wstyle,
            int exstyle, const char *wtext, int wid)
 {
     HWND ctl;
+#ifdef WIN32S_COMPAT
+    /* Win32s has no WS_EX_CLIENTEDGE; substitute WS_BORDER. */
+    if (exstyle & WS_EX_CLIENTEDGE) {
+        exstyle &= ~WS_EX_CLIENTEDGE;
+        wstyle |= WS_BORDER;
+    }
+#endif
     /*
      * Note nonstandard use of RECT. This is deliberate: by
      * transforming the width and height directly we arrange to
@@ -487,6 +494,20 @@ void statictext(struct ctlpos *cp, const char *text, int lines, int id)
 /*
  * An owner-drawn static text control for a panel title.
  */
+#ifdef WIN32S_COMPAT
+void paneltitle(struct ctlpos *cp, int id, const char *text)
+{
+    RECT r;
+
+    r.left = GAPBETWEEN;
+    r.top = cp->ypos;
+    r.right = cp->width;
+    r.bottom = TITLEHEIGHT - 3;
+    cp->ypos += r.bottom + GAPBETWEEN;
+    doctl(cp, r, "STATIC", WS_CHILD | WS_VISIBLE | SS_CENTER | WS_BORDER,
+          0, text, id);
+}
+#else
 void paneltitle(struct ctlpos *cp, int id)
 {
     RECT r;
@@ -499,6 +520,7 @@ void paneltitle(struct ctlpos *cp, int id)
     doctl(cp, r, "STATIC", WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
           0, NULL, id);
 }
+#endif
 
 /*
  * A button on the right hand side, with a static to its left.
@@ -1385,7 +1407,11 @@ void winctrl_layout(struct dlgparam *dp, struct winctrls *wc,
         c->data = dupstr(s->boxtitle);
         memset(c->shortcuts, NO_SHORTCUT, lenof(c->shortcuts));
         winctrl_add(wc, c);
+#ifdef WIN32S_COMPAT
+        paneltitle(cp, base_id, s->boxtitle);
+#else
         paneltitle(cp, base_id);
+#endif
         base_id++;
     }
 
@@ -1990,9 +2016,15 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
               HIWORD(wParam) == BN_DOUBLECLICKED))) {
             Filename *fn_prev = NULL;
             if (!ctrl->fileselect.just_button) {
+#ifdef WIN32S_COMPAT
+                char *text = GetDlgItemText_alloc(dp->hwnd, c->base_id+1);
+                if (*text)
+                    fn_prev = filename_from_str(text);
+#else
                 wchar_t *text = GetDlgItemTextW_alloc(dp->hwnd, c->base_id+1);
                 if (*text)
                     fn_prev = filename_from_wstr(text);
+#endif
                 sfree(text);
             }
 
@@ -2005,8 +2037,13 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
 
             if (fn) {
                 if (!ctrl->fileselect.just_button) {
+#ifdef WIN32S_COMPAT
+                    SetDlgItemText(dp->hwnd, c->base_id + 1,
+                                   filename_to_str(fn));
+#else
                     SetDlgItemTextW(dp->hwnd, c->base_id + 1,
                                     filename_to_wstr(fn));
+#endif
                     ctrl->handler(ctrl, dp, dp->data, EVENT_VALCHANGE);
                 } else {
                     assert(!c->data);
@@ -2202,9 +2239,13 @@ void dlg_editbox_set_utf8(dlgcontrol *ctrl, dlgparam *dp, char const *text)
 {
     struct winctrl *c = dlg_findbyctrl(dp, ctrl);
     assert(c && c->ctrl->type == CTRL_EDITBOX);
+#ifdef WIN32S_COMPAT
+    SetDlgItemText(dp->hwnd, c->base_id+1, text);
+#else
     wchar_t *wtext = dup_mb_to_wc(CP_UTF8, text);
     SetDlgItemTextW(dp->hwnd, c->base_id+1, wtext);
     sfree(wtext);
+#endif
 }
 
 char *dlg_editbox_get(dlgcontrol *ctrl, dlgparam *dp)
@@ -2218,10 +2259,14 @@ char *dlg_editbox_get_utf8(dlgcontrol *ctrl, dlgparam *dp)
 {
     struct winctrl *c = dlg_findbyctrl(dp, ctrl);
     assert(c && c->ctrl->type == CTRL_EDITBOX);
+#ifdef WIN32S_COMPAT
+    return GetDlgItemText_alloc(dp->hwnd, c->base_id+1);
+#else
     wchar_t *wtext = GetDlgItemTextW_alloc(dp->hwnd, c->base_id+1);
     char *text = dup_wc_to_mb(CP_UTF8, wtext, "");
     sfree(wtext);
     return text;
+#endif
 }
 
 void dlg_editbox_select_range(dlgcontrol *ctrl, dlgparam *dp,
@@ -2407,7 +2452,11 @@ void dlg_filesel_set(dlgcontrol *ctrl, dlgparam *dp, Filename *fn)
     assert(c);
     assert(c->ctrl->type == CTRL_FILESELECT);
     assert(!c->ctrl->fileselect.just_button);
+#ifdef WIN32S_COMPAT
+    SetDlgItemText(dp->hwnd, c->base_id+1, fn->cpath);
+#else
     SetDlgItemTextW(dp->hwnd, c->base_id+1, fn->wpath);
+#endif
 }
 
 Filename *dlg_filesel_get(dlgcontrol *ctrl, dlgparam *dp)
@@ -2416,8 +2465,13 @@ Filename *dlg_filesel_get(dlgcontrol *ctrl, dlgparam *dp)
     assert(c);
     assert(c->ctrl->type == CTRL_FILESELECT);
     if (!c->ctrl->fileselect.just_button) {
+#ifdef WIN32S_COMPAT
+        char *tmp = GetDlgItemText_alloc(dp->hwnd, c->base_id+1);
+        Filename *ret = filename_from_str(tmp);
+#else
         wchar_t *tmp = GetDlgItemTextW_alloc(dp->hwnd, c->base_id+1);
         Filename *ret = filename_from_wstr(tmp);
+#endif
         sfree(tmp);
         return ret;
     } else {
