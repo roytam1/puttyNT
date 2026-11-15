@@ -37,19 +37,19 @@ static inline bool check_availability(const struct sha256_extra *extra)
 #define SHA256_VTABLE(impl_c, impl_display)                             \
     static struct sha256_extra_mutable sha256_ ## impl_c ## _extra_mut; \
     static const struct sha256_extra sha256_ ## impl_c ## _extra = {    \
-        .check_available = sha256_ ## impl_c ## _available,             \
-        .mut = &sha256_ ## impl_c ## _extra_mut,                        \
+        /* .check_available = */ sha256_ ## impl_c ## _available,       \
+        /* .mut = */ &sha256_ ## impl_c ## _extra_mut,                  \
     };                                                                  \
     const ssh_hashalg ssh_sha256_ ## impl_c = {                         \
-        .new = sha256_ ## impl_c ## _new,                               \
-        .reset = sha256_ ## impl_c ## _reset,                           \
-        .copyfrom = sha256_ ## impl_c ## _copyfrom,                     \
-        .digest = sha256_ ## impl_c ## _digest,                         \
-        .free = sha256_ ## impl_c ## _free,                             \
-        .hlen = 32,                                                     \
-        .blocklen = 64,                                                 \
-        HASHALG_NAMES_ANNOTATED("SHA-256", impl_display),               \
-        .extra = &sha256_ ## impl_c ## _extra,                          \
+        /* .new = */ sha256_ ## impl_c ## _new,                         \
+        /* .reset = */ sha256_ ## impl_c ## _reset,                     \
+        /* .copyfrom = */ sha256_ ## impl_c ## _copyfrom,               \
+        /* .digest = */ sha256_ ## impl_c ## _digest,                   \
+        /* .free = */ sha256_ ## impl_c ## _free,                       \
+        /* .hlen = */ 32,                                               \
+        /* .blocklen = */ 64,                                           \
+        /* .text_basename = */ "SHA-256", /* .annotation = */ impl_display, /* .text_name = */ "SHA-256" " (" impl_display ")", \
+        /* .extra = */ &sha256_ ## impl_c ## _extra,                    \
     }
 
 extern const uint32_t sha256_initial_state[8];
@@ -61,13 +61,13 @@ typedef struct sha256_block sha256_block;
 struct sha256_block {
     uint8_t block[64];
     size_t used;
-    uint64_t len;
+    uint64 len;
 };
 
 static inline void sha256_block_setup(sha256_block *blk)
 {
     blk->used = 0;
-    blk->len = 0;
+    blk->len = uint64_make(0, 0);
 }
 
 static inline bool sha256_block_write(
@@ -81,7 +81,7 @@ static inline bool sha256_block_write(
     *vdata = p + chunk;
     *len -= chunk;
     blk->used += chunk;
-    blk->len += chunk;
+    blk->len = uint64_add32(blk->len, chunk);
 
     if (blk->used == sizeof(blk->block)) {
         blk->used = 0;
@@ -93,11 +93,12 @@ static inline bool sha256_block_write(
 
 static inline void sha256_block_pad(sha256_block *blk, BinarySink *bs)
 {
-    uint64_t final_len = blk->len << 3;
+    uint64 final_len = uint64_shl(blk->len, 3);
     size_t pad = 1 + (63 & (55 - blk->used));
+    size_t i;
 
     put_byte(bs, 0x80);
-    for (size_t i = 1; i < pad; i++)
+    for (i = 1; i < pad; i++)
         put_byte(bs, 0);
     put_uint64(bs, final_len);
 

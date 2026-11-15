@@ -27,28 +27,28 @@ static bool mainchan_rcvd_exit_signal_numeric(
 static void mainchan_request_response(Channel *chan, bool success);
 
 static const ChannelVtable mainchan_channelvt = {
-    .free = mainchan_free,
-    .open_confirmation = mainchan_open_confirmation,
-    .open_failed = mainchan_open_failure,
-    .send = mainchan_send,
-    .send_eof = mainchan_send_eof,
-    .set_input_wanted = mainchan_set_input_wanted,
-    .log_close_msg = mainchan_log_close_msg,
-    .want_close = chan_default_want_close,
-    .rcvd_exit_status = mainchan_rcvd_exit_status,
-    .rcvd_exit_signal = mainchan_rcvd_exit_signal,
-    .rcvd_exit_signal_numeric = mainchan_rcvd_exit_signal_numeric,
-    .run_shell = chan_no_run_shell,
-    .run_command = chan_no_run_command,
-    .run_subsystem = chan_no_run_subsystem,
-    .enable_x11_forwarding = chan_no_enable_x11_forwarding,
-    .enable_agent_forwarding = chan_no_enable_agent_forwarding,
-    .allocate_pty = chan_no_allocate_pty,
-    .set_env = chan_no_set_env,
-    .send_break = chan_no_send_break,
-    .send_signal = chan_no_send_signal,
-    .change_window_size = chan_no_change_window_size,
-    .request_response = mainchan_request_response,
+    /* .free = */ mainchan_free,
+    /* .open_confirmation = */ mainchan_open_confirmation,
+    /* .open_failed = */ mainchan_open_failure,
+    /* .send = */ mainchan_send,
+    /* .send_eof = */ mainchan_send_eof,
+    /* .set_input_wanted = */ mainchan_set_input_wanted,
+    /* .log_close_msg = */ mainchan_log_close_msg,
+    /* .want_close = */ chan_default_want_close,
+    /* .rcvd_exit_status = */ mainchan_rcvd_exit_status,
+    /* .rcvd_exit_signal = */ mainchan_rcvd_exit_signal,
+    /* .rcvd_exit_signal_numeric = */ mainchan_rcvd_exit_signal_numeric,
+    /* .run_shell = */ chan_no_run_shell,
+    /* .run_command = */ chan_no_run_command,
+    /* .run_subsystem = */ chan_no_run_subsystem,
+    /* .enable_x11_forwarding = */ chan_no_enable_x11_forwarding,
+    /* .enable_agent_forwarding = */ chan_no_enable_agent_forwarding,
+    /* .allocate_pty = */ chan_no_allocate_pty,
+    /* .set_env = */ chan_no_set_env,
+    /* .send_break = */ chan_no_send_break,
+    /* .send_signal = */ chan_no_send_signal,
+    /* .change_window_size = */ chan_no_change_window_size,
+    /* .request_response = */ mainchan_request_response,
 };
 
 typedef enum MainChanType {
@@ -113,8 +113,9 @@ mainchan *mainchan_new(
 
 static void mainchan_free(Channel *chan)
 {
+    mainchan *mc;
     assert(chan->vt == &mainchan_channelvt);
-    mainchan *mc = container_of(chan, mainchan, chan);
+    mc = container_of(chan, mainchan, chan);
     conf_free(mc->conf);
     sfree(mc);
 }
@@ -128,7 +129,7 @@ static void mainchan_open_confirmation(Channel *chan)
     PacketProtocolLayer *ppl = mc->ppl; /* for ppl_logevent */
 
     seat_update_specials_menu(mc->ppl->seat);
-    ppl_logevent("Opened main channel");
+    ppl_logevent(("Opened main channel"));
     seat_notify_session_started(mc->ppl->seat);
 
     if (mc->is_simple)
@@ -148,8 +149,8 @@ static void mainchan_open_confirmation(Channel *chan)
             if ((x11disp = x11_setup_display(
                      conf_get_str(mc->conf, CONF_x11_display),
                      mc->conf, &x11_setup_err)) == NULL) {
-                ppl_logevent("X11 forwarding not enabled: unable to"
-                             " initialise X display: %s", x11_setup_err);
+                ppl_logevent(("X11 forwarding not enabled: unable to"
+                              " initialise X display: %s", x11_setup_err));
                 sfree(x11_setup_err);
             } else {
                 x11auth = ssh_add_x11_display(
@@ -180,7 +181,7 @@ static void mainchan_open_confirmation(Channel *chan)
             mc->n_req_env++;
         }
         if (mc->n_req_env)
-            ppl_logevent("Sent %d environment variables", mc->n_req_env);
+            ppl_logevent(("Sent %d environment variables", mc->n_req_env));
 
         /* Ignore encoding of CONF_remote_cmd so as not to disturb
          * legacy handling of non-UTF-8 commands */
@@ -220,18 +221,20 @@ static void mainchan_try_fallback_command(mainchan *mc)
 
 static void mainchan_request_response(Channel *chan, bool success)
 {
+    mainchan *mc;
+    PacketProtocolLayer *ppl;
     assert(chan->vt == &mainchan_channelvt);
-    mainchan *mc = container_of(chan, mainchan, chan);
-    PacketProtocolLayer *ppl = mc->ppl; /* for ppl_logevent */
+    mc = container_of(chan, mainchan, chan);
+    ppl = mc->ppl;                      /* for ppl_logevent */
 
     if (mc->req_x11) {
         mc->req_x11 = false;
 
         if (success) {
-            ppl_logevent("X11 forwarding enabled");
+            ppl_logevent(("X11 forwarding enabled"));
             ssh_enable_x_fwd(mc->cl);
         } else {
-            ppl_logevent("X11 forwarding refused");
+            ppl_logevent(("X11 forwarding refused"));
         }
         return;
     }
@@ -240,9 +243,9 @@ static void mainchan_request_response(Channel *chan, bool success)
         mc->req_agent = false;
 
         if (success) {
-            ppl_logevent("Agent forwarding enabled");
+            ppl_logevent(("Agent forwarding enabled"));
         } else {
-            ppl_logevent("Agent forwarding refused");
+            ppl_logevent(("Agent forwarding refused"));
         }
         return;
     }
@@ -251,11 +254,11 @@ static void mainchan_request_response(Channel *chan, bool success)
         mc->req_pty = false;
 
         if (success) {
-            ppl_logevent("Allocated pty");
+            ppl_logevent(("Allocated pty"));
             mc->got_pty = true;
         } else {
-            ppl_logevent("Server refused to allocate pty");
-            ppl_printf("Server refused to allocate pty\r\n");
+            ppl_logevent(("Server refused to allocate pty"));
+            ppl_printf(("Server refused to allocate pty\r\n"));
             ssh_set_ldisc_option(mc->cl, LD_ECHO, true);
             ssh_set_ldisc_option(mc->cl, LD_EDIT, true);
         }
@@ -265,22 +268,22 @@ static void mainchan_request_response(Channel *chan, bool success)
     if (mc->n_env_replies < mc->n_req_env) {
         int j = mc->n_env_replies++;
         if (!success) {
-            ppl_logevent("Server refused to set environment variable %s",
-                         conf_get_str_nthstrkey(mc->conf,
-                                                CONF_environmt, j));
+            ppl_logevent(("Server refused to set environment variable %s",
+                          conf_get_str_nthstrkey(mc->conf,
+                                                CONF_environmt, j)));
             mc->n_env_fails++;
         }
 
         if (mc->n_env_replies == mc->n_req_env) {
             if (mc->n_env_fails == 0) {
-                ppl_logevent("All environment variables successfully set");
+                ppl_logevent(("All environment variables successfully set"));
             } else if (mc->n_env_fails == mc->n_req_env) {
-                ppl_logevent("All environment variables refused");
-                ppl_printf("Server refused to set environment "
-                           "variables\r\n");
+                ppl_logevent(("All environment variables refused"));
+                ppl_printf(("Server refused to set environment "
+                            "variables\r\n"));
             } else {
-                ppl_printf("Server refused to set all environment "
-                           "variables\r\n");
+                ppl_printf(("Server refused to set all environment "
+                            "variables\r\n"));
             }
         }
         return;
@@ -290,10 +293,10 @@ static void mainchan_request_response(Channel *chan, bool success)
         mc->req_cmd_primary = false;
 
         if (success) {
-            ppl_logevent("Started a shell/command");
+            ppl_logevent(("Started a shell/command"));
             mainchan_ready(mc);
         } else if (*conf_get_str_ambi(mc->conf, CONF_remote_cmd2, NULL)) {
-            ppl_logevent("Primary command failed; attempting fallback");
+            ppl_logevent(("Primary command failed; attempting fallback"));
             mainchan_try_fallback_command(mc);
         } else {
             /*
@@ -310,7 +313,7 @@ static void mainchan_request_response(Channel *chan, bool success)
         mc->req_cmd_fallback = false;
 
         if (success) {
-            ppl_logevent("Started a shell/command");
+            ppl_logevent(("Started a shell/command"));
             ssh_got_fallback_cmd(mc->ppl->ssh);
             mainchan_ready(mc);
         } else {
@@ -340,8 +343,9 @@ static void mainchan_ready(mainchan *mc)
 
 static void mainchan_open_failure(Channel *chan, const char *errtext)
 {
+    mainchan *mc;
     assert(chan->vt == &mainchan_channelvt);
-    mainchan *mc = container_of(chan, mainchan, chan);
+    mc = container_of(chan, mainchan, chan);
 
     ssh_sw_abort_deferred(mc->ppl->ssh,
                           "Server refused to open main channel: %s", errtext);
@@ -350,16 +354,19 @@ static void mainchan_open_failure(Channel *chan, const char *errtext)
 static size_t mainchan_send(Channel *chan, bool is_stderr,
                             const void *data, size_t length)
 {
+    mainchan *mc;
     assert(chan->vt == &mainchan_channelvt);
-    mainchan *mc = container_of(chan, mainchan, chan);
+    mc = container_of(chan, mainchan, chan);
     return seat_output(mc->ppl->seat, is_stderr, data, length);
 }
 
 static void mainchan_send_eof(Channel *chan)
 {
+    mainchan *mc;
+    PacketProtocolLayer *ppl;
     assert(chan->vt == &mainchan_channelvt);
-    mainchan *mc = container_of(chan, mainchan, chan);
-    PacketProtocolLayer *ppl = mc->ppl; /* for ppl_logevent */
+    mc = container_of(chan, mainchan, chan);
+    ppl = mc->ppl;                      /* for ppl_logevent */
 
     if (!mc->eof_sent && (seat_eof(mc->ppl->seat) || mc->got_pty)) {
         /*
@@ -370,7 +377,7 @@ static void mainchan_send_eof(Channel *chan)
          * isn't a particularly meaningful concept.
          */
         sshfwd_write_eof(mc->sc);
-        ppl_logevent("Sent EOF message");
+        ppl_logevent(("Sent EOF message"));
         mc->eof_sent = true;
         ssh_set_wants_user_input(mc->cl, false); /* stop reading from stdin */
     }
@@ -378,8 +385,9 @@ static void mainchan_send_eof(Channel *chan)
 
 static void mainchan_set_input_wanted(Channel *chan, bool wanted)
 {
+    mainchan *mc;
     assert(chan->vt == &mainchan_channelvt);
-    mainchan *mc = container_of(chan, mainchan, chan);
+    mc = container_of(chan, mainchan, chan);
 
     /*
      * This is the main channel of the SSH session, i.e. the one tied
@@ -397,12 +405,14 @@ static char *mainchan_log_close_msg(Channel *chan)
 
 static bool mainchan_rcvd_exit_status(Channel *chan, int status)
 {
+    mainchan *mc;
+    PacketProtocolLayer *ppl;
     assert(chan->vt == &mainchan_channelvt);
-    mainchan *mc = container_of(chan, mainchan, chan);
-    PacketProtocolLayer *ppl = mc->ppl; /* for ppl_logevent */
+    mc = container_of(chan, mainchan, chan);
+    ppl = mc->ppl;                      /* for ppl_logevent */
 
     ssh_got_exitcode(mc->ppl->ssh, status);
-    ppl_logevent("Session sent command exit status %d", status);
+    ppl_logevent(("Session sent command exit status %d", status));
     return true;
 }
 
@@ -415,17 +425,18 @@ static void mainchan_log_exit_signal_common(
     const char *core_msg = core_dumped ? " (core dumped)" : "";
     const char *msg_pre = (msg.len ? " (" : "");
     const char *msg_post = (msg.len ? ")" : "");
-    ppl_logevent("Session exited on %s%s%s%.*s%s",
-                 sigdesc, core_msg, msg_pre, PTRLEN_PRINTF(msg), msg_post);
+    ppl_logevent(("Session exited on %s%s%s%.*s%s",
+                  sigdesc, core_msg, msg_pre, PTRLEN_PRINTF(msg), msg_post));
 }
 
 static bool mainchan_rcvd_exit_signal(
     Channel *chan, ptrlen signame, bool core_dumped, ptrlen msg)
 {
-    assert(chan->vt == &mainchan_channelvt);
-    mainchan *mc = container_of(chan, mainchan, chan);
+    mainchan *mc;
     int exitcode;
     char *signame_str;
+    assert(chan->vt == &mainchan_channelvt);
+    mc = container_of(chan, mainchan, chan);
 
     /*
      * Translate the signal description back into a locally meaningful
@@ -457,9 +468,10 @@ static bool mainchan_rcvd_exit_signal(
 static bool mainchan_rcvd_exit_signal_numeric(
     Channel *chan, int signum, bool core_dumped, ptrlen msg)
 {
-    assert(chan->vt == &mainchan_channelvt);
-    mainchan *mc = container_of(chan, mainchan, chan);
+    mainchan *mc;
     char *signum_str;
+    assert(chan->vt == &mainchan_channelvt);
+    mc = container_of(chan, mainchan, chan);
 
     ssh_got_exitcode(mc->ppl->ssh, 128 + signum);
     signum_str = dupprintf("signal %d", signum);
@@ -529,7 +541,7 @@ void mainchan_special_cmd(mainchan *mc, SessionSpecialCode code, int arg)
     } else if ((signame = ssh_signal_lookup(code)) != NULL) {
         /* It's a signal. */
         sshfwd_send_signal(mc->sc, false, signame);
-        ppl_logevent("Sent signal SIG%s", signame);
+        ppl_logevent(("Sent signal SIG%s", signame));
     }
 }
 

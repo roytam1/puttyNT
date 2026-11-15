@@ -6,13 +6,6 @@
 #include <string.h>
 #include "ssh.h"
 
-static inline uint64_t rol(uint64_t x, unsigned shift)
-{
-    unsigned L = (+shift) & 63;
-    unsigned R = (-shift) & 63;
-    return (x << L) | (x >> R);
-}
-
 /*
  * General Keccak is defined such that its state is a 5x5 array of
  * words which can be any power-of-2 size from 1 up to 64. SHA-3 fixes
@@ -20,10 +13,13 @@ static inline uint64_t rol(uint64_t x, unsigned shift)
  *
  * The number of rounds is defined as 12 + 2k if the word size is 2^k.
  * Here we have 64-bit words only, so k=6, so 24 rounds always.
+ *
+ * The words are uint64 (two 32-bit halves, see defs.h), and misc.h has
+ * the functions that do arithmetic on them.
  */
-typedef uint64_t keccak_core_state[5][5];
+typedef uint64 keccak_core_state[5][5];
 #define NROUNDS 24               /* would differ for other word sizes */
-static const uint64_t round_constants[NROUNDS];
+static const uint64 round_constants[NROUNDS];
 static const unsigned rotation_counts[5][5];
 
 /*
@@ -33,32 +29,42 @@ static const unsigned rotation_counts[5][5];
 static void keccak_transform(keccak_core_state A)
 {
     union {
-        uint64_t C[5];
-        uint64_t B[5][5];
+        uint64 C[5];
+        uint64 B[5][5];
     } u;
+    unsigned round;
 
-    for (unsigned round = 0; round < NROUNDS; round++) {
+    for (round = 0; round < NROUNDS; round++) {
+        unsigned x;
+        unsigned y;
         /* theta step */
-        for (unsigned x = 0; x < 5; x++)
-            u.C[x] = A[x][0] ^ A[x][1] ^ A[x][2] ^ A[x][3] ^ A[x][4];
-        for (unsigned x = 0; x < 5; x++) {
-            uint64_t D = rol(u.C[(x+1) % 5], 1) ^ u.C[(x+4) % 5];
-            for (unsigned y = 0; y < 5; y++)
-                A[x][y] ^= D;
+        for (x = 0; x < 5; x++)
+            u.C[x] = uint64_xor(uint64_xor(uint64_xor(A[x][0], A[x][1]),
+                                           uint64_xor(A[x][2], A[x][3])),
+                                A[x][4]);
+        for (x = 0; x < 5; x++) {
+            uint64 D = uint64_xor(uint64_rotl(u.C[(x+1) % 5], 1),
+                                  u.C[(x+4) % 5]);
+            unsigned y;
+            for (y = 0; y < 5; y++)
+                A[x][y] = uint64_xor(A[x][y], D);
         }
 
         /* rho and pi steps */
-        for (unsigned x = 0; x < 5; x++)
-            for (unsigned y = 0; y < 5; y++)
-                u.B[y][(2*x+3*y) % 5] = rol(A[x][y], rotation_counts[x][y]);
+        for (x = 0; x < 5; x++)
+            for (y = 0; y < 5; y++)
+                u.B[y][(2*x+3*y) % 5] =
+                    uint64_rotl(A[x][y], rotation_counts[x][y]);
 
         /* chi step */
-        for (unsigned x = 0; x < 5; x++)
-            for (unsigned y = 0; y < 5; y++)
-                A[x][y] = u.B[x][y] ^ (u.B[(x+2)%5][y] & ~u.B[(x+1)%5][y]);
+        for (x = 0; x < 5; x++)
+            for (y = 0; y < 5; y++)
+                A[x][y] = uint64_xor(
+                    u.B[x][y], uint64_and(u.B[(x+2)%5][y],
+                                          uint64_not(u.B[(x+1)%5][y])));
 
         /* iota step */
-        A[0][0] ^= round_constants[round];
+        A[0][0] = uint64_xor(A[0][0], round_constants[round]);
     }
 
     smemclr(&u, sizeof(u));
@@ -81,17 +87,21 @@ static void keccak_accumulate(keccak_state *s, const void *vdata, size_t len)
 
     while (len >= s->bytes_wanted - s->bytes_got) {
         size_t b = s->bytes_wanted - s->bytes_got;
+        size_t n;
+        unsigned y;
         memcpy(s->bytes + s->bytes_got, data, b);
         len -= b;
         data += b;
 
-        size_t n = 0;
-        for (unsigned y = 0; y < 5; y++) {
-            for (unsigned x = 0; x < 5; x++) {
+        n = 0;
+        for (y = 0; y < 5; y++) {
+            unsigned x;
+            for (x = 0; x < 5; x++) {
                 if (n >= s->bytes_wanted)
                     break;
 
-                s->A[x][y] ^= GET_64BIT_LSB_FIRST(s->bytes + n);
+                s->A[x][y] = uint64_xor(s->A[x][y],
+                                        GET_64BIT_LSB_FIRST(s->bytes + n));
                 n += 8;
             }
         }
@@ -110,6 +120,8 @@ static void keccak_accumulate(keccak_state *s, const void *vdata, size_t len)
 static void keccak_output(keccak_state *s, void *voutput)
 {
     unsigned char *output = (unsigned char *)voutput;
+    size_t n;
+    unsigned y;
 
     /*
      * Add message padding.
@@ -125,15 +137,16 @@ static void keccak_output(keccak_state *s, void *voutput)
         keccak_accumulate(s, padding, len);
     }
 
-    size_t n = 0;
-    for (unsigned y = 0; y < 5; y++) {
-        for (unsigned x = 0; x < 5; x++) {
+    n = 0;
+    for (y = 0; y < 5; y++) {
+        unsigned x;
+        for (x = 0; x < 5; x++) {
             size_t to_copy = s->hash_bytes - n;
+            unsigned char outbytes[8];
             if (to_copy == 0)
                 break;
             if (to_copy > 8)
                 to_copy = 8;
-            unsigned char outbytes[8];
             PUT_64BIT_LSB_FIRST(outbytes, s->A[x][y]);
             memcpy(output + n, outbytes, to_copy);
             n += to_copy;
@@ -158,7 +171,7 @@ static void keccak_init(keccak_state *s, unsigned hashbits, unsigned ratebits,
 
     for (y = 0; y < 5; y++)
         for (x = 0; x < 5; x++)
-            s->A[x][y] = 0;
+            s->A[x][y] = uint64_make(0, 0);
 }
 
 static void keccak_sha3_init(keccak_state *s, int hashbits)
@@ -175,7 +188,6 @@ static void keccak_shake_init(keccak_state *s, int parambits, int hashbits)
  * Keccak round constants, generated via the LFSR specified in the
  * Keccak reference by the following piece of Python:
 
-import textwrap
 from functools import reduce
 
 rbytes = [1]
@@ -188,20 +200,26 @@ rbits = [byte & 1 for byte in rbytes]
 rwords = [sum(rbits[i+j] << ((1 << j) - 1) for j in range(7))
           for i in range(0, len(rbits), 7)]
 
-print(textwrap.indent("\n".join(textwrap.wrap(", ".join(
-    map("0x{:016x}".format, rwords)))), " "*4))
+pairs = ["{{0x{:08x}, 0x{:08x}}}".format(w >> 32, w & 0xFFFFFFFF)
+         for w in rwords]
+for i in range(0, len(pairs), 2):
+    print("    " + ", ".join(pairs[i:i+2]) + ",")
 
 */
 
-static const uint64_t round_constants[24] = {
-    0x0000000000000001, 0x0000000000008082, 0x800000000000808a,
-    0x8000000080008000, 0x000000000000808b, 0x0000000080000001,
-    0x8000000080008081, 0x8000000000008009, 0x000000000000008a,
-    0x0000000000000088, 0x0000000080008009, 0x000000008000000a,
-    0x000000008000808b, 0x800000000000008b, 0x8000000000008089,
-    0x8000000000008003, 0x8000000000008002, 0x8000000000000080,
-    0x000000000000800a, 0x800000008000000a, 0x8000000080008081,
-    0x8000000000008080, 0x0000000080000001, 0x8000000080008008
+static const uint64 round_constants[24] = {
+    {0x00000000, 0x00000001}, {0x00000000, 0x00008082},
+    {0x80000000, 0x0000808a}, {0x80000000, 0x80008000},
+    {0x00000000, 0x0000808b}, {0x00000000, 0x80000001},
+    {0x80000000, 0x80008081}, {0x80000000, 0x00008009},
+    {0x00000000, 0x0000008a}, {0x00000000, 0x00000088},
+    {0x00000000, 0x80008009}, {0x00000000, 0x8000000a},
+    {0x00000000, 0x8000808b}, {0x80000000, 0x0000008b},
+    {0x80000000, 0x00008089}, {0x80000000, 0x00008003},
+    {0x80000000, 0x00008002}, {0x80000000, 0x00000080},
+    {0x00000000, 0x0000800a}, {0x80000000, 0x8000000a},
+    {0x80000000, 0x80008081}, {0x80000000, 0x00008080},
+    {0x00000000, 0x80000001}, {0x80000000, 0x80008008},
 };
 
 /*
@@ -282,14 +300,14 @@ static void sha3_reset(ssh_hash *hash)
 
 #define DEFINE_SHA3(bits)                       \
     const ssh_hashalg ssh_sha3_##bits = {       \
-        .new = keccak_new,                      \
-        .reset = sha3_reset,                    \
-        .copyfrom = keccak_copyfrom,            \
-        .digest = keccak_digest,                \
-        .free = keccak_free,                    \
-        .hlen = bits/8,                         \
-        .blocklen = 200 - 2*(bits/8),           \
-        HASHALG_NAMES_BARE("SHA3-" #bits),      \
+        /* .new = */ keccak_new,                \
+        /* .reset = */ sha3_reset,              \
+        /* .copyfrom = */ keccak_copyfrom,      \
+        /* .digest = */ keccak_digest,          \
+        /* .free = */ keccak_free,              \
+        /* .hlen = */ bits/8,                   \
+        /* .blocklen = */ 200 - 2*(bits/8),     \
+        /* .text_basename = */ "SHA3-" #bits, /* .annotation = */ NULL, /* .text_name = */ "SHA3-" #bits, \
     }
 
 DEFINE_SHA3(224);
@@ -316,14 +334,14 @@ static void shake256_reset(ssh_hash *hash)
 
 #define DEFINE_SHAKE(param, hashbytes)                          \
     const ssh_hashalg ssh_shake##param##_##hashbytes##bytes = { \
-        .new = keccak_new,                                      \
-        .reset = shake##param##_reset,                          \
-        .copyfrom = keccak_copyfrom,                            \
-        .digest = keccak_digest,                                \
-        .free = keccak_free,                                    \
-        .hlen = hashbytes,                                      \
-        .blocklen = 0,                                          \
-        HASHALG_NAMES_BARE("SHAKE" #param),                     \
+        /* .new = */ keccak_new,                                \
+        /* .reset = */ shake##param##_reset,                    \
+        /* .copyfrom = */ keccak_copyfrom,                      \
+        /* .digest = */ keccak_digest,                          \
+        /* .free = */ keccak_free,                              \
+        /* .hlen = */ hashbytes,                                \
+        /* .blocklen = */ 0,                                    \
+        /* .text_basename = */ "SHAKE" #param, /* .annotation = */ NULL, /* .text_name = */ "SHAKE" #param, \
     }
 
 DEFINE_SHAKE(256, 114);                /* used by Ed448 */
@@ -367,17 +385,20 @@ void shake_xof_read(ShakeXOF *sx, void *output_v, size_t size)
     unsigned char *output = (unsigned char *)output_v;
 
     while (size > 0) {
+        size_t this_size;
         if (sx->pos == 0) {
+            unsigned y;
+            unsigned x;
             /* Copy the 64-bit words from the Keccak state into the
              * output buffer of bytes */
-            for (unsigned y = 0; y < 5; y++)
-                for (unsigned x = 0; x < 5; x++)
+            for (y = 0; y < 5; y++)
+                for (x = 0; x < 5; x++)
                     PUT_64BIT_LSB_FIRST(sx->buf + 8 * (5*y+x),
                                         sx->state.A[x][y]);
         }
 
         /* Read a chunk from the byte buffer */
-        size_t this_size = sx->bytes_per_transform - sx->pos;
+        this_size = sx->bytes_per_transform - sx->pos;
         if (this_size > size)
             this_size = size;
         memcpy(output, sx->buf + sx->pos, this_size);

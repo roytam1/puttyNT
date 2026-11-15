@@ -11,7 +11,7 @@ HMODULE load_system32_dll(const char *libname)
     char *fullpath;
     HMODULE ret;
 
-    fullpath = dupcat(get_system_dir(), "\\", libname);
+    fullpath = dupcat(get_system_dir(), "\\", libname, NULL);
     ret = LoadLibrary(fullpath);
     sfree(fullpath);
     return ret;

@@ -7,11 +7,7 @@
 
 struct printer_enum_tag {
     int nprinters;
-    DWORD enum_level;
-    union {
-        LPPRINTER_INFO_4 i4;
-        LPPRINTER_INFO_5 i5;
-    } info;
+    LPPRINTER_INFO_1 info;
 };
 
 struct printer_job_tag {
@@ -100,33 +96,15 @@ printer_enum *printer_start_enum(int *nprinters_ptr)
     buffer = snewn(512, char);
 
     /*
-     * Determine what enumeration level to use.
-     * When enumerating printers, we need to use PRINTER_INFO_4 on
-     * NT-class systems to avoid Windows looking too hard for them and
-     * slowing things down; and we need to avoid PRINTER_INFO_5 as
-     * we've seen network printers not show up.
-     * On 9x-class systems, PRINTER_INFO_4 isn't available and
-     * PRINTER_INFO_5 is recommended.
-     * Bletch.
+     * Enumeration level 1 is the one every version of Windows NT has.
+     * (Level 4, which is quicker on a network with many printers,
+     * arrived with Windows NT 3.5.)
      */
-    if (osPlatformId != VER_PLATFORM_WIN32_NT) {
-        pe->enum_level = 5;
-    } else {
-        pe->enum_level = 4;
-    }
-
     if (!printer_add_enum(PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS,
-                          pe->enum_level, &buffer, 0, nprinters_ptr))
+                          1, &buffer, 0, nprinters_ptr))
         goto error;
 
-    switch (pe->enum_level) {
-      case 4:
-        pe->info.i4 = (LPPRINTER_INFO_4)buffer;
-        break;
-      case 5:
-        pe->info.i5 = (LPPRINTER_INFO_5)buffer;
-        break;
-    }
+    pe->info = (LPPRINTER_INFO_1)buffer;
     pe->nprinters = *nprinters_ptr;
 
     return pe;
@@ -144,28 +122,14 @@ char *printer_get_name(printer_enum *pe, int i)
         return NULL;
     if (i < 0 || i >= pe->nprinters)
         return NULL;
-    switch (pe->enum_level) {
-      case 4:
-        return pe->info.i4[i].pPrinterName;
-      case 5:
-        return pe->info.i5[i].pPrinterName;
-      default:
-        return NULL;
-    }
+    return pe->info[i].pName;
 }
 
 void printer_finish_enum(printer_enum *pe)
 {
     if (!pe)
         return;
-    switch (pe->enum_level) {
-      case 4:
-        sfree(pe->info.i4);
-        break;
-      case 5:
-        sfree(pe->info.i5);
-        break;
-    }
+    sfree(pe->info);
     sfree(pe);
 }
 

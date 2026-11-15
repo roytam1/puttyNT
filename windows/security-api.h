@@ -1,39 +1,22 @@
 /*
  * security-api.h: some miscellaneous security-related helper functions,
- * defined in utils/security.c, that use the advapi32 library. Also
- * centralises the machinery for dynamically loading that library.
+ * defined in utils/security.c. They use only the security functions
+ * of advapi32.dll that Windows NT 3.1 already has.
  */
-
-#include <aclapi.h>
-
-/*
- * Functions loaded from advapi32.dll.
- */
-DECL_WINDOWS_FUNCTION(extern, BOOL, OpenProcessToken,
-                      (HANDLE, DWORD, PHANDLE));
-DECL_WINDOWS_FUNCTION(extern, BOOL, GetTokenInformation,
-                      (HANDLE, TOKEN_INFORMATION_CLASS,
-                       LPVOID, DWORD, PDWORD));
-DECL_WINDOWS_FUNCTION(extern, BOOL, InitializeSecurityDescriptor,
-                      (PSECURITY_DESCRIPTOR, DWORD));
-DECL_WINDOWS_FUNCTION(extern, BOOL, SetSecurityDescriptorOwner,
-                      (PSECURITY_DESCRIPTOR, PSID, BOOL));
-DECL_WINDOWS_FUNCTION(extern, DWORD, GetSecurityInfo,
-                      (HANDLE, SE_OBJECT_TYPE, SECURITY_INFORMATION,
-                       PSID *, PSID *, PACL *, PACL *,
-                       PSECURITY_DESCRIPTOR *));
-DECL_WINDOWS_FUNCTION(extern, DWORD, SetSecurityInfo,
-                      (HANDLE, SE_OBJECT_TYPE, SECURITY_INFORMATION,
-                       PSID, PSID, PACL, PACL));
-DECL_WINDOWS_FUNCTION(extern, DWORD, SetEntriesInAclA,
-                      (ULONG, PEXPLICIT_ACCESS, PACL, PACL *));
-bool got_advapi(void);
 
 /*
  * Find the SID describing the current user. The return value (if not
  * NULL for some error-related reason) is smalloced.
  */
 PSID get_user_sid(void);
+
+/*
+ * Find the owner of a kernel object, such as a named pipe or a file
+ * mapping, from a handle with READ_CONTROL access to it. On success,
+ * *owner points into *psd, which must be freed later using LocalFree.
+ * On failure, GetLastError() says why.
+ */
+bool get_object_owner(HANDLE h, PSID *owner, PSECURITY_DESCRIPTOR *psd);
 
 /*
  * Construct a PSECURITY_DESCRIPTOR of the type used for named pipe

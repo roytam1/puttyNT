@@ -43,35 +43,35 @@ static size_t psftp_output(Seat *, SeatOutputType type, const void *, size_t);
 static bool psftp_eof(Seat *);
 
 static const SeatVtable psftp_seat_vt = {
-    .output = psftp_output,
-    .eof = psftp_eof,
-    .sent = nullseat_sent,
-    .banner = nullseat_banner_to_stderr,
-    .get_userpass_input = filexfer_get_userpass_input,
-    .notify_session_started = nullseat_notify_session_started,
-    .notify_remote_exit = nullseat_notify_remote_exit,
-    .notify_remote_disconnect = nullseat_notify_remote_disconnect,
-    .connection_fatal = console_connection_fatal,
-    .nonfatal = console_nonfatal,
-    .update_specials_menu = nullseat_update_specials_menu,
-    .get_ttymode = nullseat_get_ttymode,
-    .set_busy_status = nullseat_set_busy_status,
-    .confirm_ssh_host_key = console_confirm_ssh_host_key,
-    .confirm_weak_crypto_primitive = console_confirm_weak_crypto_primitive,
-    .confirm_weak_cached_hostkey = console_confirm_weak_cached_hostkey,
-    .prompt_descriptions = console_prompt_descriptions,
-    .is_utf8 = nullseat_is_never_utf8,
-    .echoedit_update = nullseat_echoedit_update,
-    .get_display = nullseat_get_display,
-    .get_windowid = nullseat_get_windowid,
-    .get_window_pixel_size = nullseat_get_window_pixel_size,
-    .stripctrl_new = console_stripctrl_new,
-    .set_trust_status = nullseat_set_trust_status,
-    .can_set_trust_status = nullseat_can_set_trust_status_yes,
-    .has_mixed_input_stream = nullseat_has_mixed_input_stream_no,
-    .verbose = cmdline_seat_verbose,
-    .interactive = nullseat_interactive_yes,
-    .get_cursor_position = nullseat_get_cursor_position,
+    /* .output = */ psftp_output,
+    /* .eof = */ psftp_eof,
+    /* .sent = */ nullseat_sent,
+    /* .banner = */ nullseat_banner_to_stderr,
+    /* .get_userpass_input = */ filexfer_get_userpass_input,
+    /* .notify_session_started = */ nullseat_notify_session_started,
+    /* .notify_remote_exit = */ nullseat_notify_remote_exit,
+    /* .notify_remote_disconnect = */ nullseat_notify_remote_disconnect,
+    /* .connection_fatal = */ console_connection_fatal,
+    /* .nonfatal = */ console_nonfatal,
+    /* .update_specials_menu = */ nullseat_update_specials_menu,
+    /* .get_ttymode = */ nullseat_get_ttymode,
+    /* .set_busy_status = */ nullseat_set_busy_status,
+    /* .confirm_ssh_host_key = */ console_confirm_ssh_host_key,
+    /* .confirm_weak_crypto_primitive = */ console_confirm_weak_crypto_primitive,
+    /* .confirm_weak_cached_hostkey = */ console_confirm_weak_cached_hostkey,
+    /* .prompt_descriptions = */ console_prompt_descriptions,
+    /* .is_utf8 = */ nullseat_is_never_utf8,
+    /* .echoedit_update = */ nullseat_echoedit_update,
+    /* .get_display = */ nullseat_get_display,
+    /* .get_windowid = */ nullseat_get_windowid,
+    /* .get_window_pixel_size = */ nullseat_get_window_pixel_size,
+    /* .stripctrl_new = */ console_stripctrl_new,
+    /* .set_trust_status = */ nullseat_set_trust_status,
+    /* .can_set_trust_status = */ nullseat_can_set_trust_status_yes,
+    /* .has_mixed_input_stream = */ nullseat_has_mixed_input_stream_no,
+    /* .verbose = */ cmdline_seat_verbose,
+    /* .interactive = */ nullseat_interactive_yes,
+    /* .get_cursor_position = */ nullseat_get_cursor_position,
 };
 static Seat psftp_seat[1] = {{ &psftp_seat_vt }};
 
@@ -81,8 +81,9 @@ static Seat psftp_seat[1] = {{ &psftp_seat_vt }};
  * afterwards.
  */
 static StripCtrlChars *string_scc;
+/* The caller declares "char *varname;" (C89: no declarations in for) */
 #define with_stripctrl(varname, input)                                  \
-    for (char *varname = stripctrl_string(string_scc, input); varname;  \
+    for (varname = stripctrl_string(string_scc, input); varname;        \
          sfree(varname), varname = NULL)
 
 /* ----------------------------------------------------------------------
@@ -132,7 +133,7 @@ char *canonify(const char *name)
             slash = "";
         else
             slash = "/";
-        fullname = dupcat(pwd, slash, name);
+        fullname = dupcat(pwd, slash, name, NULL);
     }
 
     req = fxp_realpath_send(fullname);
@@ -212,7 +213,7 @@ char *canonify(const char *name)
          */
         returnname = dupcat(canonname,
                             (strendswith(canonname, "/") ? "" : "/"),
-                            fullname + i + 1);
+                            fullname + i + 1, NULL);
         sfree(fullname);
         sfree(canonname);
         return returnname;
@@ -236,11 +237,14 @@ static void not_connected(void)
  */
 bool sftp_get_file(char *fname, char *outfname, bool recurse, bool restart)
 {
+    char *san;
+    char *sano;
     struct fxp_handle *fh;
     struct sftp_packet *pktin;
     struct sftp_request *req;
     struct fxp_xfer *xfer;
-    uint64_t offset;
+    uint64 offset;
+    char offbuf[UINT64_DECIMAL_SIZE];
     WFile *file;
     bool toret, shown_err = false;
     struct fxp_attrs attrs;
@@ -384,7 +388,7 @@ bool sftp_get_file(char *fname, char *outfname, bool recurse, bool restart)
                 char *nextfname, *nextoutfname;
                 bool retd;
 
-                nextfname = dupcat(fname, "/", ournames[i]->filename);
+                nextfname = dupcat(fname, "/", ournames[i]->filename, NULL);
                 nextoutfname = dir_file_cat(outfname, ournames[i]->filename);
                 retd = sftp_get_file(
                     nextfname, nextoutfname, recurse, restart);
@@ -445,7 +449,7 @@ bool sftp_get_file(char *fname, char *outfname, bool recurse, bool restart)
     }
 
     if (restart) {
-        if (seek_file(file, 0, FROM_END) == -1) {
+        if (seek_file(file, uint64_make(0, 0), FROM_END) == -1) {
             close_wfile(file);
             with_stripctrl(san, outfname)
                 printf("reget: cannot restart %s - file too large\n", san);
@@ -457,9 +461,10 @@ bool sftp_get_file(char *fname, char *outfname, bool recurse, bool restart)
         }
 
         offset = get_file_posn(file);
-        printf("reget: restarting at file position %"PRIu64"\n", offset);
+        printf("reget: restarting at file position %s\n",
+               uint64_decimal(offset, offbuf));
     } else {
-        offset = 0;
+        offset = uint64_make(0, 0);
     }
 
     with_stripctrl(san, fname) {
@@ -531,7 +536,8 @@ bool sftp_put_file(char *fname, char *outfname, bool recurse, bool restart)
     struct fxp_xfer *xfer;
     struct sftp_packet *pktin;
     struct sftp_request *req;
-    uint64_t offset;
+    uint64 offset;
+    char offbuf[UINT64_DECIMAL_SIZE];
     RFile *file;
     bool err = false, eof;
     struct fxp_attrs attrs;
@@ -609,7 +615,7 @@ bool sftp_put_file(char *fname, char *outfname, bool recurse, bool restart)
         if (restart) {
             while (i < nnames) {
                 char *nextoutfname;
-                nextoutfname = dupcat(outfname, "/", ournames[i]);
+                nextoutfname = dupcat(outfname, "/", ournames[i], NULL);
                 req = fxp_stat_send(nextoutfname);
                 pktin = sftp_wait_for_reply(req);
                 result = fxp_stat_recv(pktin, req, &attrs);
@@ -633,13 +639,13 @@ bool sftp_put_file(char *fname, char *outfname, bool recurse, bool restart)
             bool retd;
 
             nextfname = dir_file_cat(fname, ournames[i]);
-            nextoutfname = dupcat(outfname, "/", ournames[i]);
+            nextoutfname = dupcat(outfname, "/", ournames[i], NULL);
             retd = sftp_put_file(nextfname, nextoutfname, recurse, restart);
             restart = false;           /* after first partial file, do full */
             sfree(nextoutfname);
             sfree(nextfname);
             if (!retd) {
-                for (size_t i = 0; i < nnames; i++) {
+                for (i = 0; i < nnames; i++) {
                     sfree(ournames[i]);
                 }
                 sfree(ournames);
@@ -650,7 +656,7 @@ bool sftp_put_file(char *fname, char *outfname, bool recurse, bool restart)
         /*
          * Done this recursion level. Free everything.
          */
-        for (size_t i = 0; i < nnames; i++) {
+        for (i = 0; i < nnames; i++) {
             sfree(ournames[i]);
         }
         sfree(ournames);
@@ -700,12 +706,13 @@ bool sftp_put_file(char *fname, char *outfname, bool recurse, bool restart)
             goto cleanup;
         }
         offset = attrs.size;
-        printf("reput: restarting at file position %"PRIu64"\n", offset);
+        printf("reput: restarting at file position %s\n",
+               uint64_decimal(offset, offbuf));
 
         if (seek_file((WFile *)file, offset, FROM_START) != 0)
-            seek_file((WFile *)file, 0, FROM_END);    /* *shrug* */
+            seek_file((WFile *)file, uint64_make(0, 0), FROM_END); /* *shrug* */
     } else {
-        offset = 0;
+        offset = uint64_make(0, 0);
     }
 
     printf("local:%s => remote:%s\n", fname, outfname);
@@ -843,6 +850,7 @@ SftpWildcardMatcher *sftp_begin_wildcard_matching(char *name)
 
 char *sftp_wildcard_get_filename(SftpWildcardMatcher *swcm)
 {
+    char *san;
     struct fxp_name *name;
     struct sftp_packet *pktin;
     struct sftp_request *req;
@@ -1035,6 +1043,7 @@ void list_directory_from_sftp_warn_unsorted(void)
 
 void list_directory_from_sftp_print(struct fxp_name *name)
 {
+    char *san;
     with_stripctrl(san, name->longname)
         printf("%s\n", san);
 }
@@ -1045,6 +1054,7 @@ void list_directory_from_sftp_print(struct fxp_name *name)
  */
 int sftp_cmd_ls(struct sftp_command *cmd)
 {
+    char *san;
     struct fxp_handle *dirh;
     struct fxp_names *names;
     const char *dir;
@@ -1108,6 +1118,7 @@ int sftp_cmd_ls(struct sftp_command *cmd)
             list_directory_from_sftp_new();
 
         while (1) {
+            size_t i;
 
             req = fxp_readdir_send(dirh);
             pktin = sftp_wait_for_reply(req);
@@ -1124,7 +1135,7 @@ int sftp_cmd_ls(struct sftp_command *cmd)
                 break;
             }
 
-            for (size_t i = 0; i < names->nnames; i++)
+            for (i = 0; i < names->nnames; i++)
                 if (!wildcard || wc_match(wildcard, names->names[i].filename))
                     list_directory_from_sftp_feed(ctx, &names->names[i]);
 
@@ -1151,6 +1162,7 @@ int sftp_cmd_ls(struct sftp_command *cmd)
  */
 int sftp_cmd_cd(struct sftp_command *cmd)
 {
+    char *san;
     struct fxp_handle *dirh;
     struct sftp_packet *pktin;
     struct sftp_request *req;
@@ -1195,6 +1207,7 @@ int sftp_cmd_cd(struct sftp_command *cmd)
  */
 int sftp_cmd_pwd(struct sftp_command *cmd)
 {
+    char *san;
     if (!backend) {
         not_connected();
         return 0;
@@ -1416,6 +1429,7 @@ int sftp_cmd_reput(struct sftp_command *cmd)
 
 int sftp_cmd_mkdir(struct sftp_command *cmd)
 {
+    char *san;
     char *dir;
     struct sftp_packet *pktin;
     struct sftp_request *req;
@@ -1562,6 +1576,7 @@ struct sftp_context_mv {
 
 static bool sftp_action_mv(void *vctx, char *srcfname)
 {
+    char *san;
     struct sftp_context_mv *ctx = (struct sftp_context_mv *)vctx;
     struct sftp_packet *pktin;
     struct sftp_request *req;
@@ -1575,7 +1590,7 @@ static bool sftp_action_mv(void *vctx, char *srcfname)
 
         p = srcfname + strlen(srcfname);
         while (p > srcfname && p[-1] != '/') p--;
-        newname = dupcat(ctx->dstfname, "/", p);
+        newname = dupcat(ctx->dstfname, "/", p, NULL);
         newcanon = canonify(newname);
         sfree(newname);
 
@@ -2327,7 +2342,8 @@ struct sftp_command *sftp_getcmd(FILE *fp, int mode, int modeflags)
 static void sftp_cmd_free(struct sftp_command *cmd)
 {
     if (cmd->words) {
-        for (size_t i = 0; i < cmd->nwords; i++)
+        size_t i;
+        for (i = 0; i < cmd->nwords; i++)
             sfree(cmd->words[i]);
         sfree(cmd->words);
     }
@@ -2336,6 +2352,7 @@ static void sftp_cmd_free(struct sftp_command *cmd)
 
 static int do_sftp_init(void)
 {
+    char *san;
     struct sftp_packet *pktin;
     struct sftp_request *req;
 
@@ -2500,13 +2517,14 @@ static bool psftp_eof(Seat *seat)
 bool sftp_recvdata(char *buf, size_t len)
 {
     while (len > 0) {
+        size_t got;
         while (bufchain_size(&received_data) == 0) {
             if (backend_exitcode(backend) >= 0 ||
                 ssh_sftp_loop_iteration() < 0)
                 return false;          /* doom */
         }
 
-        size_t got = bufchain_fetch_consume_up_to(&received_data, buf, len);
+        got = bufchain_fetch_consume_up_to(&received_data, buf, len);
         buf += got;
         len -= got;
     }
@@ -2803,6 +2821,7 @@ int psftp_main(CmdlineArgList *arglist)
     int modeflags = 0;
     bool sanitise_stderr = true;
     Filename *batchfile = NULL;
+    size_t arglistpos;
 
     sk_init();
     enable_dit();
@@ -2813,11 +2832,12 @@ int psftp_main(CmdlineArgList *arglist)
     conf = conf_new();
     do_defaults(NULL, conf);
 
-    size_t arglistpos = 0;
+    arglistpos = 0;
     while (arglist->args[arglistpos]) {
         CmdlineArg *arg = arglist->args[arglistpos++];
         CmdlineArg *nextarg = arglist->args[arglistpos];
         const char *argstr = cmdline_arg_to_str(arg);
+        int retd;
 
         if (argstr[0] != '-') {
             if (userhost)
@@ -2826,7 +2846,7 @@ int psftp_main(CmdlineArgList *arglist)
                 userhost = dupstr(argstr);
             continue;
         }
-        int retd = cmdline_process_param(arg, nextarg, 1, conf);
+        retd = cmdline_process_param(arg, nextarg, 1, conf);
         if (retd == -2) {
             cmdline_error("option \"%s\" requires an argument", argstr);
         } else if (retd == 2) {

@@ -13,10 +13,12 @@
  * mp_mod_known_integer: see there for the proofs. The basic idea is
  * that we precompute the reciprocal of our modulus as a fixed-point
  * number, and use that to get an approximate quotient which we
- * subtract off. For these integer sizes, precomputing a fixed-point
- * reciprocal of the form (2^48 / modulus) leaves us at most off by 1
- * in the quotient, so there's a single (time-safe) trial subtraction
- * at the end.
+ * subtract off. Precomputing a fixed-point reciprocal of the form
+ * ((2^32-1) / modulus) leaves us at most off by 1 in the quotient of
+ * any 32-bit input, so there's a single (time-safe) trial subtraction
+ * at the end. The quotient is the top half of the 64-bit product of
+ * the input and the reciprocal, which mul_32x32 computes in 32-bit
+ * arithmetic.
  *
  * (It's possible that some speed could be gained by not reducing
  * fully at every step. But then you'd have to carefully identify all
@@ -25,29 +27,31 @@
  */
 
 /* Precompute the reciprocal */
-static inline uint64_t reciprocal_for_reduction(uint16_t q)
+static inline uint32_t reciprocal_for_reduction(uint16_t q)
 {
-    return ((uint64_t)1 << 48) / q;
+    return 0xFFFFFFFF / q;
 }
 
 /* Reduce x mod q, assuming qrecip == reciprocal_for_reduction(q) */
-static inline uint16_t reduce(uint32_t x, uint16_t q, uint64_t qrecip)
+static inline uint16_t reduce(uint32_t x, uint16_t q, uint32_t qrecip)
 {
-    uint64_t unshifted_quot = x * qrecip;
-    uint64_t quot = unshifted_quot >> 48;
-    uint16_t reduced = x - quot * q;
+    uint32_t quot, prod_lo;
+    uint16_t reduced;
+    mul_32x32(x, qrecip, &quot, &prod_lo);
+    reduced = x - quot * q;
     reduced -= q * (1 & ((q-1 - reduced) >> 15));
     return reduced;
 }
 
 /* Reduce x mod q as above, but also return the quotient */
 static inline uint16_t reduce_with_quot(uint32_t x, uint32_t *quot_out,
-                                        uint16_t q, uint64_t qrecip)
+                                        uint16_t q, uint32_t qrecip)
 {
-    uint64_t unshifted_quot = x * qrecip;
-    uint64_t quot = unshifted_quot >> 48;
-    uint16_t reduced = x - quot * q;
-    uint64_t extraquot = (1 & ((q-1 - reduced) >> 15));
+    uint32_t quot, prod_lo, extraquot;
+    uint16_t reduced;
+    mul_32x32(x, qrecip, &quot, &prod_lo);
+    reduced = x - quot * q;
+    extraquot = (1 & ((q-1 - reduced) >> 15));
     reduced -= extraquot * q;
     *quot_out = quot + extraquot;
     return reduced;

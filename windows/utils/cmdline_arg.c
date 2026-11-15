@@ -80,17 +80,18 @@ CmdlineArgList *cmdline_arg_list_from_GetCommandLineW(void)
 {
     CmdlineArgListWin *list = snew(CmdlineArgListWin);
     CmdlineArgList *listp = &list->listp;
+    int argc;
+    size_t i;
 
     list->cmdline = GetCommandLineW();
 
-    int argc;
     split_into_argv_w(list->cmdline, true,
                       &argc, &list->argv, &list->argstart);
     list->argc = (size_t)argc;
 
     listp->args = NULL;
     listp->nargs = listp->argssize = 0;
-    for (size_t i = 1; i < list->argc; i++) {
+    for (i = 1; i < list->argc; i++) {
         CmdlineArg *argp = cmdline_arg_from_wide_argv_word(
             listp, list->argv[i]);
         CmdlineArgWin *arg = container_of(argp, CmdlineArgWin, argp);
@@ -103,10 +104,11 @@ CmdlineArgList *cmdline_arg_list_from_GetCommandLineW(void)
 
 void cmdline_arg_free(CmdlineArg *argp)
 {
+    CmdlineArgWin *arg;
     if (!argp)
         return;
 
-    CmdlineArgWin *arg = container_of(argp, CmdlineArgWin, argp);
+    arg = container_of(argp, CmdlineArgWin, argp);
     burnwcs(arg->wide);
     burnstr(arg->utf8);
     burnstr(arg->acp);
@@ -116,7 +118,8 @@ void cmdline_arg_free(CmdlineArg *argp)
 void cmdline_arg_list_free(CmdlineArgList *listp)
 {
     CmdlineArgListWin *list = container_of(listp, CmdlineArgListWin, listp);
-    for (size_t i = 0; i < listp->nargs; i++)
+    size_t i;
+    for (i = 0; i < listp->nargs; i++)
         cmdline_arg_free(listp->args[i]);
     /* list->argv[0] points at the start of the string allocated by
      * split_into_argv_w */
@@ -146,37 +149,41 @@ CmdlineArg *cmdline_arg_from_utf8(CmdlineArgList *listp, const char *string)
 
 const char *cmdline_arg_to_str(CmdlineArg *argp)
 {
+    CmdlineArgWin *arg;
     if (!argp)
         return NULL;
 
-    CmdlineArgWin *arg = container_of(argp, CmdlineArgWin, argp);
+    arg = container_of(argp, CmdlineArgWin, argp);
     return arg->acp;
 }
 
 const char *cmdline_arg_to_utf8(CmdlineArg *argp)
 {
+    CmdlineArgWin *arg;
     if (!argp)
         return NULL;
 
-    CmdlineArgWin *arg = container_of(argp, CmdlineArgWin, argp);
+    arg = container_of(argp, CmdlineArgWin, argp);
     return arg->utf8;
 }
 
 Filename *cmdline_arg_to_filename(CmdlineArg *argp)
 {
+    CmdlineArgWin *arg;
     if (!argp)
         return NULL;
 
-    CmdlineArgWin *arg = container_of(argp, CmdlineArgWin, argp);
+    arg = container_of(argp, CmdlineArgWin, argp);
     return filename_from_wstr(arg->wide);
 }
 
 void cmdline_arg_wipe(CmdlineArg *argp)
 {
+    CmdlineArgWin *arg;
     if (!argp)
         return;
 
-    CmdlineArgWin *arg = container_of(argp, CmdlineArgWin, argp);
+    arg = container_of(argp, CmdlineArgWin, argp);
     if (arg->index != (size_t)-1) {
         CmdlineArgList *listp = argp->list;
         CmdlineArgListWin *list = container_of(

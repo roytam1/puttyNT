@@ -20,16 +20,6 @@ static void about_handler(dlgcontrol *ctrl, dlgparam *dlg,
     }
 }
 
-static void help_handler(dlgcontrol *ctrl, dlgparam *dlg,
-                         void *data, int event)
-{
-    HWND *hwndp = (HWND *)ctrl->context.p;
-
-    if (event == EVENT_ACTION) {
-        show_help(*hwndp);
-    }
-}
-
 static void variable_pitch_handler(dlgcontrol *ctrl, dlgparam *dlg,
                                    void *data, int event)
 {
@@ -40,7 +30,7 @@ static void variable_pitch_handler(dlgcontrol *ctrl, dlgparam *dlg,
     }
 }
 
-void win_setup_config_box(struct controlbox *b, HWND *hwndp, bool has_help,
+void win_setup_config_box(struct controlbox *b, HWND *hwndp,
                           bool midsession, int protocol)
 {
     const struct BackendVtable *backvt;
@@ -51,17 +41,12 @@ void win_setup_config_box(struct controlbox *b, HWND *hwndp, bool has_help,
 
     if (!midsession) {
         /*
-         * Add the About and Help buttons to the standard panel.
+         * Add the About button to the standard panel.
          */
         s = ctrl_getset(b, "", "", "");
         c = ctrl_pushbutton(s, "About", 'a', HELPCTX(no_help),
                             about_handler, P(hwndp));
         c->column = 0;
-        if (has_help) {
-            c = ctrl_pushbutton(s, "Help", 'h', HELPCTX(no_help),
-                                help_handler, P(hwndp));
-            c->column = 1;
-        }
     }
 
     /*
@@ -173,16 +158,18 @@ void win_setup_config_box(struct controlbox *b, HWND *hwndp, bool has_help,
                       I(CONF_beep_ind),
                       "Disabled", I(B_IND_DISABLED),
                       "Flashing", I(B_IND_FLASH),
-                      "Steady", I(B_IND_STEADY));
+                      "Steady", I(B_IND_STEADY), NULL);
 
     /*
      * The sunken-edge border is a Windows GUI feature.
      */
     s = ctrl_getset(b, "Window/Appearance", "border",
                     "Adjust the window border");
+#ifdef WS_EX_CLIENTEDGE
     ctrl_checkbox(s, "Sunken-edge border (slightly thicker)", 's',
                   HELPCTX(appearance_border),
                   conf_checkbox_handler, I(CONF_sunken_edge));
+#endif
 
     /*
      * Configurable font quality settings for Windows.
@@ -198,7 +185,7 @@ void win_setup_config_box(struct controlbox *b, HWND *hwndp, bool has_help,
                       "Antialiased", I(FQ_ANTIALIASED),
                       "Non-Antialiased", I(FQ_NONANTIALIASED),
                       "ClearType", I(FQ_CLEARTYPE),
-                      "Default", I(FQ_DEFAULT));
+                      "Default", I(FQ_DEFAULT), NULL);
 
     /*
      * Cyrillic Lock is a horrid misfeature even on Windows, and
@@ -289,7 +276,7 @@ void win_setup_config_box(struct controlbox *b, HWND *hwndp, bool has_help,
                       I(CONF_mouse_is_xterm),
                       "Windows (Middle extends, Right brings up menu)", I(2),
                       "Compromise (Middle extends, Right pastes)", I(0),
-                      "xterm (Right extends, Middle pastes)", I(1));
+                      "xterm (Right extends, Middle pastes)", I(1), NULL);
     /*
      * This really ought to go at the _top_ of its box, not the
      * bottom, so we'll just do some shuffling now we've set it
@@ -328,7 +315,7 @@ void win_setup_config_box(struct controlbox *b, HWND *hwndp, bool has_help,
                           "Change the number of rows and columns", I(RESIZE_TERM),
                           "Change the size of the font", I(RESIZE_FONT),
                           "Change font size only when maximised", I(RESIZE_EITHER),
-                          "Forbid resizing completely", I(RESIZE_DISABLED));
+                          "Forbid resizing completely", I(RESIZE_DISABLED), NULL);
     }
 
     /*

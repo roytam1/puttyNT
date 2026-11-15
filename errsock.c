@@ -40,10 +40,14 @@ static const char *sk_error_socket_error(Socket *s)
 }
 
 static const SocketVtable ErrorSocket_sockvt = {
-    .plug = sk_error_plug,
-    .close = sk_error_close,
-    .socket_error = sk_error_socket_error,
-    .endpoint_info = nullsock_endpoint_info,
+    /* .plug = */ sk_error_plug,
+    /* .close = */ sk_error_close,
+    /* .write = */ NULL,
+    /* .write_oob = */ NULL,
+    /* .write_eof = */ NULL,
+    /* .set_frozen = */ NULL,
+    /* .socket_error = */ sk_error_socket_error,
+    /* .endpoint_info = */ nullsock_endpoint_info,
     /* other methods are NULL */
 };
 

@@ -45,34 +45,30 @@ static void wm_copydata_agent_query(strbuf *query, void **out, int *outlen)
         return;                        /* *out == NULL, so failure */
     mapname = dupprintf("PageantRequest%08x", (unsigned)GetCurrentThreadId());
 
+    /*
+     * Make the file mapping we create for communication with Pageant
+     * owned by the user SID rather than the default. This should make
+     * communication between processes with slightly different
+     * contexts more reliable: in particular, command prompts launched
+     * as administrator should still be able to run PSFTPs which refer
+     * back to the owning user's unprivileged Pageant.
+     */
     psa = NULL;
-    if (got_advapi()) {
-        /*
-         * Make the file mapping we create for communication with
-         * Pageant owned by the user SID rather than the default. This
-         * should make communication between processes with slightly
-         * different contexts more reliable: in particular, command
-         * prompts launched as administrator should still be able to
-         * run PSFTPs which refer back to the owning user's
-         * unprivileged Pageant.
-         */
-        usersid = get_user_sid();
-
-        if (usersid) {
-            psd = (PSECURITY_DESCRIPTOR)
-                LocalAlloc(LPTR, SECURITY_DESCRIPTOR_MIN_LENGTH);
-            if (psd) {
-                if (p_InitializeSecurityDescriptor(
-                        psd, SECURITY_DESCRIPTOR_REVISION) &&
-                    p_SetSecurityDescriptorOwner(psd, usersid, false)) {
-                    sa.nLength = sizeof(sa);
-                    sa.bInheritHandle = true;
-                    sa.lpSecurityDescriptor = psd;
-                    psa = &sa;
-                } else {
-                    LocalFree(psd);
-                    psd = NULL;
-                }
+    usersid = get_user_sid();
+    if (usersid) {
+        psd = (PSECURITY_DESCRIPTOR)
+            LocalAlloc(LPTR, SECURITY_DESCRIPTOR_MIN_LENGTH);
+        if (psd) {
+            if (InitializeSecurityDescriptor(
+                    psd, SECURITY_DESCRIPTOR_REVISION) &&
+                SetSecurityDescriptorOwner(psd, usersid, false)) {
+                sa.nLength = sizeof(sa);
+                sa.bInheritHandle = true;
+                sa.lpSecurityDescriptor = psd;
+                psa = &sa;
+            } else {
+                LocalFree(psd);
+                psd = NULL;
             }
         }
     }
@@ -162,10 +158,11 @@ static int named_pipe_agent_accumulate_response(
     put_data(sb, data, len);
     if (sb->len >= 4) {
         uint32_t length_field = GET_32BIT_MSB_FIRST(sb->u);
+        int overall_length;
         if (length_field > AGENT_MAX_MSGLEN)
             return -1; /* badly formatted message */
 
-        int overall_length = length_field + 4;
+        overall_length = length_field + 4;
         if (sb->len >= overall_length)
             return overall_length;
     }
@@ -177,6 +174,7 @@ static size_t named_pipe_agent_gotdata(
     struct handle *h, const void *data, size_t len, int err)
 {
     agent_pending_query *pq = handle_get_privdata(h);
+    int status;
 
     if (err || len == 0) {
         pq->callback(pq->callback_ctx, NULL, 0);
@@ -184,7 +182,7 @@ static size_t named_pipe_agent_gotdata(
         return 0;
     }
 
-    int status = named_pipe_agent_accumulate_response(pq->response, data, len);
+    status = named_pipe_agent_accumulate_response(pq->response, data, len);
     if (status == -1) {
         pq->callback(pq->callback_ctx, NULL, 0);
         agent_cancel_query(pq);
@@ -205,6 +203,7 @@ static agent_pending_query *named_pipe_agent_query(
     char *err = NULL, *pipename = NULL;
     strbuf *sb = NULL;
     HANDLE pipehandle;
+    DWORD done;
 
     pipename = agent_named_pipe_name();
     pipehandle = connect_to_named_pipe(pipename, &err);
@@ -213,10 +212,10 @@ static agent_pending_query *named_pipe_agent_query(
 
     strbuf_finalise_agent_query(query);
 
-    for (DWORD done = 0; done < query->len ;) {
+    for (done = 0; done < query->len ;) {
         DWORD nwritten;
         bool ret = WriteFile(pipehandle, query->s + done, query->len - done,
-                             &nwritten, NULL);
+                             &nwritten, NULL) != 0;
         if (!ret)
             goto failure;
 
@@ -230,7 +229,8 @@ static agent_pending_query *named_pipe_agent_query(
         do {
             char buf[1024];
             DWORD nread;
-            bool ret = ReadFile(pipehandle, buf, sizeof(buf), &nread, NULL);
+            bool ret = ReadFile(pipehandle, buf, sizeof(buf),
+                                &nread, NULL) != 0;
             if (!ret)
                 goto failure;
             status = named_pipe_agent_accumulate_response(sb, buf, nread);

@@ -89,13 +89,15 @@ HandleWait *add_handle_wait(HANDLE h, handle_wait_callback_fn_t callback,
                             void *callback_ctx)
 {
     HandleWait *hw = snew(HandleWait);
+    tree234 *t;
+    HandleWait *added;
     hw->handle = h;
     hw->callback = callback;
     hw->callback_ctx = callback_ctx;
 
-    tree234 *t = ensure_handlewaits_tree_exists();
+    t = ensure_handlewaits_tree_exists();
     hw->index = allocate_index();
-    HandleWait *added = add234(t, hw);
+    added = add234(t, hw);
     assert(added == hw);
 
     return hw;
@@ -115,7 +117,8 @@ HandleWaitList *get_handle_wait_list(void)
     struct HandleWaitListInner *hwli = snew(struct HandleWaitListInner);
     size_t n = 0;
     HandleWait *hw;
-    for (int i = 0; (hw = index234(t, i)) != NULL; i++) {
+    int i;
+    for (i = 0; (hw = index234(t, i)) != NULL; i++) {
         assert(n < MAXIMUM_WAIT_OBJECTS);
         hwli->hws[n] = hw;
         hwli->hwl.handles[n] = hw->handle;
@@ -129,9 +132,10 @@ void handle_wait_activate(HandleWaitList *hwl, int index)
 {
     struct HandleWaitListInner *hwli =
         container_of(hwl, struct HandleWaitListInner, hwl);
+    HandleWait *hw;
     assert(0 <= index);
     assert(index < hwli->hwl.nhandles);
-    HandleWait *hw = hwli->hws[index];
+    hw = hwli->hws[index];
     hw->callback(hw->callback_ctx);
 }
 

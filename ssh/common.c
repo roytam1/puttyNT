@@ -292,28 +292,28 @@ static bool zombiechan_want_close(Channel *chan, bool sent_eof, bool rcvd_eof);
 static char *zombiechan_log_close_msg(Channel *chan) { return NULL; }
 
 static const ChannelVtable zombiechan_channelvt = {
-    .free = zombiechan_free,
-    .open_confirmation = zombiechan_do_nothing,
-    .open_failed = zombiechan_open_failure,
-    .send = zombiechan_send,
-    .send_eof = zombiechan_do_nothing,
-    .set_input_wanted = zombiechan_set_input_wanted,
-    .log_close_msg = zombiechan_log_close_msg,
-    .want_close = zombiechan_want_close,
-    .rcvd_exit_status = chan_no_exit_status,
-    .rcvd_exit_signal = chan_no_exit_signal,
-    .rcvd_exit_signal_numeric = chan_no_exit_signal_numeric,
-    .run_shell = chan_no_run_shell,
-    .run_command = chan_no_run_command,
-    .run_subsystem = chan_no_run_subsystem,
-    .enable_x11_forwarding = chan_no_enable_x11_forwarding,
-    .enable_agent_forwarding = chan_no_enable_agent_forwarding,
-    .allocate_pty = chan_no_allocate_pty,
-    .set_env = chan_no_set_env,
-    .send_break = chan_no_send_break,
-    .send_signal = chan_no_send_signal,
-    .change_window_size = chan_no_change_window_size,
-    .request_response = chan_no_request_response,
+    /* .free = */ zombiechan_free,
+    /* .open_confirmation = */ zombiechan_do_nothing,
+    /* .open_failed = */ zombiechan_open_failure,
+    /* .send = */ zombiechan_send,
+    /* .send_eof = */ zombiechan_do_nothing,
+    /* .set_input_wanted = */ zombiechan_set_input_wanted,
+    /* .log_close_msg = */ zombiechan_log_close_msg,
+    /* .want_close = */ zombiechan_want_close,
+    /* .rcvd_exit_status = */ chan_no_exit_status,
+    /* .rcvd_exit_signal = */ chan_no_exit_signal,
+    /* .rcvd_exit_signal_numeric = */ chan_no_exit_signal_numeric,
+    /* .run_shell = */ chan_no_run_shell,
+    /* .run_command = */ chan_no_run_command,
+    /* .run_subsystem = */ chan_no_run_subsystem,
+    /* .enable_x11_forwarding = */ chan_no_enable_x11_forwarding,
+    /* .enable_agent_forwarding = */ chan_no_enable_agent_forwarding,
+    /* .allocate_pty = */ chan_no_allocate_pty,
+    /* .set_env = */ chan_no_set_env,
+    /* .send_break = */ chan_no_send_break,
+    /* .send_signal = */ chan_no_send_signal,
+    /* .change_window_size = */ chan_no_change_window_size,
+    /* .request_response = */ chan_no_request_response,
 };
 
 Channel *zombiechan_new(void)
@@ -862,6 +862,12 @@ SeatPromptResult verify_ssh_host_key(
     char **fingerprints, int ca_count,
     void (*callback)(void *ctx, SeatPromptResult result), void *ctx)
 {
+    int storage_status;
+    SeatDialogText *text;
+    const SeatDialogPromptDescriptions *pds;
+    FingerprintType fptype_default;
+    HelpCtx helpctx;
+    SeatPromptResult toret;
     /*
      * First, check if the Conf includes a manual specification of the
      * expected host key. If so, that completely supersedes everything
@@ -871,7 +877,8 @@ SeatPromptResult verify_ssh_host_key(
      */
     if (conf_get_str_nthstrkey(conf, CONF_ssh_manual_hostkeys, 0)) {
         if (fingerprints) {
-            for (size_t i = 0; i < SSH_N_FPTYPES; i++) {
+            size_t i;
+            for (i = 0; i < SSH_N_FPTYPES; i++) {
                 /*
                  * Each fingerprint string we've been given will have
                  * things like 'ssh-rsa 2048' at the front of it. Strip
@@ -879,9 +886,10 @@ SeatPromptResult verify_ssh_host_key(
                  * of the string.
                  */
                 const char *fingerprint = fingerprints[i];
+                const char *p;
                 if (!fingerprint)
                     continue;
-                const char *p = strrchr(fingerprint, ' ');
+                p = strrchr(fingerprint, ' ');
                 fingerprint = p ? p+1 : fingerprint;
                 if (conf_get_str_str_opt(conf, CONF_ssh_manual_hostkeys,
                                          fingerprint))
@@ -920,7 +928,7 @@ SeatPromptResult verify_ssh_host_key(
     /*
      * Next, check the host key cache.
      */
-    int storage_status = check_stored_host_key(host, port, keytype, keystr);
+    storage_status = check_stored_host_key(host, port, keytype, keystr);
     if (storage_status == 0) /* matching key was found in the cache */
         return SPR_OK;
 
@@ -928,17 +936,14 @@ SeatPromptResult verify_ssh_host_key(
      * The key is either missing from the cache, or does not match.
      * Either way, fall back to an interactive prompt from the Seat.
      */
-    SeatDialogText *text = seat_dialog_text_new();
-    const SeatDialogPromptDescriptions *pds =
-        seat_prompt_descriptions(iseat.seat);
+    text = seat_dialog_text_new();
+    pds = seat_prompt_descriptions(iseat.seat);
 
-    FingerprintType fptype_default =
-        ssh2_pick_default_fingerprint(fingerprints);
+    fptype_default = ssh2_pick_default_fingerprint(fingerprints);
 
     seat_dialog_text_append(
         text, SDT_TITLE, "%s Security Alert", appname);
 
-    HelpCtx helpctx;
 
     if (key && ssh_key_alg(key)->is_certificate) {
         seat_dialog_text_append(
@@ -1079,7 +1084,7 @@ SeatPromptResult verify_ssh_host_key(
                                 fingerprints[SSH_FPTYPE_MD5]);
     }
 
-    SeatPromptResult toret = seat_confirm_ssh_host_key(
+    toret = seat_confirm_ssh_host_key(
         iseat, host, port, keytype, keystr, text, helpctx, callback, ctx);
     seat_dialog_text_free(text);
     return toret;
@@ -1093,6 +1098,7 @@ SeatPromptResult confirm_weak_crypto_primitive(
     SeatDialogText *text = seat_dialog_text_new();
     const SeatDialogPromptDescriptions *pds =
         seat_prompt_descriptions(iseat.seat);
+    SeatPromptResult toret;
 
     seat_dialog_text_append(text, SDT_TITLE, "%s Security Alert", appname);
 
@@ -1143,7 +1149,7 @@ SeatPromptResult confirm_weak_crypto_primitive(
 
     seat_dialog_text_append(text, SDT_PROMPT, "Continue with connection?");
 
-    SeatPromptResult toret = seat_confirm_weak_crypto_primitive(
+    toret = seat_confirm_weak_crypto_primitive(
         iseat, text, callback, ctx);
     seat_dialog_text_free(text);
     return toret;
@@ -1156,6 +1162,8 @@ SeatPromptResult confirm_weak_cached_hostkey(
     SeatDialogText *text = seat_dialog_text_new();
     const SeatDialogPromptDescriptions *pds =
         seat_prompt_descriptions(iseat.seat);
+    SeatPromptResult toret;
+    const char **p;
 
     seat_dialog_text_append(text, SDT_TITLE, "%s Security Alert", appname);
 
@@ -1169,7 +1177,7 @@ SeatPromptResult confirm_weak_cached_hostkey(
         "The server also provides the following types of host key "
         "above the threshold, which we do not have stored:");
 
-    for (const char **p = betteralgs; *p; p++)
+    for (p = betteralgs; *p; p++)
         seat_dialog_text_append(text, SDT_DISPLAY, "%s", *p);
 
     /* In batch mode, we print the above information and then this
@@ -1183,7 +1191,7 @@ SeatPromptResult confirm_weak_cached_hostkey(
 
     seat_dialog_text_append(text, SDT_PROMPT, "Continue with connection?");
 
-    SeatPromptResult toret = seat_confirm_weak_cached_hostkey(
+    toret = seat_confirm_weak_cached_hostkey(
         iseat, text, callback, ctx);
     seat_dialog_text_free(text);
     return toret;
@@ -1226,7 +1234,7 @@ bool ssh1_common_filter_queue(PacketProtocolLayer *ppl)
 
           case SSH1_MSG_DEBUG:
             msg = get_string(pktin);
-            ppl_logevent("Remote debug message: %.*s", PTRLEN_PRINTF(msg));
+            ppl_logevent(("Remote debug message: %.*s", PTRLEN_PRINTF(msg)));
             pq_pop(ppl->in_pq);
             break;
 
@@ -1248,10 +1256,11 @@ void ssh1_compute_session_id(
     RSAKey *hostkey, RSAKey *servkey)
 {
     ssh_hash *hash = ssh_hash_new(&ssh_md5);
+    size_t i;
 
-    for (size_t i = (mp_get_nbits(hostkey->modulus) + 7) / 8; i-- ;)
+    for (i = (mp_get_nbits(hostkey->modulus) + 7) / 8; i-- ;)
         put_byte(hash, mp_get_byte(hostkey->modulus, i));
-    for (size_t i = (mp_get_nbits(servkey->modulus) + 7) / 8; i-- ;)
+    for (i = (mp_get_nbits(servkey->modulus) + 7) / 8; i-- ;)
         put_byte(hash, mp_get_byte(servkey->modulus, i));
     put_data(hash, cookie, 8);
     ssh_hash_final(hash, session_id);
@@ -1269,8 +1278,9 @@ void ssh_spr_close(Ssh *ssh, SeatPromptResult spr, const char *context)
     if (spr.kind == SPRK_USER_ABORT) {
         ssh_user_close(ssh, "User aborted at %s", context);
     } else {
+        char *err;
         assert(spr.kind == SPRK_SW_ABORT);
-        char *err = spr_get_error_message(spr);
+        err = spr_get_error_message(spr);
         ssh_sw_abort(ssh, "%s", err);
         sfree(err);
     }

@@ -27,22 +27,20 @@ struct ShinyDialogBoxState {
  * CreateDialog itself, temporarily store the state pointer that we
  * won't store in the usual window-memory slot until later.
  *
- * I don't _intend_ that this system will need to be used in multiple
- * threads at all, let alone concurrently, but just in case, declaring
- * sdb_tempstate as thread-local will protect against that possibility.
+ * Only the GUI thread makes dialog boxes, so this needn't be
+ * thread-local (upstream PuTTY makes it so just in case).
  */
-static THREADLOCAL struct ShinyDialogBoxState *sdb_tempstate;
+static struct ShinyDialogBoxState *sdb_tempstate;
 
 static inline struct ShinyDialogBoxState *ShinyDialogGetState(HWND hwnd)
 {
     if (sdb_tempstate)
         return sdb_tempstate;
-    return (struct ShinyDialogBoxState *)GetWindowLongPtr(
-        hwnd, DLGWINDOWEXTRA);
+    return (struct ShinyDialogBoxState *)GetWindowLong(hwnd, DLGWINDOWEXTRA);
 }
 
-static INT_PTR CALLBACK ShinyRealDlgProc(HWND hwnd, UINT msg,
-                                         WPARAM wParam, LPARAM lParam)
+static BOOL CALLBACK ShinyRealDlgProc(HWND hwnd, UINT msg,
+                                      WPARAM wParam, LPARAM lParam)
 {
     struct ShinyDialogBoxState *state = ShinyDialogGetState(hwnd);
     return state->proc(hwnd, msg, wParam, lParam, state->ctx);
@@ -65,10 +63,14 @@ int ShinyDialogBox(HINSTANCE hinst, LPCTSTR tmpl, const char *winclass,
      * parameter.
      */
     WNDCLASS wc;
+    struct ShinyDialogBoxState state[1];
+    HWND hwnd;
+    MSG msg;
+    int gm;
     wc.style = CS_DBLCLKS | CS_SAVEBITS | CS_BYTEALIGNWINDOW;
     wc.lpfnWndProc = DefDlgProc;
     wc.cbClsExtra = 0;
-    wc.cbWndExtra = DLGWINDOWEXTRA + sizeof(LONG_PTR);
+    wc.cbWndExtra = DLGWINDOWEXTRA + sizeof(LONG);
     wc.hInstance = hinst;
     wc.hIcon = NULL;
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
@@ -77,18 +79,15 @@ int ShinyDialogBox(HINSTANCE hinst, LPCTSTR tmpl, const char *winclass,
     wc.lpszClassName = winclass;
     RegisterClass(&wc);
 
-    struct ShinyDialogBoxState state[1];
     state->ended = false;
     state->proc = proc;
     state->ctx = ctx;
 
     sdb_tempstate = state;
-    HWND hwnd = CreateDialog(hinst, tmpl, hwndparent, ShinyRealDlgProc);
-    SetWindowLongPtr(hwnd, DLGWINDOWEXTRA, (LONG_PTR)state);
+    hwnd = CreateDialog(hinst, tmpl, hwndparent, ShinyRealDlgProc);
+    SetWindowLong(hwnd, DLGWINDOWEXTRA, (LONG)state);
     sdb_tempstate = NULL;
 
-    MSG msg;
-    int gm;
     while ((gm = GetMessage(&msg, NULL, 0, 0)) > 0) {
         if (!state->ended && !IsDialogMessage(hwnd, &msg))
             DispatchMessage(&msg);

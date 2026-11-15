@@ -61,7 +61,7 @@ static void local_proxy_opener_free(DeferredSocketOpener *opener)
 }
 
 static const DeferredSocketOpenerVtable LocalProxyOpener_openervt = {
-    .free = local_proxy_opener_free,
+    /* .free = */ local_proxy_opener_free,
 };
 
 static char *local_proxy_opener_description(Interactor *itr)
@@ -88,10 +88,10 @@ static void local_proxy_opener_set_seat(Interactor *itr, Seat *seat)
 }
 
 static const InteractorVtable LocalProxyOpener_interactorvt = {
-    .description = local_proxy_opener_description,
-    .logpolicy = local_proxy_opener_logpolicy,
-    .get_seat = local_proxy_opener_get_seat,
-    .set_seat = local_proxy_opener_set_seat,
+    /* .description = */ local_proxy_opener_description,
+    /* .logpolicy = */ local_proxy_opener_logpolicy,
+    /* .get_seat = */ local_proxy_opener_get_seat,
+    /* .set_seat = */ local_proxy_opener_set_seat,
 };
 
 static void local_proxy_opener_cleanup_interactor(LocalProxyOpener *lp)
@@ -106,6 +106,8 @@ static void local_proxy_opener_cleanup_interactor(LocalProxyOpener *lp)
 static void local_proxy_opener_coroutine(void *vctx)
 {
     LocalProxyOpener *lp = (LocalProxyOpener *)vctx;
+    char *cmd;
+    char *error_msg;
 
     crBegin(lp->crLine);
 
@@ -160,8 +162,9 @@ static void local_proxy_opener_coroutine(void *vctx)
                      * without calling any crStop */
                     return;
                 } else if (spr.kind == SPRK_SW_ABORT) {
+                    char *err;
                     local_proxy_opener_cleanup_interactor(lp);
-                    char *err = spr_get_error_message(spr);
+                    err = spr_get_error_message(spr);
                     plug_closing_error(lp->plug, err);
                     sfree(err);
                     return; /* without crStop, as above */
@@ -219,12 +222,12 @@ static void local_proxy_opener_coroutine(void *vctx)
      * Now we're ready to actually do the platform-specific socket
      * setup.
      */
-    char *cmd = lp->formatted_cmd;
+    cmd = lp->formatted_cmd;
     lp->formatted_cmd = NULL;
 
     local_proxy_opener_cleanup_interactor(lp);
 
-    char *error_msg = platform_setup_local_proxy(lp->socket, cmd);
+    error_msg = platform_setup_local_proxy(lp->socket, cmd);
     burnstr(cmd);
 
     if (error_msg) {
@@ -266,8 +269,9 @@ DeferredSocketOpener *local_proxy_opener(
 void local_proxy_opener_set_socket(DeferredSocketOpener *opener,
                                    Socket *socket)
 {
+    LocalProxyOpener *lp;
     assert(opener->vt == &LocalProxyOpener_openervt);
-    LocalProxyOpener *lp = container_of(opener, LocalProxyOpener, opener);
+    lp = container_of(opener, LocalProxyOpener, opener);
     lp->socket = socket;
     queue_toplevel_callback(local_proxy_opener_coroutine, lp);
 }

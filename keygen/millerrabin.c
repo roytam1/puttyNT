@@ -183,6 +183,9 @@ static struct mr_result miller_rabin_test_inner(MillerRabin *mr, mp_int *mw)
     result.passed = result.potential_primitive_root = 0;
 
     while (bit-- > 1) {
+        unsigned first_iter;
+        unsigned is_plus_1;
+        unsigned is_minus_1;
         /*
          * In this iteration, we're computing w^(2e) or w^(2e+1),
          * where we have w^e from the previous iteration. So we square
@@ -201,14 +204,14 @@ static struct mr_result miller_rabin_test_inner(MillerRabin *mr, mp_int *mw)
          * generating intermediate results useful to M-R, so we also
          * set 'active', which stays set from then on.
          */
-        unsigned first_iter = mp_get_bit(mr->lowbit, bit);
+        first_iter = mp_get_bit(mr->lowbit, bit);
         active |= first_iter;
 
         /*
          * Check the intermediate result against both +1 and -1.
          */
-        unsigned is_plus_1 = mp_cmp_eq(acc, monty_identity(mr->mc));
-        unsigned is_minus_1 = mp_cmp_eq(acc, mr->m_pm1);
+        is_plus_1 = mp_cmp_eq(acc, monty_identity(mr->mc));
+        is_minus_1 = mp_cmp_eq(acc, mr->m_pm1);
 
         /*
          * M-R must report success iff either: the first of the useful
@@ -254,7 +257,7 @@ bool miller_rabin_test_random(MillerRabin *mr)
     mp_int *mw = mp_random_in_range(mr->two, mr->pm1);
     struct mr_result result = miller_rabin_test_inner(mr, mw);
     mp_free(mw);
-    return result.passed;
+    return result.passed != 0;
 }
 
 mp_int *miller_rabin_find_potential_primitive_root(MillerRabin *mr)

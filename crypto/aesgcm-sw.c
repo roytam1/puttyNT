@@ -34,12 +34,11 @@
 #include "aesgcm.h"
 
 /*
- * Store a 128-bit value in the most convenient form standard C will
- * let us, namely two uint64_t giving its most and least significant
- * halves.
+ * Store a 128-bit value as four uint32_t, from the most significant
+ * (w[0]) to the least significant (w[3]).
  */
 typedef struct {
-    uint64_t hi, lo;
+    uint32_t w[4];
 } value128_t;
 
 typedef struct aesgcm_sw {
@@ -69,8 +68,9 @@ static bool aesgcm_sw_available(void)
 static void aesgcm_sw_setkey_impl(aesgcm_sw *gcm, const unsigned char *var)
 {
     value128_t v;
-    v.hi = GET_64BIT_MSB_FIRST(var);
-    v.lo = GET_64BIT_MSB_FIRST(var + 8);
+    size_t i;
+    for (i = 0; i < 4; i++)
+        v.w[i] = GET_32BIT_MSB_FIRST(var + 4*i);
 
     /*
      * Prepare the table. This has to be done in reverse order, so
@@ -79,54 +79,59 @@ static void aesgcm_sw_setkey_impl(aesgcm_sw *gcm, const unsigned char *var)
      * logical specification so that's where the logical constant term
      * lives. (See more detailed comment in aesgcm-ref-poly.c.)
      */
-    for (size_t i = 0; i < 128; i++) {
+    for (i = 0; i < 128; i++) {
+        uint32_t lobit;
         gcm->table[127 - i] = v;
 
         /* Multiply v by x, which means shifting right (bit reversal
          * again) and then adding 0xE1 at the top if we shifted a 1 out. */
-        uint64_t lobit = v.lo & 1;
-        v.lo = (v.lo >> 1) ^ (v.hi << 63);
-        v.hi = (v.hi >> 1) ^ (0xE100000000000000ULL & -lobit);
+        lobit = v.w[3] & 1;
+        v.w[3] = (v.w[3] >> 1) ^ (v.w[2] << 31);
+        v.w[2] = (v.w[2] >> 1) ^ (v.w[1] << 31);
+        v.w[1] = (v.w[1] >> 1) ^ (v.w[0] << 31);
+        v.w[0] = (v.w[0] >> 1) ^ (0xE1000000 & -lobit);
     }
 }
 
 static inline void aesgcm_sw_setup(aesgcm_sw *gcm, const unsigned char *mask)
 {
-    gcm->mask.hi = GET_64BIT_MSB_FIRST(mask);
-    gcm->mask.lo = GET_64BIT_MSB_FIRST(mask + 8);
-    gcm->acc.hi = gcm->acc.lo = 0;
+    size_t i;
+    for (i = 0; i < 4; i++) {
+        gcm->mask.w[i] = GET_32BIT_MSB_FIRST(mask + 4*i);
+        gcm->acc.w[i] = 0;
+    }
 }
 
 static inline void aesgcm_sw_coeff(aesgcm_sw *gcm, const unsigned char *coeff)
 {
-    /* XOR in the new coefficient */
-    gcm->acc.hi ^= GET_64BIT_MSB_FIRST(coeff);
-    gcm->acc.lo ^= GET_64BIT_MSB_FIRST(coeff + 8);
-
-    /* And now just loop over the bits of acc, making up a new value
-     * by XORing together the entries of 'table' corresponding to set
-     * bits. */
-
     value128_t out;
-    out.lo = out.hi = 0;
+    const value128_t *tableptr;
+    size_t i, j;
+    /* XOR in the new coefficient */
+    for (j = 0; j < 4; j++)
+        gcm->acc.w[j] ^= GET_32BIT_MSB_FIRST(coeff + 4*j);
 
-    const value128_t *tableptr = gcm->table;
+    /* And now just loop over the bits of acc, from the least
+     * significant upwards, making up a new value by XORing together
+     * the entries of 'table' corresponding to set bits. */
 
-    for (size_t i = 0; i < 64; i++) {
-        uint64_t bit = 1 & gcm->acc.lo;
-        gcm->acc.lo >>= 1;
-        uint64_t mask = -bit;
-        out.hi ^= mask & tableptr->hi;
-        out.lo ^= mask & tableptr->lo;
-        tableptr++;
-    }
-    for (size_t i = 0; i < 64; i++) {
-        uint64_t bit = 1 & gcm->acc.hi;
-        gcm->acc.hi >>= 1;
-        uint64_t mask = -bit;
-        out.hi ^= mask & tableptr->hi;
-        out.lo ^= mask & tableptr->lo;
-        tableptr++;
+    for (j = 0; j < 4; j++)
+        out.w[j] = 0;
+
+    tableptr = gcm->table;
+
+    for (j = 4; j-- > 0 ;) {
+        for (i = 0; i < 32; i++) {
+            uint32_t bit = 1 & gcm->acc.w[j];
+            uint32_t mask;
+            gcm->acc.w[j] >>= 1;
+            mask = -bit;
+            out.w[0] ^= mask & tableptr->w[0];
+            out.w[1] ^= mask & tableptr->w[1];
+            out.w[2] ^= mask & tableptr->w[2];
+            out.w[3] ^= mask & tableptr->w[3];
+            tableptr++;
+        }
     }
 
     gcm->acc = out;
@@ -134,8 +139,9 @@ static inline void aesgcm_sw_coeff(aesgcm_sw *gcm, const unsigned char *coeff)
 
 static inline void aesgcm_sw_output(aesgcm_sw *gcm, unsigned char *output)
 {
-    PUT_64BIT_MSB_FIRST(output, gcm->acc.hi ^ gcm->mask.hi);
-    PUT_64BIT_MSB_FIRST(output + 8, gcm->acc.lo ^ gcm->mask.lo);
+    size_t i;
+    for (i = 0; i < 4; i++)
+        PUT_32BIT_MSB_FIRST(output + 4*i, gcm->acc.w[i] ^ gcm->mask.w[i]);
     smemclr(&gcm->acc, 16);
     smemclr(&gcm->mask, 16);
 }

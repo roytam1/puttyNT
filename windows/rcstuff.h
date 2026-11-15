@@ -5,15 +5,9 @@
 #ifndef PUTTY_RCSTUFF_H
 #define PUTTY_RCSTUFF_H
 
-#ifdef HAVE_CMAKE_H
-#include "cmake.h"
-#endif
+#include "ntconfig.h"
 
-#if HAVE_WINRESRC_H
-#include <winresrc.h>
-#elif HAVE_WINRES_H
-#include <winres.h>
-#endif
+#include <windows.h>
 
 /* Some systems don't define this, so I do it myself if necessary */
 #ifndef TCS_MULTILINE

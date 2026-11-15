@@ -31,6 +31,20 @@ void winselgui_clear_hwnd(void)
 const char *do_select(SOCKET skt, bool enable)
 {
     int msg, events;
+
+    if (!winsel_hwnd) {
+        /*
+         * A console tool without a window (see select-cli.c), which
+         * looks at its sockets with sk_poll. They must not block, as
+         * WSAAsyncSelect would have made sure.
+         */
+        u_long nonblocking = 1;
+        if (enable &&
+            p_ioctlsocket(skt, FIONBIO, &nonblocking) == SOCKET_ERROR)
+            return winsock_error_string(p_WSAGetLastError());
+        return NULL;
+    }
+
     if (enable) {
         msg = WM_NETEVENT;
         events = (FD_CONNECT | FD_READ | FD_WRITE |
@@ -38,8 +52,6 @@ const char *do_select(SOCKET skt, bool enable)
     } else {
         msg = events = 0;
     }
-
-    assert(winsel_hwnd);
 
     if (p_WSAAsyncSelect(skt, winsel_hwnd, msg, events) == SOCKET_ERROR)
         return winsock_error_string(p_WSAGetLastError());
@@ -56,10 +68,10 @@ struct wm_netevent_params {
 static bool callback_is_for_socket(
     void *predicate_ctx, toplevel_callback_fn_t fn, void *callback_ctx)
 {
+    struct wm_netevent_params *params;
     if (fn != wm_netevent_callback)
         return false;
-    struct wm_netevent_params *params =
-        (struct wm_netevent_params *)callback_ctx;
+    params = (struct wm_netevent_params *)callback_ctx;
     if (params->wParam != (WPARAM)(uintptr_t)predicate_ctx)
         return false;
 
@@ -72,6 +84,8 @@ static bool callback_is_for_socket(
 
 void done_with_socket(SOCKET skt)
 {
+    if (!winsel_hwnd)
+        return;                        /* no messages to wait for */
     if (!moribund_sockets)
         moribund_sockets = newtree234(moribund_socket_cmp);
     PostMessage(winsel_hwnd, WM_DONE_WITH_SOCKET, (WPARAM)skt, 0);
@@ -88,6 +102,7 @@ static void wm_netevent_callback(void *vctx)
 
 void winselgui_response(UINT message, WPARAM wParam, LPARAM lParam)
 {
+    struct wm_netevent_params *params;
     if (message == WM_DONE_WITH_SOCKET) {
         del234(moribund_sockets, (void *)wParam);
         return;
@@ -102,7 +117,7 @@ void winselgui_response(UINT message, WPARAM wParam, LPARAM lParam)
      * don't call select_result directly from this handler but instead
      * wait until we're back out at the top level of the message loop.
      */
-    struct wm_netevent_params *params = snew(struct wm_netevent_params);
+    params = snew(struct wm_netevent_params);
     params->wParam = wParam;
     params->lParam = lParam;
     queue_toplevel_callback(wm_netevent_callback, params);

@@ -124,14 +124,14 @@ static const char *sshproxy_socket_error(Socket *s)
 }
 
 static const SocketVtable SshProxy_sock_vt = {
-    .plug = sshproxy_plug,
-    .close = sshproxy_close,
-    .write = sshproxy_write,
-    .write_oob = sshproxy_write_oob,
-    .write_eof = sshproxy_write_eof,
-    .set_frozen = sshproxy_set_frozen,
-    .socket_error = sshproxy_socket_error,
-    .endpoint_info = nullsock_endpoint_info,
+    /* .plug = */ sshproxy_plug,
+    /* .close = */ sshproxy_close,
+    /* .write = */ sshproxy_write,
+    /* .write_oob = */ sshproxy_write_oob,
+    /* .write_eof = */ sshproxy_write_eof,
+    /* .set_frozen = */ sshproxy_set_frozen,
+    /* .socket_error = */ sshproxy_socket_error,
+    /* .endpoint_info = */ nullsock_endpoint_info,
 };
 
 static void sshproxy_eventlog(LogPolicy *lp, const char *event)
@@ -146,6 +146,7 @@ static int sshproxy_askappend(LogPolicy *lp, Filename *filename,
                               void *ctx)
 {
     SshProxy *sp = container_of(lp, SshProxy, logpolicy);
+    char *msg;
 
     /*
      * If we have access to the outer LogPolicy, pass on this request
@@ -157,8 +158,8 @@ static int sshproxy_askappend(LogPolicy *lp, Filename *filename,
     /*
      * Otherwise, fall back to the safe noninteractive assumption.
      */
-    char *msg = dupprintf("Log file \"%s\" already exists; logging cancelled",
-                          filename_to_str(filename));
+    msg = dupprintf("Log file \"%s\" already exists; logging cancelled",
+                    filename_to_str(filename));
     sshproxy_eventlog(lp, msg);
     sfree(msg);
     return 0;
@@ -167,6 +168,7 @@ static int sshproxy_askappend(LogPolicy *lp, Filename *filename,
 static void sshproxy_logging_error(LogPolicy *lp, const char *event)
 {
     SshProxy *sp = container_of(lp, SshProxy, logpolicy);
+    char *msg;
 
     /*
      * If we have access to the outer LogPolicy, pass on this request
@@ -181,16 +183,16 @@ static void sshproxy_logging_error(LogPolicy *lp, const char *event)
      * Otherwise, the best we can do is to put it in the outer SSH
      * connection's Event Log.
      */
-    char *msg = dupprintf("Logging error: %s", event);
+    msg = dupprintf("Logging error: %s", event);
     sshproxy_eventlog(lp, msg);
     sfree(msg);
 }
 
 static const LogPolicyVtable SshProxy_logpolicy_vt = {
-    .eventlog = sshproxy_eventlog,
-    .askappend = sshproxy_askappend,
-    .logging_error = sshproxy_logging_error,
-    .verbose = null_lp_verbose_no,
+    /* .eventlog = */ sshproxy_eventlog,
+    /* .askappend = */ sshproxy_askappend,
+    /* .logging_error = */ sshproxy_logging_error,
+    /* .verbose = */ null_lp_verbose_no,
 };
 
 /*
@@ -204,8 +206,9 @@ static const LogPolicyVtable SshProxy_logpolicy_vt = {
 static void sshproxy_error(SshProxy *sp, const char *fmt, ...)
 {
     va_list ap;
+    char *msg;
     va_start(ap, fmt);
-    char *msg = dupvprintf(fmt, ap);
+    msg = dupvprintf(fmt, ap);
     va_end(ap);
 
     if (!sp->errmsg)
@@ -436,8 +439,9 @@ static SeatPromptResult sshproxy_confirm_ssh_host_key(
 
 static void sshproxy_format_seatdialogtext(strbuf *sb, SeatDialogText *text)
 {
-    for (SeatDialogTextItem *item = text->items,
-             *end = item+text->nitems; item < end; item++) {
+    SeatDialogTextItem *item;
+    SeatDialogTextItem *end;
+    for (item = text->items, end = item+text->nitems; item < end; item++) {
         switch (item->type) {
           case SDT_SCARY_HEADING:
           case SDT_PARA:
@@ -463,6 +467,7 @@ static SeatPromptResult sshproxy_confirm_weak_crypto_primitive(
     void (*callback)(void *ctx, SeatPromptResult result), void *ctx)
 {
     SshProxy *sp = container_of(seat, SshProxy, seat);
+    strbuf *sb;
 
     if (sp->clientseat) {
         /*
@@ -477,7 +482,7 @@ static SeatPromptResult sshproxy_confirm_weak_crypto_primitive(
      * Otherwise, behave as if we're in batch mode: take the safest
      * option.
      */
-    strbuf *sb = strbuf_new();
+    sb = strbuf_new();
     sshproxy_format_seatdialogtext(sb, text);
     sshproxy_error(sp, sb->s);
     strbuf_free(sb);
@@ -491,6 +496,7 @@ static SeatPromptResult sshproxy_confirm_weak_cached_hostkey(
     void (*callback)(void *ctx, SeatPromptResult result), void *ctx)
 {
     SshProxy *sp = container_of(seat, SshProxy, seat);
+    strbuf *sb;
 
     if (sp->clientseat) {
         /*
@@ -505,7 +511,7 @@ static SeatPromptResult sshproxy_confirm_weak_cached_hostkey(
      * Otherwise, behave as if we're in batch mode: take the safest
      * option.
      */
-    strbuf *sb = strbuf_new();
+    sb = strbuf_new();
     sshproxy_format_seatdialogtext(sb, text);
     sshproxy_error(sp, sb->s);
     strbuf_free(sb);
@@ -564,35 +570,35 @@ static bool sshproxy_interactive(Seat *seat)
 }
 
 static const SeatVtable SshProxy_seat_vt = {
-    .output = sshproxy_output,
-    .eof = sshproxy_eof,
-    .sent = sshproxy_sent,
-    .banner = sshproxy_banner,
-    .get_userpass_input = sshproxy_get_userpass_input,
-    .notify_session_started = sshproxy_notify_session_started,
-    .notify_remote_exit = nullseat_notify_remote_exit,
-    .notify_remote_disconnect = sshproxy_notify_remote_disconnect,
-    .connection_fatal = sshproxy_connection_fatal,
-    .nonfatal = sshproxy_nonfatal,
-    .update_specials_menu = nullseat_update_specials_menu,
-    .get_ttymode = nullseat_get_ttymode,
-    .set_busy_status = nullseat_set_busy_status,
-    .confirm_ssh_host_key = sshproxy_confirm_ssh_host_key,
-    .confirm_weak_crypto_primitive = sshproxy_confirm_weak_crypto_primitive,
-    .confirm_weak_cached_hostkey = sshproxy_confirm_weak_cached_hostkey,
-    .prompt_descriptions = sshproxy_prompt_descriptions,
-    .is_utf8 = nullseat_is_never_utf8,
-    .echoedit_update = nullseat_echoedit_update,
-    .get_display = nullseat_get_display,
-    .get_windowid = nullseat_get_windowid,
-    .get_window_pixel_size = nullseat_get_window_pixel_size,
-    .stripctrl_new = sshproxy_stripctrl_new,
-    .set_trust_status = sshproxy_set_trust_status,
-    .can_set_trust_status = sshproxy_can_set_trust_status,
-    .has_mixed_input_stream = nullseat_has_mixed_input_stream_no,
-    .verbose = sshproxy_verbose,
-    .interactive = sshproxy_interactive,
-    .get_cursor_position = nullseat_get_cursor_position,
+    /* .output = */ sshproxy_output,
+    /* .eof = */ sshproxy_eof,
+    /* .sent = */ sshproxy_sent,
+    /* .banner = */ sshproxy_banner,
+    /* .get_userpass_input = */ sshproxy_get_userpass_input,
+    /* .notify_session_started = */ sshproxy_notify_session_started,
+    /* .notify_remote_exit = */ nullseat_notify_remote_exit,
+    /* .notify_remote_disconnect = */ sshproxy_notify_remote_disconnect,
+    /* .connection_fatal = */ sshproxy_connection_fatal,
+    /* .nonfatal = */ sshproxy_nonfatal,
+    /* .update_specials_menu = */ nullseat_update_specials_menu,
+    /* .get_ttymode = */ nullseat_get_ttymode,
+    /* .set_busy_status = */ nullseat_set_busy_status,
+    /* .confirm_ssh_host_key = */ sshproxy_confirm_ssh_host_key,
+    /* .confirm_weak_crypto_primitive = */ sshproxy_confirm_weak_crypto_primitive,
+    /* .confirm_weak_cached_hostkey = */ sshproxy_confirm_weak_cached_hostkey,
+    /* .prompt_descriptions = */ sshproxy_prompt_descriptions,
+    /* .is_utf8 = */ nullseat_is_never_utf8,
+    /* .echoedit_update = */ nullseat_echoedit_update,
+    /* .get_display = */ nullseat_get_display,
+    /* .get_windowid = */ nullseat_get_windowid,
+    /* .get_window_pixel_size = */ nullseat_get_window_pixel_size,
+    /* .stripctrl_new = */ sshproxy_stripctrl_new,
+    /* .set_trust_status = */ sshproxy_set_trust_status,
+    /* .can_set_trust_status = */ sshproxy_can_set_trust_status,
+    /* .has_mixed_input_stream = */ nullseat_has_mixed_input_stream_no,
+    /* .verbose = */ sshproxy_verbose,
+    /* .interactive = */ sshproxy_interactive,
+    /* .get_cursor_position = */ nullseat_get_cursor_position,
 };
 
 Socket *sshproxy_new_connection(SockAddr *addr, const char *hostname,
@@ -602,6 +608,14 @@ Socket *sshproxy_new_connection(SockAddr *addr, const char *hostname,
                                 Interactor *clientitr)
 {
     SshProxy *sp = snew(SshProxy);
+    const char *proxy_hostname;
+    const char *proxy_username;
+    const char *proxy_password;
+    const struct BackendVtable *backvt;
+    int proxy_type;
+    char *error;
+    char *realhost;
+    const char *subkey;
     memset(sp, 0, sizeof(*sp));
 
     sp->sock.vt = &SshProxy_sock_vt;
@@ -618,7 +632,7 @@ Socket *sshproxy_new_connection(SockAddr *addr, const char *hostname,
     /* Try to treat proxy_hostname as the title of a saved session. If
      * that fails, set up a default Conf of our own treating it as a
      * hostname. */
-    const char *proxy_hostname = conf_get_str(clientconf, CONF_proxy_host);
+    proxy_hostname = conf_get_str(clientconf, CONF_proxy_host);
     if (do_defaults(proxy_hostname, sp->conf)) {
         if (!conf_launchable(sp->conf)) {
             sp->errmsg = dupprintf("saved session '%s' is not launchable",
@@ -636,17 +650,17 @@ Socket *sshproxy_new_connection(SockAddr *addr, const char *hostname,
         conf_set_int(sp->conf, CONF_port,
                      conf_get_int(clientconf, CONF_proxy_port));
     }
-    const char *proxy_username = conf_get_str(clientconf, CONF_proxy_username);
+    proxy_username = conf_get_str(clientconf, CONF_proxy_username);
     if (*proxy_username)
         conf_set_str(sp->conf, CONF_username, proxy_username);
 
-    const char *proxy_password = conf_get_str(clientconf, CONF_proxy_password);
+    proxy_password = conf_get_str(clientconf, CONF_proxy_password);
     if (*proxy_password) {
         sp->proxy_password = dupstr(proxy_password);
         sp->got_proxy_password = true;
     }
 
-    const struct BackendVtable *backvt = backend_vt_from_proto(
+    backvt = backend_vt_from_proto(
         conf_get_int(sp->conf, CONF_protocol));
 
     /*
@@ -681,7 +695,7 @@ Socket *sshproxy_new_connection(SockAddr *addr, const char *hostname,
     conf_set_bool(sp->conf, CONF_ssh_connection_sharing_upstream, false);
     conf_set_bool(sp->conf, CONF_x11_forward, false);
     conf_set_bool(sp->conf, CONF_agentfwd, false);
-    for (const char *subkey;
+    for (;
          (subkey = conf_get_str_nthstrkey(sp->conf, CONF_portfwd, 0)) != NULL;)
         conf_del_str_str(sp->conf, CONF_portfwd, subkey);
 
@@ -692,7 +706,7 @@ Socket *sshproxy_new_connection(SockAddr *addr, const char *hostname,
      */
     conf_set_bool(sp->conf, CONF_ssh_simple, true);
 
-    int proxy_type = conf_get_int(clientconf, CONF_proxy_type);
+    proxy_type = conf_get_int(clientconf, CONF_proxy_type);
     switch (proxy_type) {
       case PROXY_SSH_TCPIP:
         /*
@@ -706,6 +720,7 @@ Socket *sshproxy_new_connection(SockAddr *addr, const char *hostname,
       case PROXY_SSH_SUBSYSTEM:
       case PROXY_SSH_EXEC: {
         Conf *cmd_conf = conf_copy(clientconf);
+        char *cmd;
 
         /*
          * Unlike the Telnet and Local proxy types, we don't use the
@@ -716,7 +731,7 @@ Socket *sshproxy_new_connection(SockAddr *addr, const char *hostname,
         conf_set_str(cmd_conf, CONF_proxy_username, "");
         conf_set_str(cmd_conf, CONF_proxy_password, "");
 
-        char *cmd = format_telnet_command(sp->addr, sp->port, cmd_conf, NULL);
+        cmd = format_telnet_command(sp->addr, sp->port, cmd_conf, NULL);
         conf_free(cmd_conf);
 
         conf_set_str(sp->conf, CONF_remote_cmd, cmd);
@@ -742,7 +757,6 @@ Socket *sshproxy_new_connection(SockAddr *addr, const char *hostname,
 
     sp->logctx = log_init(&sp->logpolicy, sp->conf);
 
-    char *error, *realhost;
     error = backend_init(backvt, &sp->seat, &sp->backend, sp->logctx, sp->conf,
                          conf_get_str(sp->conf, CONF_host),
                          conf_get_int(sp->conf, CONF_port),

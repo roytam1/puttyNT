@@ -16,6 +16,7 @@ static ssh_cipher *des_xdmauth_cipher(const void *vkeydata)
     unsigned char key[8];
     int i, nbits, j;
     unsigned int bits;
+    ssh_cipher *c;
 
     bits = 0;
     nbits = 0;
@@ -31,7 +32,7 @@ static ssh_cipher *des_xdmauth_cipher(const void *vkeydata)
         nbits -= 7;
     }
 
-    ssh_cipher *c = ssh_cipher_new(&ssh_des);
+    c = ssh_cipher_new(&ssh_des);
     ssh_cipher_setkey(c, key);
     smemclr(key, sizeof(key));
     ssh_cipher_setiv(c, key);

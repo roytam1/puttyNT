@@ -10,23 +10,10 @@
 #include "putty.h"
 #include "storage.h"
 
-#include <shlobj.h>
-#ifndef CSIDL_APPDATA
-#define CSIDL_APPDATA 0x001a
-#endif
-#ifndef CSIDL_LOCAL_APPDATA
-#define CSIDL_LOCAL_APPDATA 0x001c
-#endif
-
 static const char *const reg_jumplist_key = PUTTY_REG_POS "\\Jumplist";
 static const char *const reg_jumplist_value = "Recent sessions";
 static const char *const puttystr = PUTTY_REG_POS "\\Sessions";
 static const char *const host_ca_key = PUTTY_REG_POS "\\SshHostCAs";
-
-static bool tried_shgetfolderpath = false;
-static HMODULE shell32_module = NULL;
-DECL_WINDOWS_FUNCTION(static, HRESULT, SHGetFolderPathA,
-                      (HWND, int, HANDLE, DWORD, LPSTR));
 
 struct settings_w {
     HKEY sesskey;
@@ -34,15 +21,18 @@ struct settings_w {
 
 settings_w *open_settings_w(const char *sessionname, char **errmsg)
 {
+    strbuf *sb;
+    HKEY sesskey;
+    settings_w *handle;
     *errmsg = NULL;
 
     if (!sessionname || !*sessionname)
         sessionname = "Default Settings";
 
-    strbuf *sb = strbuf_new();
+    sb = strbuf_new();
     escape_registry_key(sessionname, sb);
 
-    HKEY sesskey = create_regkey(HKEY_CURRENT_USER, puttystr, sb->s);
+    sesskey = create_regkey(HKEY_CURRENT_USER, puttystr, sb->s, NULL);
     if (!sesskey) {
         *errmsg = dupprintf("Unable to create registry key\n"
                             "HKEY_CURRENT_USER\\%s\\%s", puttystr, sb->s);
@@ -51,7 +41,7 @@ settings_w *open_settings_w(const char *sessionname, char **errmsg)
     }
     strbuf_free(sb);
 
-    settings_w *handle = snew(settings_w);
+    handle = snew(settings_w);
     handle->sesskey = sesskey;
     return handle;
 }
@@ -80,18 +70,21 @@ struct settings_r {
 
 settings_r *open_settings_r(const char *sessionname)
 {
+    strbuf *sb;
+    HKEY sesskey;
+    settings_r *handle;
     if (!sessionname || !*sessionname)
         sessionname = "Default Settings";
 
-    strbuf *sb = strbuf_new();
+    sb = strbuf_new();
     escape_registry_key(sessionname, sb);
-    HKEY sesskey = open_regkey_ro(HKEY_CURRENT_USER, puttystr, sb->s);
+    sesskey = open_regkey_ro(HKEY_CURRENT_USER, puttystr, sb->s, NULL);
     strbuf_free(sb);
 
     if (!sesskey)
         return NULL;
 
-    settings_r *handle = snew(settings_r);
+    handle = snew(settings_r);
     handle->sesskey = sesskey;
     return handle;
 }
@@ -123,7 +116,7 @@ FontSpec *read_setting_fontspec(settings_r *handle, const char *name)
     if (!fontname)
         return NULL;
 
-    settingname = dupcat(name, "IsBold");
+    settingname = dupcat(name, "IsBold", NULL);
     isbold = read_setting_i(handle, settingname, -1);
     sfree(settingname);
     if (isbold == -1) {
@@ -131,7 +124,7 @@ FontSpec *read_setting_fontspec(settings_r *handle, const char *name)
         return NULL;
     }
 
-    settingname = dupcat(name, "CharSet");
+    settingname = dupcat(name, "CharSet", NULL);
     charset = read_setting_i(handle, settingname, -1);
     sfree(settingname);
     if (charset == -1) {
@@ -139,7 +132,7 @@ FontSpec *read_setting_fontspec(settings_r *handle, const char *name)
         return NULL;
     }
 
-    settingname = dupcat(name, "Height");
+    settingname = dupcat(name, "Height", NULL);
     height = read_setting_i(handle, settingname, INT_MIN);
     sfree(settingname);
     if (height == INT_MIN) {
@@ -147,7 +140,7 @@ FontSpec *read_setting_fontspec(settings_r *handle, const char *name)
         return NULL;
     }
 
-    ret = fontspec_new(fontname, isbold, height, charset);
+    ret = fontspec_new(fontname, isbold != 0, height, charset);
     sfree(fontname);
     return ret;
 }
@@ -158,13 +151,13 @@ void write_setting_fontspec(settings_w *handle,
     char *settingname;
 
     write_setting_s(handle, name, font->name);
-    settingname = dupcat(name, "IsBold");
+    settingname = dupcat(name, "IsBold", NULL);
     write_setting_i(handle, settingname, font->isbold);
     sfree(settingname);
-    settingname = dupcat(name, "CharSet");
+    settingname = dupcat(name, "CharSet", NULL);
     write_setting_i(handle, settingname, font->charset);
     sfree(settingname);
-    settingname = dupcat(name, "Height");
+    settingname = dupcat(name, "Height", NULL);
     write_setting_i(handle, settingname, font->height);
     sfree(settingname);
 }
@@ -212,11 +205,12 @@ void close_settings_r(settings_r *handle)
 
 void del_settings(const char *sessionname)
 {
-    HKEY rkey = open_regkey_rw(HKEY_CURRENT_USER, puttystr);
+    HKEY rkey = open_regkey_rw(HKEY_CURRENT_USER, puttystr, NULL);
+    strbuf *sb;
     if (!rkey)
         return;
 
-    strbuf *sb = strbuf_new();
+    sb = strbuf_new();
     escape_registry_key(sessionname, sb);
     del_regkey(rkey, sb->s);
     strbuf_free(sb);
@@ -233,11 +227,12 @@ struct settings_e {
 
 settings_e *enum_settings_start(void)
 {
-    HKEY key = open_regkey_ro(HKEY_CURRENT_USER, puttystr);
+    HKEY key = open_regkey_ro(HKEY_CURRENT_USER, puttystr, NULL);
+    settings_e *e;
     if (!key)
         return NULL;
 
-    settings_e *e = snew(settings_e);
+    e = snew(settings_e);
     if (e) {
         e->key = key;
         e->i = 0;
@@ -267,7 +262,7 @@ void enum_settings_finish(settings_e *e)
 static void hostkey_regname(strbuf *sb, const char *hostname,
                             int port, const char *keytype)
 {
-    put_fmt(sb, "%s@%d:", keytype, port);
+    BinarySink_put_fmt(BinarySink_UPCAST(sb), "%s@%d:", keytype, port);
     escape_registry_key(hostname, sb);
 }
 
@@ -278,16 +273,19 @@ int check_stored_host_key(const char *hostname, int port,
      * Read a saved key in from the registry and see what it says.
      */
     strbuf *regname = strbuf_new();
+    HKEY rkey;
+    char *otherstr;
+    int compare;
     hostkey_regname(regname, hostname, port, keytype);
 
-    HKEY rkey = open_regkey_ro(HKEY_CURRENT_USER,
-                               PUTTY_REG_POS "\\SshHostKeys");
+    rkey = open_regkey_ro(HKEY_CURRENT_USER,
+                          PUTTY_REG_POS "\\SshHostKeys", NULL);
     if (!rkey) {
         strbuf_free(regname);
         return 1;                      /* key does not exist in registry */
     }
 
-    char *otherstr = get_reg_sz(rkey, regname->s);
+    otherstr = get_reg_sz(rkey, regname->s);
     if (!otherstr && !strcmp(keytype, "rsa")) {
         /*
          * Key didn't exist. If the key type is RSA, we'll try
@@ -350,7 +348,7 @@ int check_stored_host_key(const char *hostname, int port,
 
     close_regkey(rkey);
 
-    int compare = otherstr ? strcmp(otherstr, key) : -1;
+    compare = otherstr ? strcmp(otherstr, key) : -1;
 
     sfree(otherstr);
     strbuf_free(regname);
@@ -377,10 +375,11 @@ void store_host_key(Seat *seat, const char *hostname, int port,
                     const char *keytype, const char *key)
 {
     strbuf *regname = strbuf_new();
+    HKEY rkey;
     hostkey_regname(regname, hostname, port, keytype);
 
-    HKEY rkey = create_regkey(HKEY_CURRENT_USER,
-                              PUTTY_REG_POS "\\SshHostKeys");
+    rkey = create_regkey(HKEY_CURRENT_USER,
+                         PUTTY_REG_POS "\\SshHostKeys", NULL);
     if (rkey) {
         put_reg_sz(rkey, regname->s, key);
         close_regkey(rkey);
@@ -399,7 +398,7 @@ host_ca_enum *enum_host_ca_start(void)
     host_ca_enum *e;
     HKEY key;
 
-    if (!(key = open_regkey_ro(HKEY_CURRENT_USER, host_ca_key)))
+    if (!(key = open_regkey_ro(HKEY_CURRENT_USER, host_ca_key, NULL)))
         return NULL;
 
     e = snew(host_ca_enum);
@@ -431,19 +430,21 @@ host_ca *host_ca_load(const char *name)
 {
     strbuf *sb;
     const char *s;
+    HKEY rkey;
+    host_ca *hca;
+    DWORD val;
 
     sb = strbuf_new();
     escape_registry_key(name, sb);
-    HKEY rkey = open_regkey_ro(HKEY_CURRENT_USER, host_ca_key, sb->s);
+    rkey = open_regkey_ro(HKEY_CURRENT_USER, host_ca_key, sb->s, NULL);
     strbuf_free(sb);
 
     if (!rkey)
         return NULL;
 
-    host_ca *hca = host_ca_new();
+    hca = host_ca_new();
     hca->name = dupstr(name);
 
-    DWORD val;
 
     if ((s = get_reg_sz(rkey, "PublicKey")) != NULL)
         hca->ca_public_key = base64_decode_sb(ptrlen_from_asciz(s));
@@ -453,10 +454,11 @@ host_ca *host_ca_load(const char *name)
             percent_decode_sb(ptrlen_from_asciz(s)));
     } else if ((sb = get_reg_multi_sz(rkey, "MatchHosts")) != NULL) {
         BinarySource src[1];
-        BinarySource_BARE_INIT_PL(src, ptrlen_from_strbuf(sb));
-        CertExprBuilder *eb = cert_expr_builder_new();
-
+        CertExprBuilder *eb;
         const char *wc;
+        BinarySource_BARE_INIT_PL(src, ptrlen_from_strbuf(sb));
+        eb = cert_expr_builder_new();
+
         while (wc = get_asciz(src), !get_err(src))
             cert_expr_builder_add(eb, wc);
 
@@ -465,11 +467,11 @@ host_ca *host_ca_load(const char *name)
     }
 
     if (get_reg_dword(rkey, "PermitRSASHA1", &val))
-        hca->opts.permit_rsa_sha1 = val;
+        hca->opts.permit_rsa_sha1 = val != 0;
     if (get_reg_dword(rkey, "PermitRSASHA256", &val))
-        hca->opts.permit_rsa_sha256 = val;
+        hca->opts.permit_rsa_sha256 = val != 0;
     if (get_reg_dword(rkey, "PermitRSASHA512", &val))
-        hca->opts.permit_rsa_sha512 = val;
+        hca->opts.permit_rsa_sha512 = val != 0;
 
     close_regkey(rkey);
     return hca;
@@ -477,12 +479,16 @@ host_ca *host_ca_load(const char *name)
 
 char *host_ca_save(host_ca *hca)
 {
+    strbuf *sb;
+    HKEY rkey;
+    strbuf *base64_pubkey;
+    strbuf *validity;
     if (!*hca->name)
         return dupstr("CA record must have a name");
 
-    strbuf *sb = strbuf_new();
+    sb = strbuf_new();
     escape_registry_key(hca->name, sb);
-    HKEY rkey = create_regkey(HKEY_CURRENT_USER, host_ca_key, sb->s);
+    rkey = create_regkey(HKEY_CURRENT_USER, host_ca_key, sb->s, NULL);
     if (!rkey) {
         char *err = dupprintf("Unable to create registry key\n"
                               "HKEY_CURRENT_USER\\%s\\%s", host_ca_key, sb->s);
@@ -491,12 +497,12 @@ char *host_ca_save(host_ca *hca)
     }
     strbuf_free(sb);
 
-    strbuf *base64_pubkey = base64_encode_sb(
+    base64_pubkey = base64_encode_sb(
         ptrlen_from_strbuf(hca->ca_public_key), 0);
     put_reg_sz(rkey, "PublicKey", base64_pubkey->s);
     strbuf_free(base64_pubkey);
 
-    strbuf *validity = percent_encode_sb(
+    validity = percent_encode_sb(
         ptrlen_from_asciz(hca->validity_expression), NULL);
     put_reg_sz(rkey, "Validity", validity->s);
     strbuf_free(validity);
@@ -511,11 +517,12 @@ char *host_ca_save(host_ca *hca)
 
 char *host_ca_delete(const char *name)
 {
-    HKEY rkey = open_regkey_rw(HKEY_CURRENT_USER, host_ca_key);
+    HKEY rkey = open_regkey_rw(HKEY_CURRENT_USER, host_ca_key, NULL);
+    strbuf *sb;
     if (!rkey)
         return NULL;
 
-    strbuf *sb = strbuf_new();
+    sb = strbuf_new();
     escape_registry_key(name, sb);
     del_regkey(rkey, sb->s);
     strbuf_free(sb);
@@ -577,7 +584,7 @@ static HANDLE access_random_seed(int action)
      * Registry, if any.
      */
     {
-        HKEY rkey = open_regkey_ro(HKEY_CURRENT_USER, PUTTY_REG_POS);
+        HKEY rkey = open_regkey_ro(HKEY_CURRENT_USER, PUTTY_REG_POS, NULL);
         if (rkey) {
             char *regpath = get_reg_sz(rkey, "RandSeedFile");
             close_regkey(rkey);
@@ -591,40 +598,9 @@ static HANDLE access_random_seed(int action)
     }
 
     /*
-     * Next, try the user's local Application Data directory,
-     * followed by their non-local one. This is found using the
-     * SHGetFolderPath function, which won't be present on all
-     * versions of Windows.
-     */
-    if (!tried_shgetfolderpath) {
-        /* This is likely only to bear fruit on systems with IE5+
-         * installed, or WinMe/2K+. There is some faffing with
-         * SHFOLDER.DLL we could do to try to find an equivalent
-         * on older versions of Windows if we cared enough.
-         * However, the invocation below requires IE5+ anyway,
-         * so stuff that. */
-        shell32_module = load_system32_dll("shell32.dll");
-        GET_WINDOWS_FUNCTION(shell32_module, SHGetFolderPathA);
-        tried_shgetfolderpath = true;
-    }
-    if (p_SHGetFolderPathA) {
-        char profile[MAX_PATH + 1];
-        if (SUCCEEDED(p_SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA,
-                                         NULL, SHGFP_TYPE_CURRENT, profile)) &&
-            try_random_seed_and_free(dupcat(profile, "\\PUTTY.RND"),
-                                     action, &rethandle))
-            return rethandle;
-
-        if (SUCCEEDED(p_SHGetFolderPathA(NULL, CSIDL_APPDATA,
-                                         NULL, SHGFP_TYPE_CURRENT, profile)) &&
-            try_random_seed_and_free(dupcat(profile, "\\PUTTY.RND"),
-                                     action, &rethandle))
-            return rethandle;
-    }
-
-    /*
-     * Failing that, try %HOMEDRIVE%%HOMEPATH% as a guess at the
-     * user's home directory.
+     * Next, try %HOMEDRIVE%%HOMEPATH% as a guess at the user's home
+     * directory. (Windows NT 3.x and 4.0 have no Application Data
+     * folder to look up, unless Internet Explorer 5 is installed.)
      */
     {
         char drv[MAX_PATH], path[MAX_PATH];
@@ -640,7 +616,7 @@ static HANDLE access_random_seed(int action)
 
         if (drvlen < lenof(drv) && pathlen < lenof(path) && pathlen > 0 &&
             try_random_seed_and_free(
-                dupcat(drv, path, "\\PUTTY.RND"), action, &rethandle))
+                dupcat(drv, path, "\\PUTTY.RND", NULL), action, &rethandle))
             return rethandle;
     }
 
@@ -652,7 +628,7 @@ static HANDLE access_random_seed(int action)
         DWORD len = GetWindowsDirectory(windir, sizeof(windir));
         if (len < lenof(windir) &&
             try_random_seed_and_free(
-                dupcat(windir, "\\PUTTY.RND"), action, &rethandle))
+                dupcat(windir, "\\PUTTY.RND", NULL), action, &rethandle))
             return rethandle;
     }
 
@@ -704,12 +680,14 @@ void write_random_seed(void *data, int len)
 static int transform_jumplist_registry(
     const char *add, const char *rem, char **out)
 {
-    HKEY rkey = create_regkey(HKEY_CURRENT_USER, reg_jumplist_key);
+    HKEY rkey = create_regkey(HKEY_CURRENT_USER, reg_jumplist_key, NULL);
+    strbuf *oldlist;
+    bool write_failure;
     if (!rkey)
         return JUMPLISTREG_ERROR_KEYOPENCREATE_FAILURE;
 
     /* Get current list of saved sessions in the registry. */
-    strbuf *oldlist = get_reg_multi_sz(rkey, reg_jumplist_value);
+    oldlist = get_reg_multi_sz(rkey, reg_jumplist_value);
     if (!oldlist) {
         /* Start again with the empty list. */
         oldlist = strbuf_new();
@@ -719,11 +697,12 @@ static int transform_jumplist_registry(
     /*
      * Modify the list, if we're modifying.
      */
-    bool write_failure = false;
+    write_failure = false;
     if (add || rem) {
         BinarySource src[1];
+        strbuf *newlist;
         BinarySource_BARE_INIT_PL(src, ptrlen_from_strbuf(oldlist));
-        strbuf *newlist = strbuf_new();
+        newlist = strbuf_new();
 
         /* First add the new item to the beginning of the list. */
         if (add)
@@ -801,7 +780,7 @@ static void registry_recursive_remove(HKEY key)
 
     DWORD i = 0;
     while ((name = enum_regkey(key, i)) != NULL) {
-        HKEY subkey = open_regkey_rw(key, name);
+        HKEY subkey = open_regkey_rw(key, name, NULL);
         if (subkey) {
             registry_recursive_remove(subkey);
             close_regkey(subkey);
@@ -813,6 +792,7 @@ static void registry_recursive_remove(HKEY key)
 
 void cleanup_all(void)
 {
+    HKEY key;
     /* ------------------------------------------------------------
      * Wipe out the random seed file, in all of its possible
      * locations.
@@ -832,7 +812,7 @@ void cleanup_all(void)
     /*
      * Open the main PuTTY registry key and remove everything in it.
      */
-    HKEY key = open_regkey_rw(HKEY_CURRENT_USER, PUTTY_REG_POS);
+    key = open_regkey_rw(HKEY_CURRENT_USER, PUTTY_REG_POS, NULL);
     if (key) {
         registry_recursive_remove(key);
         close_regkey(key);
@@ -842,9 +822,10 @@ void cleanup_all(void)
      * we've done that, see if the parent key has any other
      * children.
      */
-    if ((key = open_regkey_rw(HKEY_CURRENT_USER, PUTTY_REG_PARENT)) != NULL) {
+    if ((key = open_regkey_rw(HKEY_CURRENT_USER, PUTTY_REG_PARENT, NULL)) != NULL) {
+        char *name;
         del_regkey(key, PUTTY_REG_PARENT_CHILD);
-        char *name = enum_regkey(key, 0);
+        name = enum_regkey(key, 0);
         close_regkey(key);
 
         /*
@@ -856,7 +837,7 @@ void cleanup_all(void)
             sfree(name);
         } else {
             if ((key = open_regkey_rw(HKEY_CURRENT_USER,
-                                      PUTTY_REG_GPARENT)) != NULL) {
+                                      PUTTY_REG_GPARENT, NULL)) != NULL) {
                 del_regkey(key, PUTTY_REG_GPARENT_CHILD);
                 close_regkey(key);
             }

@@ -7,10 +7,6 @@
 #include <stdlib.h>
 #include "putty.h"
 #include "storage.h"
-#ifndef NO_GSSAPI
-#include "ssh/gssc.h"
-#include "ssh/gss.h"
-#endif
 
 
 /* The cipher order given here is the default order. */
@@ -451,12 +447,13 @@ static void wprefs(settings_w *sesskey, const char *name,
                    Conf *conf, int primary)
 {
     strbuf *sb = strbuf_new();
+    int i;
 
-    for (int i = 0; i < nvals; i++) {
+    for (i = 0; i < nvals; i++) {
         const char *s = val2key(mapping, nvals,
                                 conf_get_int_int(conf, primary, i));
         if (s)
-            put_fmt(sb, "%s%s", (sb->len ? "," : ""), s);
+            BinarySink_put_fmt(BinarySink_UPCAST(sb), "%s%s", (sb->len ? "," : ""), s);
     }
 
     write_setting_s(sesskey, name, sb->s);
@@ -485,7 +482,7 @@ static void write_clip_setting(settings_w *sesskey, const char *savekey,
         write_setting_s(sesskey, savekey, "explicit");
         break;
       case CLIPUI_CUSTOM: {
-        char *sval = dupcat("custom:", conf_get_str(conf, strconfkey));
+        char *sval = dupcat("custom:", conf_get_str(conf, strconfkey), NULL);
         write_setting_s(sesskey, savekey, sval);
         sfree(sval);
         break;
@@ -530,17 +527,24 @@ char *save_settings(const char *section, Conf *conf)
 }
 
 /* Declare extern references to conf_enum_* types */
-#define CONF_ENUM(name, ...) extern const ConfSaveEnumType conf_enum_##name;
+#define CONF_ENUM_BEGIN(name) extern const ConfSaveEnumType conf_enum_##name;
+#define CONF_ENUM_END(name)
+#define VALUE(eval, sval)
+#define VALUE_OBSOLETE(eval, sval)
 #include "conf-enums.h"
-#undef CONF_ENUM
+#undef CONF_ENUM_BEGIN
+#undef CONF_ENUM_END
+#undef VALUE
+#undef VALUE_OBSOLETE
 
 void save_open_settings(settings_w *sesskey, Conf *conf)
 {
     int i;
     const char *p;
+    size_t key;
 
     /* Save the settings simple enough to handle automatically */
-    for (size_t key = 0; key < N_CONFIG_OPTIONS; key++) {
+    for (key = 0; key < N_CONFIG_OPTIONS; key++) {
         const ConfKeyInfo *info = &conf_key_info[key];
         if (!info->save_custom && !info->not_saved) {
             /* Mappings are handled individually below */
@@ -555,6 +559,12 @@ void save_open_settings(settings_w *sesskey, Conf *conf)
                 const char *orig = conf_get_str_ambi(conf, key, &orig_is_utf8);
 
                 int cp_from, cp_to;
+                size_t wlen;
+                wchar_t *wide;
+                size_t clen;
+                char *converted;
+                const char *native;
+                const char *utf8;
                 if (orig_is_utf8) {
                     cp_from = CP_UTF8;
                     cp_to = DEFAULT_CODEPAGE;
@@ -563,15 +573,12 @@ void save_open_settings(settings_w *sesskey, Conf *conf)
                     cp_to = CP_UTF8;
                 }
 
-                size_t wlen;
-                wchar_t *wide = dup_mb_to_wc_c(
+                wide = dup_mb_to_wc_c(
                     cp_from, orig, strlen(orig), &wlen);
 
-                size_t clen;
-                char *converted = dup_wc_to_mb_c(
+                converted = dup_wc_to_mb_c(
                     cp_to, wide, wlen, "", &clen);
 
-                const char *native, *utf8;
                 if (orig_is_utf8) {
                     utf8 = orig;
                     native = converted;
@@ -629,21 +636,9 @@ void save_open_settings(settings_w *sesskey, Conf *conf)
 
     /* proxy settings */
     wmap(sesskey, "Environment", conf, CONF_environmt, true);
-#ifndef NO_GSSAPI
-    write_setting_b(sesskey, "GssapiFwd", conf_get_bool(conf, CONF_gssapifwd));
-#endif
     wprefs(sesskey, "Cipher", ciphernames, CIPHER_MAX, conf, CONF_ssh_cipherlist);
     wprefs(sesskey, "KEX", kexnames, KEX_MAX, conf, CONF_ssh_kexlist);
     wprefs(sesskey, "HostKey", hknames, HK_MAX, conf, CONF_ssh_hklist);
-#ifndef NO_GSSAPI
-    write_setting_i(sesskey, "GssapiRekey", conf_get_int(conf, CONF_gssapirekey));
-#endif
-#ifndef NO_GSSAPI
-    write_setting_b(sesskey, "AuthGSSAPI", conf_get_bool(conf, CONF_try_gssapi_auth));
-    write_setting_b(sesskey, "AuthGSSAPIKEX", conf_get_bool(conf, CONF_try_gssapi_kex));
-    wprefs(sesskey, "GSSLibs", gsslibkeywords, ngsslibs, conf, CONF_ssh_gsslist);
-    write_setting_filename(sesskey, "GSSCustom", conf_get_filename(conf, CONF_ssh_gss_custom));
-#endif
 #ifdef OSX_META_KEY_CONFIG
     write_setting_b(sesskey, "OSXOptionMeta", conf_get_bool(conf, CONF_osx_option_meta));
     write_setting_b(sesskey, "OSXCommandMeta", conf_get_bool(conf, CONF_osx_command_meta));
@@ -693,9 +688,10 @@ void save_open_settings(settings_w *sesskey, Conf *conf)
 bool load_settings(const char *section, Conf *conf)
 {
     settings_r *sesskey;
+    bool exists;
 
     sesskey = open_settings_r(section);
-    bool exists = (sesskey != NULL);
+    exists = (sesskey != NULL);
     load_open_settings(sesskey, conf);
     close_settings_r(sesskey);
 
@@ -709,9 +705,10 @@ void load_open_settings(settings_r *sesskey, Conf *conf)
 {
     int i;
     char *prot;
+    size_t key;
 
     /* Load the settings simple enough to handle automatically */
-    for (size_t key = 0; key < N_CONFIG_OPTIONS; key++) {
+    for (key = 0; key < N_CONFIG_OPTIONS; key++) {
         const ConfKeyInfo *info = &conf_key_info[key];
         if (info->not_saved) {
             /* Mappings are assumed to default to empty */
@@ -757,15 +754,16 @@ void load_open_settings(settings_r *sesskey, Conf *conf)
                     bool success = conf_enum_map_to_storage(
                         info->storage_enum, info->default_value.ival,
                         &defstorage);
+                    int storageval;
+                    int confval;
                     assert(success && "unmapped default");
 
                     /* Now retrieve the stored value */
-                    int storageval = gppi_raw(sesskey, info->save_keyword,
-                                              defstorage);
+                    storageval = gppi_raw(sesskey, info->save_keyword,
+                                          defstorage);
 
                     /* And translate it back to Conf representation,
                      * replacing it with our Conf-rep default on failure */
-                    int confval;
                     if (!conf_enum_map_from_storage(
                             info->storage_enum, storageval, &confval))
                         confval = info->default_value.ival;
@@ -879,9 +877,6 @@ void load_open_settings(settings_r *sesskey, Conf *conf)
     }
 
     gppmap(sesskey, "Environment", conf, CONF_environmt);
-#ifndef NO_GSSAPI
-    gppb(sesskey, "GssapiFwd", false, conf, CONF_gssapifwd);
-#endif
     gprefs(sesskey, "Cipher", "\0",
            ciphernames, CIPHER_MAX, conf, CONF_ssh_cipherlist);
     {
@@ -933,14 +928,6 @@ void load_open_settings(settings_r *sesskey, Conf *conf)
     }
     gprefs(sesskey, "HostKey", "ed25519,ecdsa,rsa,dsa,WARN",
            hknames, HK_MAX, conf, CONF_ssh_hklist);
-#ifndef NO_GSSAPI
-    gppi(sesskey, "GssapiRekey", GSS_DEF_REKEY_MINS, conf, CONF_gssapirekey);
-    gppb(sesskey, "AuthGSSAPI", true, conf, CONF_try_gssapi_auth);
-    gppb(sesskey, "AuthGSSAPIKEX", true, conf, CONF_try_gssapi_kex);
-    gprefs(sesskey, "GSSLibs", "\0",
-           gsslibkeywords, ngsslibs, conf, CONF_ssh_gsslist);
-    gppfile(sesskey, "GSSCustom", conf, CONF_ssh_gss_custom);
-#endif
     {
         int storageval = gppi_raw(sesskey, "RemoteQTitleAction", -1);
         int confval;
@@ -1076,8 +1063,6 @@ static int sessioncmp(const void *av, const void *bv)
     return strcmp(a, b);               /* otherwise, compare normally */
 }
 
-bool sesslist_demo_mode = false;
-
 void get_sesslist(struct sesslist *list, bool allocate)
 {
     int i;
@@ -1087,17 +1072,12 @@ void get_sesslist(struct sesslist *list, bool allocate)
     if (allocate) {
         strbuf *sb = strbuf_new();
 
-        if (sesslist_demo_mode) {
-            put_asciz(sb, "demo-server");
-            put_asciz(sb, "demo-server-2");
-        } else {
-            if ((handle = enum_settings_start()) != NULL) {
-                while (enum_settings_next(handle, sb))
-                    put_byte(sb, '\0');
-                enum_settings_finish(handle);
-            }
-            put_byte(sb, '\0');
+        if ((handle = enum_settings_start()) != NULL) {
+            while (enum_settings_next(handle, sb))
+                put_byte(sb, '\0');
+            enum_settings_finish(handle);
         }
+        put_byte(sb, '\0');
 
         list->buffer = strbuf_to_str(sb);
 

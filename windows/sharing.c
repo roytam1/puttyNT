@@ -15,7 +15,8 @@
 #include "security-api.h"
 
 #define CONNSHARE_PIPE_PREFIX "\\\\.\\pipe\\putty-connshare"
-#define CONNSHARE_MUTEX_PREFIX "Local\\putty-connshare-mutex"
+/* Not in the "Local\" namespace: see agent_mutex_name.c */
+#define CONNSHARE_MUTEX_PREFIX "putty-connshare-mutex"
 
 static char *make_name(const char *prefix, const char *name)
 {

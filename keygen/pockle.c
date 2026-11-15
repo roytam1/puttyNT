@@ -59,9 +59,10 @@ static PockleStatus pockle_insert(Pockle *pockle, mp_int *p, mp_int **factors,
                                   size_t nfactors, mp_int *w)
 {
     PocklePrimeRecord *pr = snew(PocklePrimeRecord);
+    PocklePrimeRecord *found;
     pr->prime = mp_copy(p);
 
-    PocklePrimeRecord *found = add234(pockle->tree, pr);
+    found = add234(pockle->tree, pr);
     if (pr != found) {
         /* it was already in there */
         mp_free(pr->prime);
@@ -70,8 +71,9 @@ static PockleStatus pockle_insert(Pockle *pockle, mp_int *p, mp_int **factors,
     }
 
     if (w) {
+        size_t i;
         pr->factors = snewn(nfactors, PocklePrimeRecord *);
-        for (size_t i = 0; i < nfactors; i++) {
+        for (i = 0; i < nfactors; i++) {
             pr->factors[i] = find234(pockle->tree, factors[i], ppr_find);
             assert(pr->factors[i]);
         }
@@ -109,16 +111,18 @@ void pockle_release(Pockle *pockle, size_t mark)
 
 PockleStatus pockle_add_small_prime(Pockle *pockle, mp_int *p)
 {
-    if (mp_hs_integer(p, (1ULL << 32)))
+    uint32_t val;
+    size_t i;
+    if (mp_get_nbits(p) > 32)          /* p >= 2^32 */
         return POCKLE_SMALL_PRIME_NOT_SMALL;
 
-    uint32_t val = mp_get_integer(p);
+    val = mp_get_integer(p);
 
     if (val < 2)
         return POCKLE_PRIME_SMALLER_THAN_2;
 
     init_smallprimes();
-    for (size_t i = 0; i < NSMALLPRIMES; i++) {
+    for (i = 0; i < NSMALLPRIMES; i++) {
         if (val == smallprimes[i])
             break; /* success */
         if (val % smallprimes[i] == 0)
@@ -135,6 +139,10 @@ PockleStatus pockle_add_prime(Pockle *pockle, mp_int *p,
     MontyContext *mc = NULL;
     mp_int *x = NULL, *f = NULL, *w = NULL;
     PockleStatus status;
+    mp_int *f2;
+    mp_int *f3;
+    bool too_big;
+    size_t i;
 
     /*
      * We're going to try to verify that p is prime by using
@@ -180,19 +188,23 @@ PockleStatus pockle_add_prime(Pockle *pockle, mp_int *p,
     x = mp_copy(p);
     mp_sub_integer_into(x, x, 1);
     f = mp_from_integer(1);
-    for (size_t i = 0; i < nfactors; i++) {
+    for (i = 0; i < nfactors; i++) {
         mp_int *q = factors[i];
+        mp_int *quotient;
+        mp_int *residue;
+        unsigned exact;
+        mp_int *tmp;
 
         if (!find234(pockle->tree, q, ppr_find)) {
             status = POCKLE_FACTOR_NOT_KNOWN_PRIME;
             goto out;
         }
 
-        mp_int *quotient = mp_new(mp_max_bits(x));
-        mp_int *residue = mp_new(mp_max_bits(q));
+        quotient = mp_new(mp_max_bits(x));
+        residue = mp_new(mp_max_bits(q));
         mp_divmod_into(x, q, quotient, residue);
 
-        unsigned exact = mp_eq_integer(residue, 0);
+        exact = mp_eq_integer(residue, 0);
         mp_free(residue);
 
         mp_free(x);
@@ -203,7 +215,7 @@ PockleStatus pockle_add_prime(Pockle *pockle, mp_int *p,
             goto out;
         }
 
-        mp_int *tmp = f;
+        tmp = f;
         f = mp_unsafe_shrink(mp_mul(tmp, q));
         mp_free(tmp);
     }
@@ -211,9 +223,9 @@ PockleStatus pockle_add_prime(Pockle *pockle, mp_int *p,
     /*
      * Check that f > cbrt(p).
      */
-    mp_int *f2 = mp_mul(f, f);
-    mp_int *f3 = mp_mul(f2, f);
-    bool too_big = mp_cmp_hs(p, f3);
+    f2 = mp_mul(f, f);
+    f3 = mp_mul(f2, f);
+    too_big = mp_cmp_hs(p, f3) != 0;
     mp_free(f3);
     mp_free(f2);
     if (too_big) {
@@ -324,9 +336,11 @@ PockleStatus pockle_add_prime(Pockle *pockle, mp_int *p,
      */
     {
         mp_int *pm1 = mp_copy(p);
+        mp_int *power;
+        unsigned fermat_pass;
         mp_sub_integer_into(pm1, pm1, 1);
-        mp_int *power = monty_pow(mc, w, pm1);
-        unsigned fermat_pass = mp_cmp_eq(power, monty_identity(mc));
+        power = monty_pow(mc, w, pm1);
+        fermat_pass = mp_cmp_eq(power, monty_identity(mc));
         mp_free(power);
         mp_free(pm1);
 
@@ -339,14 +353,15 @@ PockleStatus pockle_add_prime(Pockle *pockle, mp_int *p,
     /*
      * And now, for each factor q, is w^{(p-1)/q}-1 coprime to p?
      */
-    for (size_t i = 0; i < nfactors; i++) {
+    for (i = 0; i < nfactors; i++) {
         mp_int *q = factors[i];
         mp_int *exponent = mp_unsafe_shrink(mp_div(p, q));
         mp_int *power = monty_pow(mc, w, exponent);
         mp_int *power_extracted = monty_export(mc, power);
+        unsigned coprime;
         mp_sub_integer_into(power_extracted, power_extracted, 1);
 
-        unsigned coprime = mp_coprime(power_extracted, p);
+        coprime = mp_coprime(power_extracted, p);
         if (!coprime) {
             /*
              * If w^{(p-1)/q}-1 is not coprime to p, the test has
@@ -404,44 +419,47 @@ strbuf *pockle_mpu(Pockle *pockle, mp_int *p)
 {
     strbuf *sb = strbuf_new_nm();
     PocklePrimeRecord *pr = find234(pockle->tree, p, ppr_find);
+    bool *needed;
+    size_t index;
     assert(pr);
 
-    bool *needed = snewn(pockle->nlist, bool);
+    needed = snewn(pockle->nlist, bool);
     memset(needed, 0, pockle->nlist * sizeof(bool));
     needed[pr->index] = true;
 
-    put_fmt(sb, "[MPU - Primality Certificate]\nVersion 1.0\nBase 10\n\n"
-            "Proof for:\nN  ");
+    BinarySink_put_fmt(BinarySink_UPCAST(sb), "[MPU - Primality Certificate]\nVersion 1.0\nBase 10\n\n"
+                       "Proof for:\nN  ");
     mp_write_decimal(sb, p);
-    put_fmt(sb, "\n");
+    BinarySink_put_fmt(BinarySink_UPCAST(sb), "\n");
 
-    for (size_t index = pockle->nlist; index-- > 0 ;) {
+    for (index = pockle->nlist; index-- > 0 ;) {
         if (!needed[index])
             continue;
         pr = pockle->list[index];
 
         if (mp_get_nbits(pr->prime) <= 64) {
-            put_fmt(sb, "\nType Small\nN  ");
+            BinarySink_put_fmt(BinarySink_UPCAST(sb), "\nType Small\nN  ");
             mp_write_decimal(sb, pr->prime);
-            put_fmt(sb, "\n");
+            BinarySink_put_fmt(BinarySink_UPCAST(sb), "\n");
         } else {
+            size_t i;
             assert(pr->witness);
-            put_fmt(sb, "\nType BLS5\nN  ");
+            BinarySink_put_fmt(BinarySink_UPCAST(sb), "\nType BLS5\nN  ");
             mp_write_decimal(sb, pr->prime);
-            put_fmt(sb, "\n");
-            for (size_t i = 0; i < pr->nfactors; i++) {
-                put_fmt(sb, "Q[%"SIZEu"]  ", i+1);
+            BinarySink_put_fmt(BinarySink_UPCAST(sb), "\n");
+            for (i = 0; i < pr->nfactors; i++) {
+                BinarySink_put_fmt(BinarySink_UPCAST(sb), "Q[%"SIZEu"]  ", i+1);
                 mp_write_decimal(sb, pr->factors[i]->prime);
                 assert(pr->factors[i]->index < index);
                 needed[pr->factors[i]->index] = true;
-                put_fmt(sb, "\n");
+                BinarySink_put_fmt(BinarySink_UPCAST(sb), "\n");
             }
-            for (size_t i = 0; i < pr->nfactors + 1; i++) {
-                put_fmt(sb, "A[%"SIZEu"]  ", i);
+            for (i = 0; i < pr->nfactors + 1; i++) {
+                BinarySink_put_fmt(BinarySink_UPCAST(sb), "A[%"SIZEu"]  ", i);
                 mp_write_decimal(sb, pr->witness);
-                put_fmt(sb, "\n");
+                BinarySink_put_fmt(BinarySink_UPCAST(sb), "\n");
             }
-            put_fmt(sb, "----\n");
+            BinarySink_put_fmt(BinarySink_UPCAST(sb), "----\n");
         }
     }
     sfree(needed);

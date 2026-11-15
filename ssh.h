@@ -823,12 +823,6 @@ static inline void ssh_hash_digest_nondestructive(ssh_hash *h,
                                                   unsigned char *out)
 { ssh_hash_final(ssh_hash_copy(h), out); }
 
-/* Handy macros for defining all those text-name fields at once */
-#define HASHALG_NAMES_BARE(base) \
-    .text_basename = base, .annotation = NULL, .text_name = base
-#define HASHALG_NAMES_ANNOTATED(base, ann) \
-    .text_basename = base, .annotation = ann, .text_name = base " (" ann ")"
-
 void hash_simple(const ssh_hashalg *alg, ptrlen data, void *output);
 
 struct ssh_kex {
@@ -836,9 +830,10 @@ struct ssh_kex {
     enum { KEXTYPE_DH, KEXTYPE_RSA, KEXTYPE_ECDH,
            KEXTYPE_GSS, KEXTYPE_GSS_ECDH } main_type;
     const ssh_hashalg *hash;
-    union {                  /* publicly visible data for each type */
-        const ecdh_keyalg *ecdh_vt;    /* for KEXTYPE_ECDH, KEXTYPE_GSS_ECDH */
-    };
+    /* Publicly visible data for each type. (NT port: upstream has this
+     * in an anonymous union, which the compilers of 1993-1996 can't
+     * initialise.) */
+    const ecdh_keyalg *ecdh_vt;        /* for KEXTYPE_ECDH, KEXTYPE_GSS_ECDH */
     const void *extra;                 /* private to the kex methods */
 };
 
@@ -880,7 +875,7 @@ struct ssh_keyalg {
     /* The following methods can be NULL if !is_certificate */
     void (*ca_public_blob)(ssh_key *key, BinarySink *);
     bool (*check_cert)(ssh_key *key, bool host, ptrlen principal,
-                       uint64_t time, const ca_options *opts,
+                       uint64 time, const ca_options *opts,
                        BinarySink *error);
     void (*cert_id_string)(ssh_key *key, BinarySink *);
     SeatDialogText *(*cert_info)(ssh_key *key);
@@ -941,7 +936,7 @@ static inline void ssh_key_cert_id_string(ssh_key *key, BinarySink *bs)
 static inline SeatDialogText *ssh_key_cert_info(ssh_key *key)
 { return key->vt->cert_info(key); }
 static inline bool ssh_key_check_cert(
-    ssh_key *key, bool host, ptrlen principal, uint64_t time,
+    ssh_key *key, bool host, ptrlen principal, uint64 time,
     const ca_options *opts, BinarySink *error)
 { return key->vt->check_cert(key, host, principal, time, opts, error); }
 static inline int ssh_key_public_bits(const ssh_keyalg *self, ptrlen blob)
@@ -1356,8 +1351,11 @@ size_t prng_seed_bits(prng *p);
  *
  * The PRNG system has its own special timing function not because its
  * timing needs are unusual in the real applications, but simply so
- * that testcrypt can mock it to keep the tests deterministic. */
-uint64_t prng_reseed_time_ms(void);
+ * that testcrypt can mock it to keep the tests deterministic.
+ *
+ * It counts milliseconds in 32 bits, so it wraps round every 49.7
+ * days; callers only subtract two of its values, which still works. */
+uint32_t prng_reseed_time_ms(void);
 
 void random_read(void *out, size_t size);
 
@@ -1515,10 +1513,11 @@ typedef struct ppk_save_parameters {
     Argon2Flavour argon2_flavour;
     uint32_t argon2_mem;               /* in Kbyte */
     bool argon2_passes_auto;
-    union {
-        uint32_t argon2_passes;        /* if auto == false */
-        uint32_t argon2_milliseconds;  /* if auto == true */
-    };
+    /* NT port: upstream keeps these two in an anonymous union, which
+     * the compilers of 1993-1996 can't initialise. Only the one that
+     * argon2_passes_auto selects is used (ppk_params_bad picks it). */
+    uint32_t argon2_passes;            /* if auto == false */
+    uint32_t argon2_milliseconds;      /* if auto == true */
     uint32_t argon2_parallelism;
 
     /* The ability to choose a specific salt is only intended for the
@@ -2060,8 +2059,4 @@ enum {
  * CPU features for security
  */
 
-#if HAVE_ARM_DIT
-void enable_dit(void);
-#else
 #define enable_dit() ((void)0)
-#endif

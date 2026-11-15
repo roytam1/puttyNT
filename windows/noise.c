@@ -9,33 +9,44 @@
 #include "ssh.h"
 #include "storage.h"
 
-#include <wincrypt.h>
-
+/*
+ * The CryptoAPI came with Windows NT 4.0, so it is loaded at run time,
+ * and its names are here because older SDKs have no wincrypt.h. A
+ * provider handle (HCRYPTPROV) is a ULONG.
+ */
+#ifndef PROV_RSA_FULL
+#define PROV_RSA_FULL 1
+#endif
+#ifndef CRYPT_VERIFYCONTEXT
+#define CRYPT_VERIFYCONTEXT 0xF0000000
+#endif
 DECL_WINDOWS_FUNCTION(static, BOOL, CryptAcquireContextA,
-                      (HCRYPTPROV *, LPCTSTR, LPCTSTR, DWORD, DWORD));
+                      (ULONG *, LPCSTR, LPCSTR, DWORD, DWORD));
 DECL_WINDOWS_FUNCTION(static, BOOL, CryptGenRandom,
-                      (HCRYPTPROV, DWORD, BYTE *));
+                      (ULONG, DWORD, BYTE *));
 DECL_WINDOWS_FUNCTION(static, BOOL, CryptReleaseContext,
-                      (HCRYPTPROV, DWORD));
+                      (ULONG, DWORD));
 static HMODULE wincrypt_module = NULL;
 
 bool win_read_random(void *buf, unsigned wanted)
 {
     bool toret = false;
-    HCRYPTPROV crypt_provider;
+    ULONG crypt_provider;
 
     if (!wincrypt_module) {
         wincrypt_module = load_system32_dll("advapi32.dll");
-        GET_WINDOWS_FUNCTION(wincrypt_module, CryptAcquireContextA);
-        GET_WINDOWS_FUNCTION(wincrypt_module, CryptGenRandom);
-        GET_WINDOWS_FUNCTION(wincrypt_module, CryptReleaseContext);
+        GET_WINDOWS_FUNCTION_NO_TYPECHECK(wincrypt_module,
+                                          CryptAcquireContextA);
+        GET_WINDOWS_FUNCTION_NO_TYPECHECK(wincrypt_module, CryptGenRandom);
+        GET_WINDOWS_FUNCTION_NO_TYPECHECK(wincrypt_module,
+                                          CryptReleaseContext);
     }
 
     if (wincrypt_module && p_CryptAcquireContextA &&
         p_CryptGenRandom && p_CryptReleaseContext &&
         p_CryptAcquireContextA(&crypt_provider, NULL, NULL, PROV_RSA_FULL,
                                CRYPT_VERIFYCONTEXT)) {
-        toret = p_CryptGenRandom(crypt_provider, wanted, buf);
+        toret = p_CryptGenRandom(crypt_provider, wanted, buf) != 0;
         p_CryptReleaseContext(crypt_provider, 0);
     }
 
@@ -132,11 +143,7 @@ void noise_ultralight(NoiseSourceId id, unsigned long data)
         random_add_noise(NOISE_SOURCE_PERFCOUNT, &perftime, sizeof(perftime));
 }
 
-uint64_t prng_reseed_time_ms(void)
+uint32_t prng_reseed_time_ms(void)
 {
-    FILETIME ft;
-    GetSystemTimeAsFileTime(&ft);
-    uint64_t value = ft.dwHighDateTime;
-    value = (value << 32) + ft.dwLowDateTime;
-    return value / 10000;              /* 1 millisecond / 100ns */
+    return GetTickCount();
 }

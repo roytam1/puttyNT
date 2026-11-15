@@ -265,8 +265,8 @@ mp_int *mp_div(mp_int *n, mp_int *d);
 mp_int *mp_mod(mp_int *x, mp_int *modulus);
 
 /*
- * Compute the residue of x mod m, where m is a small integer. x is
- * kept secret, but m is not.
+ * Compute the residue of x mod m, where m is a small integer: at most
+ * 2^23. x is kept secret, but m is not.
  */
 uint32_t mp_mod_known_integer(mp_int *x, uint32_t m);
 

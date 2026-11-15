@@ -34,11 +34,6 @@ enum UnderlineMode {
     UND_LINE, UND_FONT
 };
 
-struct _dpi_info {
-    POINT cur_dpi;
-    RECT new_wnd_rect;
-};
-
 /*
  * Against the future possibility of having more than one of these
  * in a process (and the current possibility of having zero), we
@@ -64,12 +59,10 @@ struct WinGuiSeat {
     bool font_dualwidth, font_varpitch;
     int offset_width, offset_height;
     bool was_zoomed;
-    int prev_rows, prev_cols; // FIXME I don't think these are even used
+    int prev_rows, prev_cols; /* FIXME I don't think these are even used */
 
     HBITMAP caretbm;
     int caret_x, caret_y;
-
-    int kbd_codepage;
 
     Ldisc *ldisc;
     Backend *backend;
@@ -108,8 +101,6 @@ struct WinGuiSeat {
     LPLOGPALETTE logpal;
     bool tried_pal;
     COLORREF colorref_modifier;
-
-    struct _dpi_info dpi_info;
 
     int dbltime, lasttime, lastact;
     Mouse_Button lastbtn;

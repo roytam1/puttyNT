@@ -52,7 +52,7 @@ void BinarySink_put_uint32(BinarySink *bs, unsigned long val)
     bs->write(bs, data, sizeof(data));
 }
 
-void BinarySink_put_uint64(BinarySink *bs, uint64_t val)
+void BinarySink_put_uint64(BinarySink *bs, uint64 val)
 {
     unsigned char data[8];
     PUT_64BIT_MSB_FIRST(data, val);
@@ -192,12 +192,12 @@ unsigned long BinarySource_get_uint32(BinarySource *src)
     return GET_32BIT_MSB_FIRST(ucp);
 }
 
-uint64_t BinarySource_get_uint64(BinarySource *src)
+uint64 BinarySource_get_uint64(BinarySource *src)
 {
     const unsigned char *ucp;
 
     if (!avail(8))
-        return 0;
+        return uint64_make(0, 0);
 
     ucp = consume(8);
     return GET_64BIT_MSB_FIRST(ucp);
@@ -242,13 +242,14 @@ static ptrlen BinarySource_get_chars_internal(
     BinarySource *src, const char *set, bool include)
 {
     const char *start = here;
+    const char *end;
     while (avail(1)) {
         bool present = NULL != strchr(set, *(const char *)consume(0));
         if (present != include)
             break;
         (void) consume(1);
     }
-    const char *end = here;
+    end = here;
     return make_ptrlen(start, end - start);
 }
 

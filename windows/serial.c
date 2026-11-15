@@ -207,6 +207,7 @@ static char *serial_init(const BackendVtable *vt, Seat *seat,
     HANDLE serport;
     char *err;
     char *serline;
+    char *serfilename;
 
     /* No local authentication phase in this protocol */
     seat_set_trust_status(seat, false);
@@ -249,7 +250,7 @@ static char *serial_init(const BackendVtable *vt, Seat *seat,
      * contains a backslash, we use it verbatim. (This also lets
      * existing configurations using \\.\ continue working.)
      */
-    char *serfilename =
+    serfilename =
         dupprintf("%s%s", strchr(serline, '\\') ? "" : "\\\\.\\", serline);
     serport = CreateFile(serfilename, GENERIC_READ | GENERIC_WRITE, 0, NULL,
                          OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
@@ -437,31 +438,35 @@ static int serial_cfg_info(Backend *be)
 }
 
 const BackendVtable serial_backend = {
-    .init = serial_init,
-    .free = serial_free,
-    .reconfig = serial_reconfig,
-    .send = serial_send,
-    .sendbuffer = serial_sendbuffer,
-    .size = serial_size,
-    .special = serial_special,
-    .get_specials = serial_get_specials,
-    .connected = serial_connected,
-    .exitcode = serial_exitcode,
-    .sendok = serial_sendok,
-    .ldisc_option_state = serial_ldisc,
-    .provide_ldisc = serial_provide_ldisc,
-    .unthrottle = serial_unthrottle,
-    .cfg_info = serial_cfg_info,
-    .id = "serial",
-    .displayname_tc = "Serial",
-    .displayname_lc = "serial",
-    .protocol = PROT_SERIAL,
-    .serial_parity_mask = ((1 << SER_PAR_NONE) |
+    /* .init = */ serial_init,
+    /* .free = */ serial_free,
+    /* .reconfig = */ serial_reconfig,
+    /* .send = */ serial_send,
+    /* .sendbuffer = */ serial_sendbuffer,
+    /* .size = */ serial_size,
+    /* .special = */ serial_special,
+    /* .get_specials = */ serial_get_specials,
+    /* .connected = */ serial_connected,
+    /* .exitcode = */ serial_exitcode,
+    /* .sendok = */ serial_sendok,
+    /* .ldisc_option_state = */ serial_ldisc,
+    /* .provide_ldisc = */ serial_provide_ldisc,
+    /* .unthrottle = */ serial_unthrottle,
+    /* .cfg_info = */ serial_cfg_info,
+    /* .test_for_upstream = */ NULL,
+    /* .close_warn_text = */ NULL,
+    /* .id = */ "serial",
+    /* .displayname_tc = */ "Serial",
+    /* .displayname_lc = */ "serial",
+    /* .protocol = */ PROT_SERIAL,
+    /* .default_port = */ 0,
+    /* .flags = */ 0,
+    /* .serial_parity_mask = */ ((1 << SER_PAR_NONE) |
                            (1 << SER_PAR_ODD) |
                            (1 << SER_PAR_EVEN) |
                            (1 << SER_PAR_MARK) |
                            (1 << SER_PAR_SPACE)),
-    .serial_flow_mask =   ((1 << SER_FLOW_NONE) |
+    /* .serial_flow_mask = */ ((1 << SER_FLOW_NONE) |
                            (1 << SER_FLOW_XONXOFF) |
                            (1 << SER_FLOW_RTSCTS) |
                            (1 << SER_FLOW_DSRDTR)),

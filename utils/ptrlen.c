@@ -56,7 +56,9 @@ bool ptrlen_endswith(ptrlen whole, ptrlen suffix, ptrlen *tail)
 
 bool ptrlen_contains(ptrlen input, const char *characters)
 {
-    for (const char *p = input.ptr, *end = p + input.len; p < end; p++)
+    const char *p;
+    const char *end;
+    for (p = input.ptr, end = p + input.len; p < end; p++)
         if (strchr(characters, *p))
             return true;
     return false;
@@ -64,7 +66,9 @@ bool ptrlen_contains(ptrlen input, const char *characters)
 
 bool ptrlen_contains_only(ptrlen input, const char *characters)
 {
-    for (const char *p = input.ptr, *end = p + input.len; p < end; p++)
+    const char *p;
+    const char *end;
+    for (p = input.ptr, end = p + input.len; p < end; p++)
         if (!strchr(characters, *p))
             return false;
     return true;
@@ -74,6 +78,7 @@ ptrlen ptrlen_get_word(ptrlen *input, const char *separators)
 {
     const char *p = input->ptr, *end = p + input->len;
     ptrlen toret;
+    size_t to_consume;
 
     while (p < end && strchr(separators, *p))
         p++;
@@ -82,7 +87,7 @@ ptrlen ptrlen_get_word(ptrlen *input, const char *separators)
         p++;
     toret.len = p - (const char *)toret.ptr;
 
-    size_t to_consume = p - (const char *)input->ptr;
+    to_consume = p - (const char *)input->ptr;
     assert(to_consume <= input->len);
     input->ptr = (const char *)input->ptr + to_consume;
     input->len -= to_consume;

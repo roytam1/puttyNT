@@ -1,39 +1,29 @@
 /*
- * Windows networking abstraction.
- *
- * For the IPv6 code in here I am indebted to Jeroen Massar and
- * unfix.org.
+ * Windows networking abstraction, on WinSock 1.1 (IPv4 only), which
+ * every version of Windows NT has.
  */
-
-#include <winsock2.h> /* need to put this first, for winelib builds */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
-
-#define NEED_DECLARATION_OF_SELECT     /* in order to initialise it */
 
 #include "putty.h"
 #include "network.h"
 #include "tree234.h"
 #include "ssh.h"
 
-#include <ws2tcpip.h>
-
-#if HAVE_AFUNIX_H
-#include <afunix.h>
+/*
+ * WinSock 2 names that winsock.h (WinSock 1.1) lacks. Windows NT 4.0
+ * SP4 and later accept SO_EXCLUSIVEADDRUSE, which stops other
+ * programs from listening on the same port; older ones refuse it,
+ * which does no harm.
+ */
+#ifndef SO_EXCLUSIVEADDRUSE
+#define SO_EXCLUSIVEADDRUSE ((int)(~SO_REUSEADDR))
 #endif
-
-#ifndef NO_IPV6
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wmissing-braces"
-#endif
-const struct in6_addr in6addr_any = IN6ADDR_ANY_INIT;
-const struct in6_addr in6addr_loopback = IN6ADDR_LOOPBACK_INIT;
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
+#define SD_SEND 1                      /* shutdown(): no more sending */
+#ifndef HANDLE_FLAG_INHERIT
+#define HANDLE_FLAG_INHERIT 0x00000001
 #endif
 
 #define ipv4_is_loopback(addr) \
@@ -46,9 +36,6 @@ const struct in6_addr in6addr_loopback = IN6ADDR_LOOPBACK_INIT;
  */
 typedef struct SockAddrStep_tag SockAddrStep;
 struct SockAddrStep_tag {
-#ifndef NO_IPV6
-    struct addrinfo *ai;               /* steps along addr->ais */
-#endif
     int curraddr;
 };
 
@@ -63,6 +50,8 @@ struct NetSocket {
     bool frozen; /* this causes readability notifications to be ignored */
     bool frozen_readable; /* this means we missed at least one readability
                            * notification while we were frozen */
+    bool incomingeof;  /* nothing more to read; for sk_poll */
+    bool listener;
     bool localhost_only;               /* for listening sockets */
     char oobdata[1];
     size_t sending_oob;
@@ -72,13 +61,6 @@ struct NetSocket {
     SockAddrStep step;
     int port;
     int pending_error;             /* in case send() returns error */
-    /*
-     * We sometimes need pairs of Socket structures to be linked:
-     * if we are listening on the same IPv6 and v4 port, for
-     * example. So here we define `parent' and `child' pointers to
-     * track this link.
-     */
-    NetSocket *parent, *child;
 
     Socket sock;
 };
@@ -95,9 +77,6 @@ struct NetSocket {
 typedef enum SuperFamily {
     UNRESOLVED,
     IP,
-#if HAVE_AFUNIX_H
-    UNIX,
-#endif
     NAMEDPIPE
 } SuperFamily;
 
@@ -105,9 +84,6 @@ struct SockAddr {
     int refcount;
     const char *error;
     SuperFamily superfamily;
-#ifndef NO_IPV6
-    struct addrinfo *ais;              /* Addresses IPv6 style. */
-#endif
     unsigned long *addresses;          /* Addresses IPv4 style. */
     int naddresses;
     char hostname[512];                /* Store an unresolved host name. */
@@ -115,23 +91,14 @@ struct SockAddr {
 
 /*
  * Which address family this address belongs to. AF_INET for IPv4;
- * AF_INET6 for IPv6; AF_UNIX for Unix-domain sockets; AF_UNSPEC
- * indicates that name resolution has not been done and a simple host
- * name is held in this SockAddr structure.
+ * AF_UNSPEC indicates that name resolution has not been done and a
+ * simple host name is held in this SockAddr structure.
  */
 static inline int sockaddr_family(SockAddr *addr, SockAddrStep step)
 {
     switch (addr->superfamily) {
       case IP:
-#ifndef NO_IPV6
-        if (step.ai)
-            return step.ai->ai_family;
-#endif
         return AF_INET;
-#if HAVE_AFUNIX_H
-      case UNIX:
-        return AF_UNIX;
-#endif
       default:
         return AF_UNSPEC;
     }
@@ -141,13 +108,8 @@ static inline int sockaddr_family(SockAddr *addr, SockAddrStep step)
  * Start a SockAddrStep structure to step through multiple
  * addresses.
  */
-#ifndef NO_IPV6
-#define START_STEP(addr, step) \
-    ((step).ai = (addr)->ais, (step).curraddr = 0)
-#else
 #define START_STEP(addr, step) \
     ((step).curraddr = 0)
-#endif
 
 static tree234 *sktree;
 
@@ -191,8 +153,6 @@ DECL_WINDOWS_FUNCTION(static, struct servent FAR *, getservbyname,
                       (const char FAR *, const char FAR *));
 DECL_WINDOWS_FUNCTION(static, ULONG, inet_addr, (const char FAR *));
 DECL_WINDOWS_FUNCTION(static, char FAR *, inet_ntoa, (struct in_addr));
-DECL_WINDOWS_FUNCTION(static, const char FAR *, inet_ntop,
-                      (int, void FAR *, char *, size_t));
 DECL_WINDOWS_FUNCTION(static, int, connect,
                       (SOCKET, const struct sockaddr FAR *, int));
 DECL_WINDOWS_FUNCTION(static, int, bind,
@@ -203,8 +163,6 @@ DECL_WINDOWS_FUNCTION(static, SOCKET, socket, (int, int, int));
 DECL_WINDOWS_FUNCTION(static, int, listen, (SOCKET, int));
 DECL_WINDOWS_FUNCTION(static, int, send, (SOCKET, const char FAR *, int, int));
 DECL_WINDOWS_FUNCTION(static, int, shutdown, (SOCKET, int));
-DECL_WINDOWS_FUNCTION(static, int, ioctlsocket,
-                      (SOCKET, LONG, ULONG FAR *));
 DECL_WINDOWS_FUNCTION(static, SOCKET, accept,
                       (SOCKET, struct sockaddr FAR *, int FAR *));
 DECL_WINDOWS_FUNCTION(static, int, getpeername,
@@ -212,30 +170,14 @@ DECL_WINDOWS_FUNCTION(static, int, getpeername,
 DECL_WINDOWS_FUNCTION(static, int, getsockname,
                       (SOCKET, struct sockaddr FAR *, int FAR *));
 DECL_WINDOWS_FUNCTION(static, int, recv, (SOCKET, char FAR *, int, int));
-DECL_WINDOWS_FUNCTION(static, int, WSAIoctl,
-                      (SOCKET, DWORD, LPVOID, DWORD, LPVOID, DWORD,
-                       LPDWORD, LPWSAOVERLAPPED,
-                       LPWSAOVERLAPPED_COMPLETION_ROUTINE));
-#ifndef NO_IPV6
-DECL_WINDOWS_FUNCTION(static, int, getaddrinfo,
-                      (const char *nodename, const char *servname,
-                       const struct addrinfo *hints, struct addrinfo **res));
-DECL_WINDOWS_FUNCTION(static, void, freeaddrinfo, (struct addrinfo *res));
-DECL_WINDOWS_FUNCTION(static, int, getnameinfo,
-                      (const struct sockaddr FAR *sa, socklen_t salen,
-                       char FAR *host, DWORD hostlen, char FAR *serv,
-                       DWORD servlen, int flags));
-DECL_WINDOWS_FUNCTION(static, int, WSAAddressToStringA,
-                      (LPSOCKADDR, DWORD, LPWSAPROTOCOL_INFO,
-                       LPSTR, LPDWORD));
-#endif
+DECL_WINDOWS_FUNCTION(static, int, select,
+                      (int, fd_set FAR *, fd_set FAR *, fd_set FAR *,
+                       const struct timeval FAR *));
+DECL_WINDOWS_FUNCTION(static, int, getsockopt,
+                      (SOCKET, int, int, char FAR *, int FAR *));
 
 static HMODULE winsock_module = NULL;
 static WSADATA wsadata;
-#ifndef NO_IPV6
-static HMODULE winsock2_module = NULL;
-static HMODULE wship6_module = NULL;
-#endif
 
 static bool sk_startup(int hi, int lo)
 {
@@ -255,55 +197,33 @@ static bool sk_startup(int hi, int lo)
 }
 
 DEF_WINDOWS_FUNCTION(WSAAsyncSelect);
-DEF_WINDOWS_FUNCTION(WSAEventSelect);
 DEF_WINDOWS_FUNCTION(WSAGetLastError);
-DEF_WINDOWS_FUNCTION(WSAEnumNetworkEvents);
-DEF_WINDOWS_FUNCTION(select);
+DEF_WINDOWS_FUNCTION(ioctlsocket);
+
+DECL_WINDOWS_FUNCTION(static, BOOL, SetHandleInformation,
+                      (HANDLE, DWORD, DWORD));
+
+/*
+ * Stop a socket being inherited by child processes, such as a local
+ * proxy command. Windows NT 3.1 has no SetHandleInformation, so there
+ * sockets stay inheritable.
+ */
+static void socket_no_inherit(SOCKET s)
+{
+    if (p_SetHandleInformation)
+        p_SetHandleInformation((HANDLE)s, HANDLE_FLAG_INHERIT, 0);
+}
 
 void sk_init(void)
 {
-#ifndef NO_IPV6
-    winsock2_module =
-#endif
-        winsock_module = load_system32_dll("ws2_32.dll");
-    if (!winsock_module) {
-        winsock_module = load_system32_dll("wsock32.dll");
-    }
+    /* WinSock 1.1, which every version of Windows NT has; on NT 4.0
+     * this DLL passes the calls on to WinSock 2 */
+    winsock_module = load_system32_dll("wsock32.dll");
     if (!winsock_module)
         modalfatalbox("Unable to load any WinSock library");
 
-#ifndef NO_IPV6
-    /* Check if we have getaddrinfo in Winsock */
-    if (GetProcAddress(winsock_module, "getaddrinfo") != NULL) {
-        GET_WINDOWS_FUNCTION(winsock_module, getaddrinfo);
-        GET_WINDOWS_FUNCTION(winsock_module, freeaddrinfo);
-        GET_WINDOWS_FUNCTION_NO_TYPECHECK(winsock_module, getnameinfo);
-        /* This function would fail its type-check if we did one,
-         * because the VS header file provides an inline definition
-         * which is __cdecl instead of WINAPI. */
-    } else {
-        /* Fall back to wship6.dll for Windows 2000 */
-        wship6_module = load_system32_dll("wship6.dll");
-        if (wship6_module) {
-            GET_WINDOWS_FUNCTION(wship6_module, getaddrinfo);
-            GET_WINDOWS_FUNCTION(wship6_module, freeaddrinfo);
-            /* See comment above about type check */
-            GET_WINDOWS_FUNCTION_NO_TYPECHECK(wship6_module, getnameinfo);
-        } else {
-        }
-    }
-    GET_WINDOWS_FUNCTION(winsock2_module, WSAAddressToStringA);
-#endif
-
     GET_WINDOWS_FUNCTION(winsock_module, WSAAsyncSelect);
-    GET_WINDOWS_FUNCTION(winsock_module, WSAEventSelect);
-    /* We don't type-check select because at least some MinGW versions
-     * of the Windows API headers seem to disagree with the
-     * documentation on whether the 'struct timeval *' pointer is
-     * const or not. */
-    GET_WINDOWS_FUNCTION_NO_TYPECHECK(winsock_module, select);
     GET_WINDOWS_FUNCTION(winsock_module, WSAGetLastError);
-    GET_WINDOWS_FUNCTION(winsock_module, WSAEnumNetworkEvents);
     GET_WINDOWS_FUNCTION(winsock_module, WSAStartup);
     GET_WINDOWS_FUNCTION(winsock_module, WSACleanup);
     GET_WINDOWS_FUNCTION(winsock_module, closesocket);
@@ -318,12 +238,6 @@ void sk_init(void)
     GET_WINDOWS_FUNCTION(winsock_module, getservbyname);
     GET_WINDOWS_FUNCTION(winsock_module, inet_addr);
     GET_WINDOWS_FUNCTION(winsock_module, inet_ntoa);
-    /* Older Visual Studio, and MinGW as of Ubuntu 16.04, don't know
-     * about this function at all, so can't type-check it. Also there
-     * seems to be some disagreement in the VS headers about whether
-     * the second argument is void * or const void *, so I omit the
-     * type check. */
-    GET_WINDOWS_FUNCTION_NO_TYPECHECK(winsock_module, inet_ntop);
     GET_WINDOWS_FUNCTION(winsock_module, connect);
     GET_WINDOWS_FUNCTION(winsock_module, bind);
     GET_WINDOWS_FUNCTION(winsock_module, setsockopt);
@@ -336,12 +250,14 @@ void sk_init(void)
     GET_WINDOWS_FUNCTION(winsock_module, getpeername);
     GET_WINDOWS_FUNCTION(winsock_module, getsockname);
     GET_WINDOWS_FUNCTION(winsock_module, recv);
-    GET_WINDOWS_FUNCTION(winsock_module, WSAIoctl);
+    GET_WINDOWS_FUNCTION(winsock_module, select);
+    GET_WINDOWS_FUNCTION(winsock_module, getsockopt);
 
-    /* Try to get the best WinSock version we can get */
-    if (!sk_startup(2,2) &&
-        !sk_startup(2,0) &&
-        !sk_startup(1,1)) {
+    /* Not in the Windows NT 3.1 headers, so no type check */
+    GET_WINDOWS_FUNCTION_NO_TYPECHECK(load_system32_dll("kernel32.dll"),
+                                      SetHandleInformation);
+
+    if (!sk_startup(1,1)) {
         modalfatalbox("Unable to initialise WinSock");
     }
 
@@ -367,14 +283,13 @@ void sk_cleanup(void)
         sktree = NULL;
     }
 
+    /*
+     * The WinSock DLL stays loaded: on Windows NT 3.1 it keeps a
+     * thread of its own running after WSACleanup, and unloading the
+     * DLL under that thread made the program crash or hang on exit.
+     */
     if (p_WSACleanup)
         p_WSACleanup();
-    if (winsock_module)
-        FreeLibrary(winsock_module);
-#ifndef NO_IPV6
-    if (wship6_module)
-        FreeLibrary(wship6_module);
-#endif
 }
 
 const char *winsock_error_string(int error)
@@ -476,53 +391,21 @@ static inline const char *namelookup_strerror(DWORD err)
 SockAddr *sk_namelookup(const char *host, char **canonicalname,
                         int address_family)
 {
+    SockAddr *addr;
+    unsigned long a;
+    struct hostent *h;
     *canonicalname = NULL;
 
-    SockAddr *addr = snew(SockAddr);
+    addr = snew(SockAddr);
     memset(addr, 0, sizeof(SockAddr));
     addr->superfamily = UNRESOLVED;
     addr->refcount = 1;
 
-#ifndef NO_IPV6
     /*
-     * Use getaddrinfo, as long as it's available. This should handle
-     * both IPv4 and IPv6 address literals, and hostnames, in one
-     * unified API.
+     * WinSock 1.1 has no getaddrinfo: check for an IPv4 literal
+     * first, then ask gethostbyname.
      */
-    if (p_getaddrinfo) {
-        struct addrinfo hints;
-        memset(&hints, 0, sizeof(hints));
-        hints.ai_family = (address_family == ADDRTYPE_IPV4 ? AF_INET :
-                           address_family == ADDRTYPE_IPV6 ? AF_INET6 :
-                           AF_UNSPEC);
-        hints.ai_flags = AI_CANONNAME;
-        hints.ai_socktype = SOCK_STREAM;
-
-        /* strip [] on IPv6 address literals */
-        char *trimmed_host = host_strduptrim(host);
-        int err = p_getaddrinfo(trimmed_host, NULL, &hints, &addr->ais);
-        sfree(trimmed_host);
-
-        if (addr->ais) {
-            addr->superfamily = IP;
-            if (addr->ais->ai_canonname)
-                *canonicalname = dupstr(addr->ais->ai_canonname);
-            else
-                *canonicalname = dupstr(host);
-        } else {
-            addr->error = namelookup_strerror(err);
-        }
-        return addr;
-    }
-#endif
-
-    /*
-     * Failing that (if IPv6 support was not compiled in, or if
-     * getaddrinfo turned out to be unavailable at run time), try the
-     * old-fashioned approach, which is to start by manually checking
-     * for an IPv4 literal and then use gethostbyname.
-     */
-    unsigned long a = p_inet_addr(host);
+    a = p_inet_addr(host);
     if (a != (unsigned long) INADDR_NONE) {
         addr->addresses = snew(unsigned long);
         addr->naddresses = 1;
@@ -532,11 +415,11 @@ SockAddr *sk_namelookup(const char *host, char **canonicalname,
         return addr;
     }
 
-    struct hostent *h = p_gethostbyname(host);
+    h = p_gethostbyname(host);
     if (h) {
+        size_t n;
         addr->superfamily = IP;
 
-        size_t n;
         for (n = 0; h->h_addr_list[n]; n++);
         addr->addresses = snewn(n, unsigned long);
         addr->naddresses = n;
@@ -559,9 +442,6 @@ static SockAddr *sk_special_addr(SuperFamily superfamily, const char *name)
     SockAddr *addr = snew(SockAddr);
     addr->error = NULL;
     addr->superfamily = superfamily;
-#ifndef NO_IPV6
-    addr->ais = NULL;
-#endif
     addr->addresses = NULL;
     addr->naddresses = 0;
     addr->refcount = 1;
@@ -580,24 +460,8 @@ SockAddr *sk_namedpipe_addr(const char *pipename)
     return sk_special_addr(NAMEDPIPE, pipename);
 }
 
-#if HAVE_AFUNIX_H
-SockAddr *sk_unix_addr(const char *sockpath)
-{
-    return sk_special_addr(UNIX, sockpath);
-}
-#endif
-
 static bool sk_nextaddr(SockAddr *addr, SockAddrStep *step)
 {
-#ifndef NO_IPV6
-    if (step->ai) {
-        if (step->ai->ai_next) {
-            step->ai = step->ai->ai_next;
-            return true;
-        } else
-            return false;
-    }
-#endif
     if (step->curraddr+1 < addr->naddresses) {
         step->curraddr++;
         return true;
@@ -611,23 +475,6 @@ void sk_getaddr(SockAddr *addr, char *buf, int buflen)
     SockAddrStep step;
     START_STEP(addr, step);
 
-#ifndef NO_IPV6
-    if (step.ai) {
-        int err = 0;
-        if (p_WSAAddressToStringA) {
-            DWORD dwbuflen = buflen;
-            err = p_WSAAddressToStringA(step.ai->ai_addr, step.ai->ai_addrlen,
-                                        NULL, buf, &dwbuflen);
-        } else
-            err = -1;
-        if (err) {
-            strncpy(buf, addr->hostname, buflen);
-            if (!buf[0])
-                strncpy(buf, "<unknown>", buflen);
-            buf[buflen-1] = '\0';
-        }
-    } else
-#endif
     if (sockaddr_family(addr, step) == AF_INET) {
         struct in_addr a;
         assert(addr->addresses && step.curraddr < addr->naddresses);
@@ -656,14 +503,7 @@ static SockAddr sk_extractaddr_tmp(
     toret = *addr;                    /* structure copy */
     toret.refcount = 1;
 
-#ifndef NO_IPV6
-    toret.ais = step->ai;
-#endif
-    if (sockaddr_family(addr, *step) == AF_INET
-#ifndef NO_IPV6
-        && !toret.ais
-#endif
-        )
+    if (sockaddr_family(addr, *step) == AF_INET)
         toret.addresses += step->curraddr;
 
     return toret;
@@ -671,11 +511,7 @@ static SockAddr sk_extractaddr_tmp(
 
 bool sk_addr_needs_port(SockAddr *addr)
 {
-    return addr->superfamily != NAMEDPIPE
-#if HAVE_AFUNIX_H
-        && addr->superfamily != UNIX
-#endif
-        ;
+    return addr->superfamily != NAMEDPIPE;
 }
 
 bool sk_hostname_is_local(const char *name)
@@ -685,37 +521,13 @@ bool sk_hostname_is_local(const char *name)
            !strncmp(name, "127.", 4);
 }
 
-static INTERFACE_INFO local_interfaces[16];
-static int n_local_interfaces;       /* 0=not yet, -1=failed, >0=number */
-
+/*
+ * Only loopback addresses count as local: the list of this machine's
+ * own addresses (WSAIoctl with SIO_GET_INTERFACE_LIST) needs WinSock 2.
+ */
 static bool ipv4_is_local_addr(struct in_addr addr)
 {
-    if (ipv4_is_loopback(addr))
-        return true;                   /* loopback addresses are local */
-    if (!n_local_interfaces) {
-        SOCKET s = p_socket(AF_INET, SOCK_DGRAM, 0);
-        DWORD retbytes;
-
-        SetHandleInformation((HANDLE)s, HANDLE_FLAG_INHERIT, 0);
-
-        if (p_WSAIoctl &&
-            p_WSAIoctl(s, SIO_GET_INTERFACE_LIST, NULL, 0,
-                       local_interfaces, sizeof(local_interfaces),
-                       &retbytes, NULL, NULL) == 0)
-            n_local_interfaces = retbytes / sizeof(INTERFACE_INFO);
-        else
-            n_local_interfaces = -1;
-    }
-    if (n_local_interfaces > 0) {
-        int i;
-        for (i = 0; i < n_local_interfaces; i++) {
-            SOCKADDR_IN *address =
-                (SOCKADDR_IN *)&local_interfaces[i].iiAddress;
-            if (address->sin_addr.s_addr == addr.s_addr)
-                return true;           /* this address is local */
-        }
-    }
-    return false;                      /* this address is not local */
+    return ipv4_is_loopback(addr);
 }
 
 bool sk_address_is_local(SockAddr *addr)
@@ -725,18 +537,7 @@ bool sk_address_is_local(SockAddr *addr)
     START_STEP(addr, step);
     family = sockaddr_family(addr, step);
 
-#ifndef NO_IPV6
-    if (family == AF_INET6) {
-        return IN6_IS_ADDR_LOOPBACK(&((const struct sockaddr_in6 *)step.ai->ai_addr)->sin6_addr);
-    } else
-#endif
     if (family == AF_INET) {
-#ifndef NO_IPV6
-        if (step.ai) {
-            return ipv4_is_local_addr(((struct sockaddr_in *)step.ai->ai_addr)
-                                      ->sin_addr);
-        } else
-#endif
         {
             struct in_addr a;
             assert(addr->addresses && step.curraddr < addr->naddresses);
@@ -762,9 +563,6 @@ int sk_addrtype(SockAddr *addr)
     family = sockaddr_family(addr, step);
 
     return (family == AF_INET ? ADDRTYPE_IPV4 :
-#ifndef NO_IPV6
-            family == AF_INET6 ? ADDRTYPE_IPV6 :
-#endif
             ADDRTYPE_NAME);
 }
 
@@ -776,18 +574,6 @@ void sk_addrcopy(SockAddr *addr, char *buf)
     family = sockaddr_family(addr, step);
 
     assert(family != AF_UNSPEC);
-#ifndef NO_IPV6
-    if (step.ai) {
-        if (family == AF_INET)
-            memcpy(buf, &((struct sockaddr_in *)step.ai->ai_addr)->sin_addr,
-                   sizeof(struct in_addr));
-        else if (family == AF_INET6)
-            memcpy(buf, &((struct sockaddr_in6 *)step.ai->ai_addr)->sin6_addr,
-                   sizeof(struct in6_addr));
-        else
-            unreachable("bad address family in sk_addrcopy");
-    } else
-#endif
     if (family == AF_INET) {
         struct in_addr a;
         assert(addr->addresses && step.curraddr < addr->naddresses);
@@ -800,10 +586,6 @@ void sk_addr_free(SockAddr *addr)
 {
     if (--addr->refcount > 0)
         return;
-#ifndef NO_IPV6
-    if (addr->ais && p_freeaddrinfo)
-        p_freeaddrinfo(addr->ais);
-#endif
     if (addr->addresses)
         sfree(addr->addresses);
     sfree(addr);
@@ -833,14 +615,14 @@ static const char *sk_net_socket_error(Socket *s);
 static SocketEndpointInfo *sk_net_endpoint_info(Socket *s, bool peer);
 
 static const SocketVtable NetSocket_sockvt = {
-    .plug = sk_net_plug,
-    .close = sk_net_close,
-    .write = sk_net_write,
-    .write_oob = sk_net_write_oob,
-    .write_eof = sk_net_write_eof,
-    .set_frozen = sk_net_set_frozen,
-    .socket_error = sk_net_socket_error,
-    .endpoint_info = sk_net_endpoint_info,
+    /* .plug = */ sk_net_plug,
+    /* .close = */ sk_net_close,
+    /* .write = */ sk_net_write,
+    /* .write_oob = */ sk_net_write_oob,
+    /* .write_eof = */ sk_net_write_eof,
+    /* .set_frozen = */ sk_net_set_frozen,
+    /* .socket_error = */ sk_net_socket_error,
+    /* .endpoint_info = */ sk_net_endpoint_info,
 };
 
 static Socket *sk_net_accept(accept_ctx_t ctx, Plug *plug)
@@ -857,14 +639,16 @@ static Socket *sk_net_accept(accept_ctx_t ctx, Plug *plug)
     s->error = NULL;
     s->plug = plug;
     bufchain_init(&s->output_data);
+    s->connected = true;
     s->writable = true;              /* to start with */
     s->sending_oob = 0;
     s->outgoingeof = EOF_NO;
     s->frozen = true;
     s->frozen_readable = false;
+    s->incomingeof = false;
+    s->listener = false;
     s->localhost_only = false;    /* unused, but best init anyway */
     s->pending_error = 0;
-    s->parent = s->child = NULL;
     s->addr = NULL;
 
     s->s = (SOCKET)ctx.p;
@@ -893,9 +677,6 @@ static Socket *sk_net_accept(accept_ctx_t ctx, Plug *plug)
 static DWORD try_connect(NetSocket *sock)
 {
     SOCKET s;
-#ifndef NO_IPV6
-    SOCKADDR_IN6 a6;
-#endif
     SOCKADDR_IN a;
     DWORD err;
     const char *errstr;
@@ -936,7 +717,7 @@ static DWORD try_connect(NetSocket *sock)
         goto ret;
     }
 
-    SetHandleInformation((HANDLE)s, HANDLE_FLAG_INHERIT, 0);
+    socket_no_inherit(s);
 
     if (sock->oobinline) {
         BOOL b = true;
@@ -965,27 +746,12 @@ static DWORD try_connect(NetSocket *sock)
     while (1) {
         int sockcode;
 
-#ifndef NO_IPV6
-        if (family == AF_INET6) {
-            memset(&a6, 0, sizeof(a6));
-            a6.sin6_family = AF_INET6;
-          /*a6.sin6_addr = in6addr_any; */ /* == 0 done by memset() */
-            a6.sin6_port = p_htons(localport);
-        } else
-#endif
         {
             a.sin_family = AF_INET;
             a.sin_addr.s_addr = p_htonl(INADDR_ANY);
             a.sin_port = p_htons(localport);
         }
-#ifndef NO_IPV6
-        sockcode = p_bind(s, (family == AF_INET6 ?
-                              (struct sockaddr *) &a6 :
-                              (struct sockaddr *) &a),
-                          (family == AF_INET6 ? sizeof(a6) : sizeof(a)));
-#else
         sockcode = p_bind(s, (struct sockaddr *) &a, sizeof(a));
-#endif
         if (sockcode != SOCKET_ERROR) {
             err = 0;
             break;                     /* done */
@@ -1010,23 +776,6 @@ static DWORD try_connect(NetSocket *sock)
     /*
      * Connect to remote address.
      */
-#ifndef NO_IPV6
-    if (sock->step.ai) {
-        if (family == AF_INET6) {
-            a6.sin6_family = AF_INET6;
-            a6.sin6_port = p_htons((short) sock->port);
-            a6.sin6_addr =
-                ((struct sockaddr_in6 *) sock->step.ai->ai_addr)->sin6_addr;
-            a6.sin6_flowinfo = ((struct sockaddr_in6 *) sock->step.ai->ai_addr)->sin6_flowinfo;
-            a6.sin6_scope_id = ((struct sockaddr_in6 *) sock->step.ai->ai_addr)->sin6_scope_id;
-        } else {
-            a.sin_family = AF_INET;
-            a.sin_addr =
-                ((struct sockaddr_in *) sock->step.ai->ai_addr)->sin_addr;
-            a.sin_port = p_htons((short) sock->port);
-        }
-    } else
-#endif
     {
         assert(sock->addr->addresses && sock->step.curraddr < sock->addr->naddresses);
         a.sin_family = AF_INET;
@@ -1044,14 +793,7 @@ static DWORD try_connect(NetSocket *sock)
     }
 
     if ((
-#ifndef NO_IPV6
-            p_connect(s,
-                      ((family == AF_INET6) ? (struct sockaddr *) &a6 :
-                       (struct sockaddr *) &a),
-                      (family == AF_INET6) ? sizeof(a6) : sizeof(a))
-#else
             p_connect(s, (struct sockaddr *) &a, sizeof(a))
-#endif
         ) == SOCKET_ERROR) {
         err = p_WSAGetLastError();
         /*
@@ -1065,12 +807,13 @@ static DWORD try_connect(NetSocket *sock)
             goto ret;
         }
     } else {
+        SockAddr thisaddr;
         /*
          * If we _don't_ get EWOULDBLOCK, the connect has completed
          * and we should set the socket as writable.
          */
         sock->writable = true;
-        SockAddr thisaddr = sk_extractaddr_tmp(sock->addr, &sock->step);
+        thisaddr = sk_extractaddr_tmp(sock->addr, &sock->step);
         plug_log(sock->plug, &sock->sock, PLUGLOG_CONNECT_SUCCESS,
                  &thisaddr, sock->port, NULL, 0);
     }
@@ -1113,9 +856,10 @@ Socket *sk_new(SockAddr *addr, int port, bool privport, bool oobinline,
     s->outgoingeof = EOF_NO;
     s->frozen = false;
     s->frozen_readable = false;
+    s->incomingeof = false;
+    s->listener = false;
     s->localhost_only = false;    /* unused, but best init anyway */
     s->pending_error = 0;
-    s->parent = s->child = NULL;
     s->oobinline = oobinline;
     s->nodelay = nodelay;
     s->keepalive = keepalive;
@@ -1139,12 +883,6 @@ static Socket *sk_newlistener_internal(
 {
     SOCKET sk;
     SOCKADDR_IN a;
-#ifndef NO_IPV6
-    SOCKADDR_IN6 a6;
-#endif
-#if HAVE_AFUNIX_H
-    SOCKADDR_UN au;
-#endif
     struct sockaddr *bindaddr;
     unsigned bindsize;
 
@@ -1163,22 +901,21 @@ static Socket *sk_newlistener_internal(
     s->error = NULL;
     s->plug = plug;
     bufchain_init(&s->output_data);
+    s->connected = false;
     s->writable = false;             /* to start with */
     s->sending_oob = 0;
     s->outgoingeof = EOF_NO;
     s->frozen = false;
     s->frozen_readable = false;
+    s->incomingeof = false;
+    s->listener = true;
     s->localhost_only = local_host_only;
     s->pending_error = 0;
-    s->parent = s->child = NULL;
     s->addr = NULL;
 
     /*
-     * Our default, if passed the `don't care' value
-     * ADDRTYPE_UNSPEC, is to listen on IPv4. If IPv6 is supported,
-     * we will also set up a second socket listening on IPv6, but
-     * the v4 one is primary since that ought to work even on
-     * non-v6-supporting systems.
+     * IPv4 is all there is: the `don't care' value ADDRTYPE_UNSPEC
+     * means IPv4 too.
      */
     if (address_family == AF_UNSPEC) address_family = AF_INET;
 
@@ -1194,13 +931,10 @@ static Socket *sk_newlistener_internal(
         return &s->sock;
     }
 
-    SetHandleInformation((HANDLE)sk, HANDLE_FLAG_INHERIT, 0);
+    socket_no_inherit(sk);
 
     s->oobinline = false;
 
-#if HAVE_AFUNIX_H
-    if (address_family != AF_UNIX)
-#endif
     {
         BOOL on = true;
         p_setsockopt(sk, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
@@ -1208,39 +942,6 @@ static Socket *sk_newlistener_internal(
     }
 
     switch (address_family) {
-#ifndef NO_IPV6
-      case AF_INET6: {
-        memset(&a6, 0, sizeof(a6));
-        a6.sin6_family = AF_INET6;
-        if (local_host_only)
-            a6.sin6_addr = in6addr_loopback;
-        else
-            a6.sin6_addr = in6addr_any;
-        if (srcaddr != NULL && p_getaddrinfo) {
-            struct addrinfo hints;
-            struct addrinfo *ai;
-            int err;
-
-            memset(&hints, 0, sizeof(hints));
-            hints.ai_family = AF_INET6;
-            hints.ai_flags = 0;
-            {
-                /* strip [] on IPv6 address literals */
-                char *trimmed_addr = host_strduptrim(srcaddr);
-                err = p_getaddrinfo(trimmed_addr, NULL, &hints, &ai);
-                sfree(trimmed_addr);
-            }
-            if (err == 0 && ai->ai_family == AF_INET6) {
-                a6.sin6_addr =
-                    ((struct sockaddr_in6 *)ai->ai_addr)->sin6_addr;
-            }
-        }
-        a6.sin6_port = p_htons(port);
-        bindaddr = (struct sockaddr *)&a6;
-        bindsize = sizeof(a6);
-        break;
-      }
-#endif
       case AF_INET: {
         bool got_addr = false;
         a.sin_family = AF_INET;
@@ -1273,15 +974,6 @@ static Socket *sk_newlistener_internal(
         bindsize = sizeof(a);
         break;
       }
-#if HAVE_AFUNIX_H
-      case AF_UNIX: {
-        au.sun_family = AF_UNIX;
-        strncpy(au.sun_path, srcaddr, sizeof(au.sun_path));
-        bindaddr = (struct sockaddr *)&au;
-        bindsize = sizeof(au);
-        break;
-      }
-#endif
       default:
         unreachable("bad address family in sk_newlistener_internal");
     }
@@ -1317,27 +1009,6 @@ static Socket *sk_newlistener_internal(
 
     add234(sktree, s);
 
-#ifndef NO_IPV6
-    /*
-     * If we were given ADDRTYPE_UNSPEC, we must also create an
-     * IPv6 listening socket and link it to this one.
-     */
-    if (address_family == AF_INET && orig_address_family == AF_UNSPEC) {
-        Socket *other = sk_newlistener_internal(srcaddr, port, plug,
-                                                local_host_only, AF_INET6);
-
-        if (other) {
-            NetSocket *ns = container_of(other, NetSocket, sock);
-            if (!ns->error) {
-                ns->parent = s;
-                s->child = ns;
-            } else {
-                sfree(ns);
-            }
-        }
-    }
-#endif
-
     return &s->sock;
 }
 
@@ -1349,31 +1020,15 @@ Socket *sk_newlistener(const char *srcaddr, int port, Plug *plug,
      * into local reality.
      */
     int address_family = (orig_address_family == ADDRTYPE_IPV4 ? AF_INET :
-#ifndef NO_IPV6
-                          orig_address_family == ADDRTYPE_IPV6 ? AF_INET6 :
-#endif
                           AF_UNSPEC);
 
     return sk_newlistener_internal(srcaddr, port, plug, local_host_only,
                                    address_family);
 }
 
-Socket *sk_newlistener_unix(const char *path, Plug *plug)
-{
-#if HAVE_AFUNIX_H
-    return sk_newlistener_internal(path, 0, plug, false, AF_UNIX);
-#else
-    return new_error_socket_fmt(
-        plug, "AF_UNIX support not compiled into this program");
-#endif
-}
-
 static void sk_net_close(Socket *sock)
 {
     NetSocket *s = container_of(sock, NetSocket, sock);
-
-    if (s->child)
-        sk_net_close(&s->child->sock);
 
     bufchain_clear(&s->output_data);
 
@@ -1437,8 +1092,9 @@ static void try_send(NetSocket *s)
             len = s->sending_oob;
             data = &s->oobdata;
         } else {
+            ptrlen bufdata;
             urgentflag = 0;
-            ptrlen bufdata = bufchain_prefix(&s->output_data);
+            bufdata = bufchain_prefix(&s->output_data);
             data = bufdata.ptr;
             len = bufdata.len;
         }
@@ -1640,7 +1296,7 @@ void select_result(WPARAM wParam, LPARAM lParam)
              * which is equivalent to `no OOB pending', so the
              * effect will be to non-OOB-ify any OOB data.
              */
-            atmark = atmark_from_ioctl;
+            atmark = atmark_from_ioctl != 0;
         } else
             atmark = true;
 
@@ -1655,6 +1311,7 @@ void select_result(WPARAM wParam, LPARAM lParam)
         if (ret < 0) {
             plug_closing_winsock_error(s->plug, err);
         } else if (0 == ret) {
+            s->incomingeof = true;
             plug_closing_normal(s->plug);
         } else {
             plug_receive(s->plug, atmark ? 0 : 1, buf, ret);
@@ -1696,19 +1353,17 @@ void select_result(WPARAM wParam, LPARAM lParam)
                     break;
                 plug_closing_winsock_error(s->plug, err);
             } else {
-                if (ret)
+                if (ret) {
                     plug_receive(s->plug, 0, buf, ret);
-                else
+                } else {
+                    s->incomingeof = true;
                     plug_closing_normal(s->plug);
+                }
             }
         } while (ret > 0);
         return;
       case FD_ACCEPT: {
-#ifdef NO_IPV6
         struct sockaddr_in isa;
-#else
-        struct sockaddr_storage isa; // FIXME: also if Unix and no IPv6
-#endif
         int addrlen = sizeof(isa);
         SOCKET t;  /* socket of connection */
         accept_ctx_t actx;
@@ -1724,13 +1379,7 @@ void select_result(WPARAM wParam, LPARAM lParam)
 
         actx.p = (void *)t;
 
-#ifndef NO_IPV6
-        if (isa.ss_family == AF_INET &&
-            s->localhost_only &&
-            !ipv4_is_local_addr(((struct sockaddr_in *)&isa)->sin_addr))
-#else
         if (s->localhost_only && !ipv4_is_local_addr(isa.sin_addr))
-#endif
         {
             closesocket_wrap(t);  /* dodgy WinSock let nonlocal through */
         } else if (plug_accepting(s->plug, sk_net_accept, actx)) {
@@ -1739,6 +1388,102 @@ void select_result(WPARAM wParam, LPARAM lParam)
         break;
       }
     }
+}
+
+static bool fd_in(SOCKET skt, const fd_set *set)
+{
+    u_int i;
+    for (i = 0; i < set->fd_count; i++)
+        if (set->fd_array[i] == skt)
+            return true;
+    return false;
+}
+
+/*
+ * The console tools' way to find network activity when they have no
+ * window for WSAAsyncSelect to send it to (see select-cli.c): look at
+ * the sockets (the first FD_SETSIZE of them) with select(), and pass
+ * what it finds to select_result as the events WSAAsyncSelect would
+ * have sent. Returns true if there was any.
+ */
+bool sk_poll(void)
+{
+    fd_set rfds, wfds, efds;
+    struct timeval tv;
+    SOCKET ready[3 * FD_SETSIZE], skt;
+    u_int nready = 0, i, j;
+    NetSocket *s;
+    int k;
+
+    FD_ZERO(&rfds);
+    FD_ZERO(&wfds);
+    FD_ZERO(&efds);
+    for (k = 0; (s = index234(sktree, k)) != NULL; k++) {
+        if (s->s == INVALID_SOCKET || s->error)
+            continue;
+        if (s->listener) {
+            FD_SET(s->s, &rfds);         /* FD_ACCEPT */
+        } else if (!s->connected) {
+            FD_SET(s->s, &wfds);         /* FD_CONNECT */
+            FD_SET(s->s, &efds);         /* FD_CONNECT, failed */
+        } else {
+            if (!s->frozen && !s->incomingeof)
+                FD_SET(s->s, &rfds);     /* FD_READ */
+            if (!s->writable)
+                FD_SET(s->s, &wfds);     /* FD_WRITE */
+            if (!s->oobinline && !s->incomingeof)
+                FD_SET(s->s, &efds);     /* FD_OOB */
+        }
+    }
+    if (rfds.fd_count == 0 && wfds.fd_count == 0 && efds.fd_count == 0)
+        return false;
+
+    tv.tv_sec = tv.tv_usec = 0;
+    if (p_select(0, &rfds, &wfds, &efds, &tv) <= 0)
+        return false;
+
+    for (i = 0; i < 3; i++) {
+        fd_set *set = i == 0 ? &efds : i == 1 ? &wfds : &rfds;
+        for (j = 0; j < set->fd_count; j++) {
+            skt = set->fd_array[j];
+            for (k = 0; k < (int)nready && ready[k] != skt; k++);
+            if (k == (int)nready)
+                ready[nready++] = skt;
+        }
+    }
+
+    /*
+     * select_result can close sockets, and the plugs can open new
+     * ones, so each event looks its socket up again.
+     */
+    for (i = 0; i < nready; i++) {
+        NetSocket *s0;
+        skt = ready[i];
+        s0 = find234(sktree, (void *)skt, cmpforsearch);
+        if (!s0)
+            continue;
+        if (s0->listener) {
+            select_result((WPARAM)skt, WSAMAKESELECTREPLY(FD_ACCEPT, 0));
+        } else if (!s0->connected) {
+            /* A failed connection is in efds, or, from some WinSocks,
+             * in wfds like a successful one */
+            int err = 0, len = sizeof(err);
+            p_getsockopt(skt, SOL_SOCKET, SO_ERROR, (char *)&err, &len);
+            if (err == 0 && fd_in(skt, &efds))
+                err = WSAECONNREFUSED;
+            select_result((WPARAM)skt, WSAMAKESELECTREPLY(FD_CONNECT, err));
+        } else {
+            if (fd_in(skt, &efds))
+                select_result((WPARAM)skt, WSAMAKESELECTREPLY(FD_OOB, 0));
+            if (fd_in(skt, &wfds) &&
+                find234(sktree, (void *)skt, cmpforsearch) == s0)
+                select_result((WPARAM)skt, WSAMAKESELECTREPLY(FD_WRITE, 0));
+            if (fd_in(skt, &rfds) &&
+                find234(sktree, (void *)skt, cmpforsearch) == s0)
+                select_result((WPARAM)skt, WSAMAKESELECTREPLY(FD_READ, 0));
+        }
+    }
+    return true;
 }
 
 /*
@@ -1759,12 +1504,7 @@ static const char *sk_net_socket_error(Socket *sock)
 static SocketEndpointInfo *sk_net_endpoint_info(Socket *sock, bool peer)
 {
     NetSocket *s = container_of(sock, NetSocket, sock);
-#ifdef NO_IPV6
     struct sockaddr_in addr;
-#else
-    struct sockaddr_storage addr; // FIXME: also if Unix and no IPv6
-    char buf[INET6_ADDRSTRLEN];
-#endif
     int addrlen = sizeof(addr);
     SocketEndpointInfo *pi;
 
@@ -1790,18 +1530,6 @@ static SocketEndpointInfo *sk_net_endpoint_info(Socket *sock, bool peer)
             p_inet_ntoa(((struct sockaddr_in *)&addr)->sin_addr));
         pi->log_text = dupprintf("%s:%d", pi->addr_text, pi->port);
 
-#ifndef NO_IPV6
-    } else if (((struct sockaddr *)&addr)->sa_family == AF_INET6) {
-        pi->addressfamily = ADDRTYPE_IPV6;
-        memcpy(pi->addr_bin.ipv6,
-               &((struct sockaddr_in6 *)&addr)->sin6_addr, 16);
-        pi->port = p_ntohs(((struct sockaddr_in6 *)&addr)->sin6_port);
-        pi->addr_text = dupstr(
-            p_inet_ntop(AF_INET6, &((struct sockaddr_in6 *)&addr)->sin6_addr,
-                        buf, sizeof(buf)));
-        pi->log_text = dupprintf("[%s]:%d", pi->addr_text, pi->port);
-
-#endif
     } else {
         sfree(pi);
         return NULL;

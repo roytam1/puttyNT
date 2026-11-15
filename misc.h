@@ -27,10 +27,9 @@ char *host_strduptrim(const char *s);
 
 char *dupstr(const char *s);
 wchar_t *dupwcs(const wchar_t *s);
-char *dupcat_fn(const char *s1, ...);
-#define dupcat(...) dupcat_fn(__VA_ARGS__, (const char *)NULL)
-wchar_t *dupwcscat_fn(const wchar_t *s1, ...);
-#define dupwcscat(...) dupwcscat_fn(__VA_ARGS__, (const wchar_t *)NULL)
+/* NT port: no variadic macros, so the caller ends the list with NULL */
+char *dupcat(const char *s1, ...);
+wchar_t *dupwcscat(const wchar_t *s1, ...);
 char *dupprintf(const char *fmt, ...) PRINTF_LIKE(1, 2);
 char *dupvprintf(const char *fmt, va_list ap);
 void burnstr(char *string);
@@ -189,8 +188,8 @@ static inline const void *ptrlen_end(ptrlen pl)
 static inline ptrlen make_ptrlen_startend(const void *startv, const void *endv)
 {
     const char *start = (const char *)startv, *end = (const char *)endv;
-    assert(end >= start);
     ptrlen pl;
+    assert(end >= start);
     pl.ptr = start;
     pl.len = end - start;
     return pl;
@@ -327,7 +326,9 @@ static inline NORETURN void unreachable_internal(void) { abort(); }
  *
  * Output goes to debug.log
  *
- * debug() is like printf().
+ * debug() is like printf(), but takes its arguments in a second
+ * pair of brackets: debug(("x=%d\n", x)). (NT port: upstream uses a
+ * variadic macro, which the compilers of 1993-1996 don't have.)
  *
  * dmemdump() and dmemdumpl() both do memory dumps.  The difference
  * is that dmemdumpl() is more suited for when the memory address is
@@ -338,7 +339,7 @@ static inline NORETURN void unreachable_internal(void) { abort(); }
 #ifdef DEBUG
 void debug_printf(const char *fmt, ...) PRINTF_LIKE(1, 2);
 void debug_memdump(const void *buf, int len, bool L);
-#define debug(...) (debug_printf(__VA_ARGS__))
+#define debug(args) (debug_printf args)
 #define dmemdump(buf,len) (debug_memdump(buf, len, false))
 #define dmemdumpl(buf,len) (debug_memdump(buf, len, true))
 
@@ -347,17 +348,13 @@ void debug_memdump(const void *buf, int len, bool L);
 const char *conf_id(int key);
 
 #else
-#define debug(...) ((void)0)
+#define debug(args) ((void)0)
 #define dmemdump(buf,len) ((void)0)
 #define dmemdumpl(buf,len) ((void)0)
 #endif
 
 #ifndef lenof
-#if HAVE_COUNTOF
-#define lenof(x) _Countof(x)
-#else
 #define lenof(x) ( (sizeof((x))) / (sizeof(*(x))))
-#endif
 #endif
 
 #ifndef min
@@ -366,28 +363,6 @@ const char *conf_id(int key);
 #ifndef max
 #define max(x,y) ( (x) > (y) ? (x) : (y) )
 #endif
-
-static inline uint64_t GET_64BIT_LSB_FIRST(const void *vp)
-{
-    const uint8_t *p = (const uint8_t *)vp;
-    return (((uint64_t)p[0]      ) | ((uint64_t)p[1] <<  8) |
-            ((uint64_t)p[2] << 16) | ((uint64_t)p[3] << 24) |
-            ((uint64_t)p[4] << 32) | ((uint64_t)p[5] << 40) |
-            ((uint64_t)p[6] << 48) | ((uint64_t)p[7] << 56));
-}
-
-static inline void PUT_64BIT_LSB_FIRST(void *vp, uint64_t value)
-{
-    uint8_t *p = (uint8_t *)vp;
-    p[0] = (uint8_t)(value);
-    p[1] = (uint8_t)(value >> 8);
-    p[2] = (uint8_t)(value >> 16);
-    p[3] = (uint8_t)(value >> 24);
-    p[4] = (uint8_t)(value >> 32);
-    p[5] = (uint8_t)(value >> 40);
-    p[6] = (uint8_t)(value >> 48);
-    p[7] = (uint8_t)(value >> 56);
-}
 
 static inline uint32_t GET_32BIT_LSB_FIRST(const void *vp)
 {
@@ -418,28 +393,6 @@ static inline void PUT_16BIT_LSB_FIRST(void *vp, uint16_t value)
     p[1] = (uint8_t)(value >> 8);
 }
 
-static inline uint64_t GET_64BIT_MSB_FIRST(const void *vp)
-{
-    const uint8_t *p = (const uint8_t *)vp;
-    return (((uint64_t)p[7]      ) | ((uint64_t)p[6] <<  8) |
-            ((uint64_t)p[5] << 16) | ((uint64_t)p[4] << 24) |
-            ((uint64_t)p[3] << 32) | ((uint64_t)p[2] << 40) |
-            ((uint64_t)p[1] << 48) | ((uint64_t)p[0] << 56));
-}
-
-static inline void PUT_64BIT_MSB_FIRST(void *vp, uint64_t value)
-{
-    uint8_t *p = (uint8_t *)vp;
-    p[7] = (uint8_t)(value);
-    p[6] = (uint8_t)(value >> 8);
-    p[5] = (uint8_t)(value >> 16);
-    p[4] = (uint8_t)(value >> 24);
-    p[3] = (uint8_t)(value >> 32);
-    p[2] = (uint8_t)(value >> 40);
-    p[1] = (uint8_t)(value >> 48);
-    p[0] = (uint8_t)(value >> 56);
-}
-
 static inline uint32_t GET_32BIT_MSB_FIRST(const void *vp)
 {
     const uint8_t *p = (const uint8_t *)vp;
@@ -467,6 +420,205 @@ static inline void PUT_16BIT_MSB_FIRST(void *vp, uint16_t value)
     uint8_t *p = (uint8_t *)vp;
     p[1] = (uint8_t)(value);
     p[0] = (uint8_t)(value >> 8);
+}
+
+/*
+ * Multiply two 32-bit numbers, giving the 64-bit product as its high
+ * and low halves. Only 32-bit arithmetic is used, because the NT 3.1
+ * compilers have no 64-bit integer type. There are no branches, so
+ * the time taken depends on the values only if the CPU's multiply
+ * instruction does.
+ */
+static inline void mul_32x32(uint32_t a, uint32_t b,
+                             uint32_t *hi, uint32_t *lo)
+{
+    uint32_t al = a & 0xFFFF, ah = a >> 16;
+    uint32_t bl = b & 0xFFFF, bh = b >> 16;
+    uint32_t ll = al * bl, lh = al * bh, hl = ah * bl;
+    uint32_t mid = (ll >> 16) + (lh & 0xFFFF) + (hl & 0xFFFF);
+    *lo = (ll & 0xFFFF) | (mid << 16);
+    *hi = ah * bh + (lh >> 16) + (hl >> 16) + (mid >> 16);
+}
+
+/*
+ * Arithmetic on uint64, the 64-bit unsigned integer held as two
+ * 32-bit halves (see defs.h). Only uint64_cmp branches on the values,
+ * so the others are fine for secret data, as in the hash functions.
+ * Shift and rotate counts are not secret.
+ */
+static inline uint64 uint64_make(uint32_t hi, uint32_t lo)
+{
+    uint64 r;
+    r.hi = hi;
+    r.lo = lo;
+    return r;
+}
+
+static inline uint64 uint64_add(uint64 a, uint64 b)
+{
+    uint64 r;
+    r.lo = a.lo + b.lo;
+    /* the carry out of the low half, computed without a branch */
+    r.hi = a.hi + b.hi + (((a.lo & b.lo) | ((a.lo | b.lo) & ~r.lo)) >> 31);
+    return r;
+}
+
+static inline uint64 uint64_add32(uint64 a, uint32_t b)
+{
+    uint64 r;
+    r.lo = a.lo + b;
+    r.hi = a.hi + (((a.lo & b) | ((a.lo | b) & ~r.lo)) >> 31);
+    return r;
+}
+
+static inline uint64 uint64_sub(uint64 a, uint64 b)
+{
+    uint64 r;
+    r.lo = a.lo - b.lo;
+    /* the borrow out of the low half, computed without a branch */
+    r.hi = a.hi - b.hi - (((~a.lo & b.lo) | ((~a.lo | b.lo) & r.lo)) >> 31);
+    return r;
+}
+
+static inline uint64 uint64_xor(uint64 a, uint64 b)
+{
+    a.hi ^= b.hi;
+    a.lo ^= b.lo;
+    return a;
+}
+
+static inline uint64 uint64_and(uint64 a, uint64 b)
+{
+    a.hi &= b.hi;
+    a.lo &= b.lo;
+    return a;
+}
+
+static inline uint64 uint64_or(uint64 a, uint64 b)
+{
+    a.hi |= b.hi;
+    a.lo |= b.lo;
+    return a;
+}
+
+static inline uint64 uint64_not(uint64 a)
+{
+    a.hi = ~a.hi;
+    a.lo = ~a.lo;
+    return a;
+}
+
+/* Shift left by 0 to 63 bits */
+static inline uint64 uint64_shl(uint64 a, unsigned n)
+{
+    uint64 r;
+    if (n >= 32) {
+        r.hi = a.lo << (n - 32);
+        r.lo = 0;
+    } else if (n == 0) {
+        r = a;
+    } else {
+        r.hi = (a.hi << n) | (a.lo >> (32 - n));
+        r.lo = a.lo << n;
+    }
+    return r;
+}
+
+/* Shift right by 0 to 63 bits */
+static inline uint64 uint64_shr(uint64 a, unsigned n)
+{
+    uint64 r;
+    if (n >= 32) {
+        r.lo = a.hi >> (n - 32);
+        r.hi = 0;
+    } else if (n == 0) {
+        r = a;
+    } else {
+        r.lo = (a.lo >> n) | (a.hi << (32 - n));
+        r.hi = a.hi >> n;
+    }
+    return r;
+}
+
+/* Rotate right by 0 to 63 bits */
+static inline uint64 uint64_rotr(uint64 a, unsigned n)
+{
+    uint64 r;
+    if (n >= 32) {
+        /* rotating by 32 swaps the halves */
+        uint32_t t = a.hi;
+        a.hi = a.lo;
+        a.lo = t;
+        n -= 32;
+    }
+    if (n == 0)
+        return a;
+    r.hi = (a.hi >> n) | (a.lo << (32 - n));
+    r.lo = (a.lo >> n) | (a.hi << (32 - n));
+    return r;
+}
+
+/* Rotate left by 0 to 63 bits */
+static inline uint64 uint64_rotl(uint64 a, unsigned n)
+{
+    return uint64_rotr(a, (64 - n) & 63);
+}
+
+/* Compare, giving a value <0, 0 or >0 as memcmp does. Not for secret
+ * data. */
+static inline int uint64_cmp(uint64 a, uint64 b)
+{
+    if (a.hi != b.hi)
+        return a.hi < b.hi ? -1 : +1;
+    if (a.lo != b.lo)
+        return a.lo < b.lo ? -1 : +1;
+    return 0;
+}
+
+static inline double uint64_to_double(uint64 a)
+{
+    return a.hi * 4294967296.0 + a.lo;
+}
+
+/* The 64-bit product of two 32-bit numbers */
+static inline uint64 uint64_mul32(uint32_t a, uint32_t b)
+{
+    uint64 r;
+    mul_32x32(a, b, &r.hi, &r.lo);
+    return r;
+}
+
+/* In utils/uint64.c: division by a number up to 65535, and output in
+ * decimal into a buffer of UINT64_DECIMAL_SIZE characters */
+uint64 uint64_divmod(uint64 x, unsigned d, unsigned *rem);
+#define UINT64_DECIMAL_SIZE 21
+char *uint64_decimal(uint64 x, char *buf);
+size_t uint64_from_decimal(const char *s, uint64 *out);
+
+static inline uint64 GET_64BIT_LSB_FIRST(const void *vp)
+{
+    const uint8_t *p = (const uint8_t *)vp;
+    return uint64_make(GET_32BIT_LSB_FIRST(p + 4), GET_32BIT_LSB_FIRST(p));
+}
+
+static inline void PUT_64BIT_LSB_FIRST(void *vp, uint64 value)
+{
+    uint8_t *p = (uint8_t *)vp;
+    PUT_32BIT_LSB_FIRST(p, value.lo);
+    PUT_32BIT_LSB_FIRST(p + 4, value.hi);
+}
+
+static inline uint64 GET_64BIT_MSB_FIRST(const void *vp)
+{
+    const uint8_t *p = (const uint8_t *)vp;
+    return uint64_make(GET_32BIT_MSB_FIRST(p), GET_32BIT_MSB_FIRST(p + 4));
+}
+
+static inline void PUT_64BIT_MSB_FIRST(void *vp, uint64 value)
+{
+    uint8_t *p = (uint8_t *)vp;
+    PUT_32BIT_MSB_FIRST(p, value.hi);
+    PUT_32BIT_MSB_FIRST(p + 4, value.lo);
 }
 
 /* For use in X11-related applications, an endianness-variable form of

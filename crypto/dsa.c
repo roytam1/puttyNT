@@ -57,11 +57,13 @@ static void dsa_freekey(ssh_key *key)
 
 static void append_hex_to_strbuf(strbuf *sb, mp_int *x)
 {
+    char *hex;
+    size_t hexlen;
     if (sb->len > 0)
         put_byte(sb, ',');
     put_data(sb, "0x", 2);
-    char *hex = mp_get_hex(x);
-    size_t hexlen = strlen(hex);
+    hex = mp_get_hex(x);
+    hexlen = strlen(hex);
     put_data(sb, hex, hexlen);
     smemclr(hex, hexlen);
     sfree(hex);
@@ -114,6 +116,17 @@ static bool dsa_verify(ssh_key *key, ptrlen sig, ptrlen data)
     BinarySource src[1];
     unsigned char hash[20];
     bool toret;
+    mp_int *r;
+    mp_int *s;
+    unsigned invalid;
+    mp_int *w;
+    mp_int *sha;
+    mp_int *u1;
+    mp_int *u2;
+    mp_int *gu1p;
+    mp_int *yu2p;
+    mp_int *gu1yu2p;
+    mp_int *v;
 
     if (!dsa->p)
         return false;
@@ -141,8 +154,8 @@ static bool dsa_verify(ssh_key *key, ptrlen sig, ptrlen data)
     }
 
     /* Now we're sitting on a 40-byte string for sure. */
-    mp_int *r = mp_from_bytes_be(make_ptrlen(sig.ptr, 20));
-    mp_int *s = mp_from_bytes_be(make_ptrlen((const char *)sig.ptr + 20, 20));
+    r = mp_from_bytes_be(make_ptrlen(sig.ptr, 20));
+    s = mp_from_bytes_be(make_ptrlen((const char *)sig.ptr + 20, 20));
     if (!r || !s) {
         if (r)
             mp_free(r);
@@ -152,7 +165,7 @@ static bool dsa_verify(ssh_key *key, ptrlen sig, ptrlen data)
     }
 
     /* Basic sanity checks: 0 < r,s < q */
-    unsigned invalid = 0;
+    invalid = 0;
     invalid |= mp_eq_integer(r, 0);
     invalid |= mp_eq_integer(s, 0);
     invalid |= mp_cmp_hs(r, dsa->q);
@@ -166,7 +179,7 @@ static bool dsa_verify(ssh_key *key, ptrlen sig, ptrlen data)
     /*
      * Step 1. w <- s^-1 mod q.
      */
-    mp_int *w = mp_invert(s, dsa->q);
+    w = mp_invert(s, dsa->q);
     if (!w) {
         mp_free(r);
         mp_free(s);
@@ -177,27 +190,27 @@ static bool dsa_verify(ssh_key *key, ptrlen sig, ptrlen data)
      * Step 2. u1 <- SHA(message) * w mod q.
      */
     hash_simple(&ssh_sha1, data, hash);
-    mp_int *sha = mp_from_bytes_be(make_ptrlen(hash, 20));
-    mp_int *u1 = mp_modmul(sha, w, dsa->q);
+    sha = mp_from_bytes_be(make_ptrlen(hash, 20));
+    u1 = mp_modmul(sha, w, dsa->q);
 
     /*
      * Step 3. u2 <- r * w mod q.
      */
-    mp_int *u2 = mp_modmul(r, w, dsa->q);
+    u2 = mp_modmul(r, w, dsa->q);
 
     /*
      * Step 4. v <- (g^u1 * y^u2 mod p) mod q.
      */
-    mp_int *gu1p = mp_modpow(dsa->g, u1, dsa->p);
-    mp_int *yu2p = mp_modpow(dsa->y, u2, dsa->p);
-    mp_int *gu1yu2p = mp_modmul(gu1p, yu2p, dsa->p);
-    mp_int *v = mp_mod(gu1yu2p, dsa->q);
+    gu1p = mp_modpow(dsa->g, u1, dsa->p);
+    yu2p = mp_modpow(dsa->y, u2, dsa->p);
+    gu1yu2p = mp_modmul(gu1p, yu2p, dsa->p);
+    v = mp_mod(gu1yu2p, dsa->q);
 
     /*
      * Step 5. v should now be equal to r.
      */
 
-    toret = mp_cmp_eq(v, r);
+    toret = mp_cmp_eq(v, r) != 0;
 
     mp_free(w);
     mp_free(sha);
@@ -345,25 +358,33 @@ static void dsa_sign(ssh_key *key, ptrlen data, unsigned flags, BinarySink *bs)
     struct dsa_key *dsa = container_of(key, struct dsa_key, sshk);
     unsigned char digest[20];
     int i;
+    mp_int *k;
+    mp_int *kinv;
+    mp_int *gkp;
+    mp_int *r;
+    mp_int *hash;
+    mp_int *xr;
+    mp_int *hxr;
+    mp_int *s;
 
     hash_simple(&ssh_sha1, data, digest);
 
     /* Generate any valid exponent k, using the RFC 6979 deterministic
      * procedure. */
-    mp_int *k = rfc6979(&ssh_sha1, dsa->q, dsa->x, data);
-    mp_int *kinv = mp_invert(k, dsa->q);       /* k^-1 mod q */
+    k = rfc6979(&ssh_sha1, dsa->q, dsa->x, data);
+    kinv = mp_invert(k, dsa->q);               /* k^-1 mod q */
 
     /*
      * Now we have k, so just go ahead and compute the signature.
      */
-    mp_int *gkp = mp_modpow(dsa->g, k, dsa->p); /* g^k mod p */
-    mp_int *r = mp_mod(gkp, dsa->q);        /* r = (g^k mod p) mod q */
+    gkp = mp_modpow(dsa->g, k, dsa->p);         /* g^k mod p */
+    r = mp_mod(gkp, dsa->q);                /* r = (g^k mod p) mod q */
     mp_free(gkp);
 
-    mp_int *hash = mp_from_bytes_be(make_ptrlen(digest, 20));
-    mp_int *xr = mp_mul(dsa->x, r);
-    mp_int *hxr = mp_add(xr, hash);         /* hash + x*r */
-    mp_int *s = mp_modmul(kinv, hxr, dsa->q); /* s = k^-1 * (hash+x*r) mod q */
+    hash = mp_from_bytes_be(make_ptrlen(digest, 20));
+    xr = mp_mul(dsa->x, r);
+    hxr = mp_add(xr, hash);                 /* hash + x*r */
+    s = mp_modmul(kinv, hxr, dsa->q);         /* s = k^-1 * (hash+x*r) mod q */
     mp_free(hxr);
     mp_free(xr);
     mp_free(kinv);
@@ -383,25 +404,30 @@ static void dsa_sign(ssh_key *key, ptrlen data, unsigned flags, BinarySink *bs)
 static char *dsa_alg_desc(const ssh_keyalg *self) { return dupstr("DSA"); }
 
 const ssh_keyalg ssh_dsa = {
-    .new_pub = dsa_new_pub,
-    .new_priv = dsa_new_priv,
-    .new_priv_openssh = dsa_new_priv_openssh,
-    .freekey = dsa_freekey,
-    .invalid = dsa_invalid,
-    .sign = dsa_sign,
-    .verify = dsa_verify,
-    .public_blob = dsa_public_blob,
-    .private_blob = dsa_private_blob,
-    .openssh_blob = dsa_openssh_blob,
-    .has_private = dsa_has_private,
-    .cache_str = dsa_cache_str,
-    .components = dsa_components,
-    .base_key = nullkey_base_key,
-    .pubkey_bits = dsa_pubkey_bits,
-    .supported_flags = nullkey_supported_flags,
-    .alternate_ssh_id = nullkey_alternate_ssh_id,
-    .alg_desc = dsa_alg_desc,
-    .variable_size = nullkey_variable_size_yes,
-    .ssh_id = "ssh-dss",
-    .cache_id = "dss",
+    /* .new_pub = */ dsa_new_pub,
+    /* .new_priv = */ dsa_new_priv,
+    /* .new_priv_openssh = */ dsa_new_priv_openssh,
+    /* .freekey = */ dsa_freekey,
+    /* .invalid = */ dsa_invalid,
+    /* .sign = */ dsa_sign,
+    /* .verify = */ dsa_verify,
+    /* .public_blob = */ dsa_public_blob,
+    /* .private_blob = */ dsa_private_blob,
+    /* .openssh_blob = */ dsa_openssh_blob,
+    /* .has_private = */ dsa_has_private,
+    /* .cache_str = */ dsa_cache_str,
+    /* .components = */ dsa_components,
+    /* .base_key = */ nullkey_base_key,
+    /* .ca_public_blob = */ NULL,
+    /* .check_cert = */ NULL,
+    /* .cert_id_string = */ NULL,
+    /* .cert_info = */ NULL,
+    /* .pubkey_bits = */ dsa_pubkey_bits,
+    /* .supported_flags = */ nullkey_supported_flags,
+    /* .alternate_ssh_id = */ nullkey_alternate_ssh_id,
+    /* .alg_desc = */ dsa_alg_desc,
+    /* .variable_size = */ nullkey_variable_size_yes,
+    /* .related_alg = */ NULL,
+    /* .ssh_id = */ "ssh-dss",
+    /* .cache_id = */ "dss",
 };

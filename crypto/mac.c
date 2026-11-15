@@ -14,7 +14,7 @@ bool ssh2_mac_verresult(ssh2_mac *mac, const void *candidate)
 
     assert(mac->vt->len <= sizeof(correct));
     ssh2_mac_genresult(mac, correct);
-    toret = smemeq(correct, candidate, mac->vt->len);
+    toret = smemeq(correct, candidate, mac->vt->len) != 0;
 
     smemclr(correct, sizeof(correct));
 

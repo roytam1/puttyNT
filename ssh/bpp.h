@@ -81,9 +81,11 @@ void ssh2_bpp_queue_disconnect(BinaryPacketProtocol *bpp,
 bool ssh2_bpp_check_unimplemented(BinaryPacketProtocol *bpp, PktIn *pktin);
 
 /* Convenience macro for BPPs to send formatted strings to the Event
- * Log. Assumes a function parameter called 'bpp' is in scope. */
-#define bpp_logevent(...) ( \
-    logevent_and_free((bpp)->logctx, dupprintf(__VA_ARGS__)))
+ * Log. Assumes a function parameter called 'bpp' is in scope. The
+ * dupprintf arguments go in a second pair of brackets, as with
+ * ppl_logevent in ppl.h. */
+#define bpp_logevent(args) ( \
+    logevent_and_free((bpp)->logctx, dupprintf args))
 
 /*
  * Structure that tracks how much data is sent and received, for

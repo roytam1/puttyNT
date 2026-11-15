@@ -141,9 +141,10 @@ struct RFC6979 {
 
 static mp_int *bits2int(ptrlen b, RFC6979 *s)
 {
+    mp_int *x;
     if (b.len > s->qbytes)
         b.len = s->qbytes;
-    mp_int *x = mp_from_bytes_be(b);
+    x = mp_from_bytes_be(b);
 
     /*
      * Rationale for using mp_rshift_fixed_into and not
@@ -165,7 +166,8 @@ static mp_int *bits2int(ptrlen b, RFC6979 *s)
 static void BinarySink_put_int2octets(BinarySink *bs, mp_int *x, RFC6979 *s)
 {
     mp_int *x_mod_q = mp_mod(x, s->q);
-    for (size_t i = s->qbytes; i-- > 0 ;)
+    size_t i;
+    for (i = s->qbytes; i-- > 0 ;)
         put_byte(bs, mp_get_byte(x_mod_q, i));
     mp_free(x_mod_q);
 }
@@ -186,6 +188,7 @@ RFC6979 *rfc6979_new(const ssh_hashalg *hashalg, mp_int *q, mp_int *x)
 {
     /* Make the state structure. */
     RFC6979 *s = snew(RFC6979);
+    size_t hbits;
     s->q = q;
     s->x = x;
     s->qbits = mp_get_nbits(q);
@@ -196,7 +199,7 @@ RFC6979 *rfc6979_new(const ssh_hashalg *hashalg, mp_int *q, mp_int *x)
 
     /* In each attempt, we concatenate enough hash blocks to be
      * greater than qbits in size. */
-    size_t hbits = 8 * s->hlen;
+    hbits = 8 * s->hlen;
     s->T_nblocks = (s->qbits + hbits - 1) / hbits;
     s->T = snewn(s->T_nblocks * s->hlen, unsigned char);
 
@@ -260,10 +263,12 @@ void rfc6979_setup(RFC6979 *s, ptrlen message)
 RFC6979Result rfc6979_attempt(RFC6979 *s)
 {
     RFC6979Result result;
+    unsigned char K[MAX_HASH_LEN];
+    size_t i;
 
     /* 3.2 (h) 1: set T to the empty string */
     /* 3.2 (h) 2: make lots of output by concatenating MACs of V */
-    for (size_t i = 0; i < s->T_nblocks; i++) {
+    for (i = 0; i < s->T_nblocks; i++) {
         ssh2_mac_start(s->mac);
         put_data(s->mac, s->V, s->hlen);
         ssh2_mac_genresult(s->mac, s->V);
@@ -311,7 +316,6 @@ RFC6979Result rfc6979_attempt(RFC6979 *s)
     ssh2_mac_start(s->mac);
     put_data(s->mac, s->V, s->hlen);
     put_byte(s->mac, 0);
-    unsigned char K[MAX_HASH_LEN];
     ssh2_mac_genresult(s->mac, K);
     ssh2_mac_setkey(s->mac, make_ptrlen(K, s->hlen));
     smemclr(K, sizeof(K));
@@ -345,8 +349,8 @@ mp_int *rfc6979(
     const ssh_hashalg *hashalg, mp_int *q, mp_int *x, ptrlen message)
 {
     RFC6979 *s = rfc6979_new(hashalg, q, x);
-    rfc6979_setup(s, message);
     RFC6979Result result;
+    rfc6979_setup(s, message);
     while (true) {
         result = rfc6979_attempt(s);
         if (result.ok)

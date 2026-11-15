@@ -1,10 +1,11 @@
 /*
- * Implementation function behind dupwcscat() in misc.h.
+ * dupwcscat() in misc.h.
  *
  * This function is called with an arbitrary number of 'const wchar_t
- * *' parameters, of which the last one is a null pointer. The wrapper
- * macro puts on the null pointer itself, so normally callers don't
- * have to.
+ * *' parameters, of which the last one is a null pointer. (NT port:
+ * upstream has a variadic wrapper macro that adds the null pointer.
+ * The compilers of 1993-1996 have no variadic macros, so callers
+ * pass it themselves.)
  */
 
 #include <stdarg.h>
@@ -13,7 +14,7 @@
 #include "defs.h"
 #include "misc.h"
 
-wchar_t *dupwcscat_fn(const wchar_t *s1, ...)
+wchar_t *dupwcscat(const wchar_t *s1, ...)
 {
     int len;
     wchar_t *p, *q, *sn;

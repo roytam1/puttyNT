@@ -50,9 +50,10 @@ static void ca_state_free(void *vctx)
 
 static void ca_refresh_name_list(struct ca_state *st)
 {
+    host_ca_enum *hce;
     clear_string_tree(st->ca_names);
 
-    host_ca_enum *hce = enum_host_ca_start();
+    hce = enum_host_ca_start();
     if (hce) {
         strbuf *namebuf = strbuf_new();
 
@@ -95,6 +96,8 @@ static void ca_refresh_pubkey_info(struct ca_state *st, dlgparam *dp)
     strbuf *blob = strbuf_new();
 
     ptrlen data = ptrlen_from_asciz(st->pubkey);
+    ptrlen alg_name;
+    const ssh_keyalg *alg;
 
     if (st->ca_pubkey_blob)
         strbuf_free(st->ca_pubkey_blob);
@@ -115,21 +118,21 @@ static void ca_refresh_pubkey_info(struct ca_state *st, dlgparam *dp)
          * Otherwise, try to decode as if it was a public key _file_.
          */
         BinarySource src[1];
-        BinarySource_BARE_INIT_PL(src, data);
         const char *error;
+        BinarySource_BARE_INIT_PL(src, data);
         if (!ppk_loadpub_s(src, NULL, BinarySink_UPCAST(blob), NULL, &error)) {
             text = dupprintf("Cannot decode key: %s", error);
             goto out;
         }
     }
 
-    ptrlen alg_name = pubkey_blob_to_alg_name(ptrlen_from_strbuf(blob));
+    alg_name = pubkey_blob_to_alg_name(ptrlen_from_strbuf(blob));
     if (!alg_name.len) {
         text = dupstr("Invalid key (no key type)");
         goto out;
     }
 
-    const ssh_keyalg *alg = find_pubkey_alg_len(alg_name);
+    alg = find_pubkey_alg_len(alg_name);
     if (!alg) {
         text = dupprintf("Unrecognised key type '%.*s'",
                          PTRLEN_PRINTF(alg_name));
@@ -163,16 +166,18 @@ static void ca_refresh_pubkey_info(struct ca_state *st, dlgparam *dp)
 static void ca_load_selected_record(struct ca_state *st, dlgparam *dp)
 {
     int i = dlg_listbox_index(st->ca_reclist, dp);
+    const char *name;
+    host_ca *hca;
     if (i < 0) {
         dlg_beep(dp);
         return;
     }
-    const char *name = index234(st->ca_names, i);
+    name = index234(st->ca_names, i);
     if (!name) { /* in case the list box and the tree got out of sync */
         dlg_beep(dp);
         return;
     }
-    host_ca *hca = host_ca_load(name);
+    hca = host_ca_load(name);
     if (!hca) {
         char *msg = dupprintf("Unable to load host CA record '%s'", name);
         dlg_error_msg(dp, msg);
@@ -186,7 +191,7 @@ static void ca_load_selected_record(struct ca_state *st, dlgparam *dp)
     dlg_refresh(st->ca_name_edit, dp);
     dlg_refresh(st->ca_pubkey_edit, dp);
     dlg_refresh(st->ca_validity_edit, dp);
-    for (size_t i = 0; i < NRSATYPES; i++)
+    for (i = 0; i < NRSATYPES; i++)
         dlg_refresh(st->rsa_type_checkboxes[i], dp);
     ca_refresh_pubkey_info(st, dp);
 }
@@ -205,13 +210,13 @@ static void ca_name_handler(dlgcontrol *ctrl, dlgparam *dp,
     if (event == EVENT_REFRESH) {
         dlg_editbox_set(ctrl, dp, st->name);
     } else if (event == EVENT_VALCHANGE) {
+        int index;
         sfree(st->name);
         st->name = dlg_editbox_get(ctrl, dp);
 
         /*
          * Try to auto-select the typed name in the list.
          */
-        int index;
         if (!findrelpos234(st->ca_names, st->name, NULL, REL234_GE, &index))
             index = count234(st->ca_names) - 1;
         if (index >= 0)
@@ -224,10 +229,11 @@ static void ca_reclist_handler(dlgcontrol *ctrl, dlgparam *dp,
 {
     struct ca_state *st = (struct ca_state *)ctrl->context.p;
     if (event == EVENT_REFRESH) {
+        const char *name;
+        int i;
         dlg_update_start(ctrl, dp);
         dlg_listbox_clear(ctrl, dp);
-        const char *name;
-        for (int i = 0; (name = index234(st->ca_names, i)) != NULL; i++)
+        for (i = 0; (name = index234(st->ca_names, i)) != NULL; i++)
             dlg_listbox_add(ctrl, dp, name);
         dlg_update_done(ctrl, dp);
     } else if (event == EVENT_ACTION) {
@@ -250,14 +256,16 @@ static void ca_save_handler(dlgcontrol *ctrl, dlgparam *dp,
 {
     struct ca_state *st = (struct ca_state *)ctrl->context.p;
     if (event == EVENT_ACTION) {
+        char *error_msg;
+        ptrlen error_loc;
+        host_ca *hca;
+        char *error;
         if (!*st->validity) {
             dlg_error_msg(dp, "No validity expression configured "
                           "for this key");
             return;
         }
 
-        char *error_msg;
-        ptrlen error_loc;
         if (!cert_expr_valid(st->validity, &error_msg, &error_loc)) {
             char *error_full = dupprintf("Error in expression: %s", error_msg);
             dlg_error_msg(dp, error_full);
@@ -275,7 +283,7 @@ static void ca_save_handler(dlgcontrol *ctrl, dlgparam *dp,
             return;
         }
 
-        host_ca *hca = snew(host_ca);
+        hca = snew(host_ca);
         memset(hca, 0, sizeof(*hca));
         hca->name = dupstr(st->name);
         hca->ca_public_key = strbuf_dup(ptrlen_from_strbuf(
@@ -283,7 +291,7 @@ static void ca_save_handler(dlgcontrol *ctrl, dlgparam *dp,
         hca->validity_expression = dupstr(st->validity);
         hca->opts = st->opts;          /* structure copy */
 
-        char *error = host_ca_save(hca);
+        error = host_ca_save(hca);
         host_ca_free(hca);
 
         if (error) {
@@ -302,17 +310,19 @@ static void ca_delete_handler(dlgcontrol *ctrl, dlgparam *dp,
     struct ca_state *st = (struct ca_state *)ctrl->context.p;
     if (event == EVENT_ACTION) {
         int i = dlg_listbox_index(st->ca_reclist, dp);
+        const char *name;
+        char *error;
         if (i < 0) {
             dlg_beep(dp);
             return;
         }
-        const char *name = index234(st->ca_names, i);
+        name = index234(st->ca_names, i);
         if (!name) { /* in case the list box and the tree got out of sync */
             dlg_beep(dp);
             return;
         }
 
-        char *error = host_ca_delete(name);
+        error = host_ca_delete(name);
         if (error) {
             dlg_error_msg(dp, error);
             sfree(error);
@@ -397,6 +407,7 @@ void setup_ca_config_box(struct controlbox *b)
     /* Internal state for manipulating the host CA system */
     struct ca_state *st = (struct ca_state *)ctrl_alloc_with_free(
         b, sizeof(struct ca_state), ca_state_free);
+    dlgcontrol *sigtypelabel;
     memset(st, 0, sizeof(*st));
     st->ca_names = newtree234(ca_name_compare);
     st->validity = dupstr("");
@@ -475,7 +486,7 @@ void setup_ca_config_box(struct controlbox *b)
     c = ctrl_text(s, "Signature types (RSA keys only):",
                   HELPCTX(ssh_cert_rsa_hash));
     c->column = 0;
-    dlgcontrol *sigtypelabel = c;
+    sigtypelabel = c;
     c = ctrl_checkbox(s, "SHA-1", NO_SHORTCUT, HELPCTX(ssh_cert_rsa_hash),
                       ca_rsa_type_handler, P(st));
     c->column = 1;

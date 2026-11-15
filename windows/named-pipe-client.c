@@ -59,10 +59,7 @@ HANDLE connect_to_named_pipe(const char *pipename, char **err)
         return INVALID_HANDLE_VALUE;
     }
 
-    if (p_GetSecurityInfo(pipehandle, SE_KERNEL_OBJECT,
-                          OWNER_SECURITY_INFORMATION,
-                          &pipeowner, NULL, NULL, NULL,
-                          &psd) != ERROR_SUCCESS) {
+    if (!get_object_owner(pipehandle, &pipeowner, &psd)) {
         CloseHandle(pipehandle);
         *err = dupprintf(
             "Unable to get named pipe security information: %s",

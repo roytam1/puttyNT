@@ -75,16 +75,18 @@ void http_digest_response(BinarySink *bs, ptrlen username, ptrlen password,
     unsigned char rsphash[MAX_HASH_LEN];
     const ssh_hashalg *alg = httphashalgs[hash];
     size_t hashlen = httphashlengths[hash];
+    unsigned char ncbuf[4];
+    unsigned char client_nonce_raw[33];
+    char client_nonce_base64[lenof(client_nonce_raw) / 3 * 4];
+    ssh_hash *h;
+    unsigned i;
 
     enable_dit(); /* just in case main() forgot */
 
-    unsigned char ncbuf[4];
     PUT_32BIT_MSB_FIRST(ncbuf, nonce_count);
 
-    unsigned char client_nonce_raw[33];
     random_read(client_nonce_raw, lenof(client_nonce_raw));
-    char client_nonce_base64[lenof(client_nonce_raw) / 3 * 4];
-    for (unsigned i = 0; i < lenof(client_nonce_raw)/3; i++)
+    for (i = 0; i < lenof(client_nonce_raw)/3; i++)
         base64_encode_atom(client_nonce_raw + 3*i, 3,
                            client_nonce_base64 + 4*i);
 
@@ -94,7 +96,7 @@ void http_digest_response(BinarySink *bs, ptrlen username, ptrlen password,
      * "MD5-sess" which as far as I know don't sensibly apply to
      * proxies and HTTP CONNECT).
      */
-    ssh_hash *h = ssh_hash_new(alg);
+    h = ssh_hash_new(alg);
     put_datapl(h, username);
     put_byte(h, ':');
     put_datapl(h, realm);

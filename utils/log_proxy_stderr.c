@@ -35,11 +35,14 @@ void log_proxy_stderr(Plug *plug, Socket *sock, ProxyStderrBuf *psb,
      */
 
     while (len > 0) {
+        size_t to_consume;
+        size_t pos;
+        size_t newsize;
         /*
          * Copy as much data into psb->buf as will fit.
          */
         assert(psb->size < lenof(psb->buf));
-        size_t to_consume = lenof(psb->buf) - psb->size;
+        to_consume = lenof(psb->buf) - psb->size;
         if (to_consume > len)
             to_consume = len;
         memcpy(psb->buf + psb->size, data, to_consume);
@@ -50,20 +53,22 @@ void log_proxy_stderr(Plug *plug, Socket *sock, ProxyStderrBuf *psb,
         /*
          * Output any full lines in psb->buf.
          */
-        size_t pos = 0;
+        pos = 0;
         while (pos < psb->size) {
             char *nlpos = memchr(psb->buf + pos, '\n', psb->size - pos);
+            size_t endpos;
+            char *msg;
             if (!nlpos)
                 break;
 
             /*
              * Found a newline in the buffer, so we can output a line.
              */
-            size_t endpos = nlpos - psb->buf;
+            endpos = nlpos - psb->buf;
             while (endpos > pos && (psb->buf[endpos-1] == '\n' ||
                                     psb->buf[endpos-1] == '\r'))
                 endpos--;
-            char *msg = dupprintf(
+            msg = dupprintf(
                 "%s: %.*s", psb->prefix, (int)(endpos - pos), psb->buf + pos);
             plug_log(plug, sock, PLUGLOG_PROXY_MSG, NULL, 0, msg, 0);
             sfree(msg);
@@ -90,7 +95,7 @@ void log_proxy_stderr(Plug *plug, Socket *sock, ProxyStderrBuf *psb,
         /*
          * Now move any remaining data up to the front of the buffer.
          */
-        size_t newsize = psb->size - pos;
+        newsize = psb->size - pos;
         if (newsize)
             memmove(psb->buf, psb->buf + pos, newsize);
         psb->size = newsize;

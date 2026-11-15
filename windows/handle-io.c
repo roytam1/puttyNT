@@ -141,14 +141,14 @@ static DWORD WINAPI handle_input_threadfunc(void *param)
             memset(povl, 0, sizeof(OVERLAPPED));
             povl->hEvent = oev;
         }
-        readret = ReadFile(ctx->h, ctx->buffer,readlen, &ctx->len, povl);
+        readret = ReadFile(ctx->h, ctx->buffer,readlen, &ctx->len, povl) != 0;
         if (!readret)
             ctx->readerr = GetLastError();
         else
             ctx->readerr = 0;
         if (povl && !readret && ctx->readerr == ERROR_IO_PENDING) {
             WaitForSingleObject(povl->hEvent, INFINITE);
-            readret = GetOverlappedResult(ctx->h, povl, &ctx->len, false);
+            readret = GetOverlappedResult(ctx->h, povl, &ctx->len, false) != 0;
             if (!readret)
                 ctx->readerr = GetLastError();
             else
@@ -319,14 +319,14 @@ static DWORD WINAPI handle_output_threadfunc(void *param)
         }
 
         writeret = WriteFile(ctx->h, ctx->buffer, ctx->len,
-                             &ctx->lenwritten, povl);
+                             &ctx->lenwritten, povl) != 0;
         if (!writeret)
             ctx->writeerr = GetLastError();
         else
             ctx->writeerr = 0;
         if (povl && !writeret && GetLastError() == ERROR_IO_PENDING) {
             writeret = GetOverlappedResult(ctx->h, povl,
-                                           &ctx->lenwritten, true);
+                                           &ctx->lenwritten, true) != 0;
             if (!writeret)
                 ctx->writeerr = GetLastError();
             else
@@ -470,6 +470,7 @@ struct handle *handle_input_new(HANDLE handle, handle_inputfn_t gotdata,
 {
     struct handle *h = snew(struct handle);
     DWORD in_threadid; /* required for Win9x */
+    HANDLE hThread;
 
     h->type = HT_INPUT;
     h->u.i.h = handle;
@@ -482,8 +483,8 @@ struct handle *handle_input_new(HANDLE handle, handle_inputfn_t gotdata,
     h->u.i.flags = flags;
 
     ensure_ready_event_setup();
-    HANDLE hThread = CreateThread(NULL, 0, handle_input_threadfunc,
-                                  &h->u.i, 0, &in_threadid);
+    hThread = CreateThread(NULL, 0, handle_input_threadfunc,
+                           &h->u.i, 0, &in_threadid);
     if (hThread)
         CloseHandle(hThread);          /* we don't need the thread handle */
     h->u.i.busy = true;
@@ -496,6 +497,7 @@ struct handle *handle_output_new(HANDLE handle, handle_outputfn_t sentdata,
 {
     struct handle *h = snew(struct handle);
     DWORD out_threadid; /* required for Win9x */
+    HANDLE hThread;
 
     h->type = HT_OUTPUT;
     h->u.o.h = handle;
@@ -512,8 +514,8 @@ struct handle *handle_output_new(HANDLE handle, handle_outputfn_t sentdata,
     h->u.o.flags = flags;
 
     ensure_ready_event_setup();
-    HANDLE hThread = CreateThread(NULL, 0, handle_output_threadfunc,
-                                  &h->u.o, 0, &out_threadid);
+    hThread = CreateThread(NULL, 0, handle_output_threadfunc,
+                           &h->u.o, 0, &out_threadid);
     if (hThread)
         CloseHandle(hThread);          /* we don't need the thread handle */
 

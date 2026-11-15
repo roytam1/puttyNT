@@ -10,9 +10,9 @@
 #include "mpint_i.h"
 
 #ifdef PRNG_DIAGNOSTICS
-#define prngdebug debug
+#define prngdebug(args) debug(args)
 #else
-#define prngdebug(...) ((void)0)
+#define prngdebug(args) ((void)0)
 #endif
 
 /*
@@ -99,7 +99,7 @@ struct prng_impl {
     ssh_hash *collectors[NCOLLECTORS];
     size_t until_reseed;
     uint32_t reseeds;
-    uint64_t last_reseed_time;
+    uint32_t last_reseed_time;
 };
 
 static void prng_seed_BinarySink_write(
@@ -108,13 +108,14 @@ static void prng_seed_BinarySink_write(
 prng *prng_new(const ssh_hashalg *hashalg)
 {
     prng_impl *pi = snew(prng_impl);
+    size_t i;
 
     memset(pi, 0, sizeof(prng_impl));
     pi->hashalg = hashalg;
     pi->keymaker = NULL;
     pi->generator = NULL;
     memset(pi->counter, 0, sizeof(pi->counter));
-    for (size_t i = 0; i < NCOLLECTORS; i++)
+    for (i = 0; i < NCOLLECTORS; i++)
         pi->collectors[i] = ssh_hash_new(pi->hashalg);
     pi->until_reseed = 0;
     BinarySink_INIT(&pi->Prng, prng_seed_BinarySink_write);
@@ -127,9 +128,10 @@ prng *prng_new(const ssh_hashalg *hashalg)
 void prng_free(prng *pr)
 {
     prng_impl *pi = container_of(pr, prng_impl, Prng);
+    size_t i;
 
     smemclr(pi->counter, sizeof(pi->counter));
-    for (size_t i = 0; i < NCOLLECTORS; i++)
+    for (i = 0; i < NCOLLECTORS; i++)
         ssh_hash_free(pi->collectors[i]);
     if (pi->generator)
         ssh_hash_free(pi->generator);
@@ -145,7 +147,7 @@ void prng_seed_begin(prng *pr)
 
     assert(!pi->keymaker);
 
-    prngdebug("prng: reseed begin\n");
+    prngdebug(("prng: reseed begin\n"));
 
     /*
      * Make a hash instance that will generate the key for the new one.
@@ -166,7 +168,7 @@ static void prng_seed_BinarySink_write(
     prng *pr = BinarySink_DOWNCAST(bs, prng);
     prng_impl *pi = container_of(pr, prng_impl, Prng);
     assert(pi->keymaker);
-    prngdebug("prng: got %"SIZEu" bytes of seed\n", len);
+    prngdebug(("prng: got %"SIZEu" bytes of seed\n", len));
     put_data(pi->keymaker, data, len);
 }
 
@@ -177,7 +179,7 @@ void prng_seed_finish(prng *pr)
 
     assert(pi->keymaker);
 
-    prngdebug("prng: reseed finish\n");
+    prngdebug(("prng: reseed finish\n"));
 
     /*
      * Actually generate the key.
@@ -202,13 +204,15 @@ void prng_seed_finish(prng *pr)
 static inline void prng_generate(prng_impl *pi, void *outbuf)
 {
     ssh_hash *h = ssh_hash_copy(pi->generator);
+    BignumCarry c;
+    unsigned i;
 
-    prngdebug("prng_generate\n");
+    prngdebug(("prng_generate\n"));
     put_byte(h, 'G');
-    for (unsigned i = 0; i < 128; i += 8)
+    for (i = 0; i < 128; i += 8)
         put_byte(h, pi->counter[i/BIGNUM_INT_BITS] >> (i%BIGNUM_INT_BITS));
-    BignumCarry c = 1;
-    for (unsigned i = 0; i < lenof(pi->counter); i++)
+    c = 1;
+    for (i = 0; i < lenof(pi->counter); i++)
         BignumADC(pi->counter[i], c, pi->counter[i], 0, c);
     ssh_hash_final(h, outbuf);
 }
@@ -217,15 +221,17 @@ void prng_read(prng *pr, void *vout, size_t size)
 {
     prng_impl *pi = container_of(pr, prng_impl, Prng);
     unsigned char buf[MAX_HASH_LEN];
+    uint8_t *out;
 
     assert(!pi->keymaker);
 
-    prngdebug("prng_read %"SIZEu"\n", size);
+    prngdebug(("prng_read %"SIZEu"\n", size));
 
-    uint8_t *out = (uint8_t *)vout;
+    out = (uint8_t *)vout;
     while (size > 0) {
+        size_t to_use;
         prng_generate(pi, buf);
-        size_t to_use = size > pi->hashalg->hlen ? pi->hashalg->hlen : size;
+        to_use = size > pi->hashalg->hlen ? pi->hashalg->hlen : size;
         memcpy(out, buf, to_use);
         out += to_use;
         size -= to_use;
@@ -240,18 +246,20 @@ void prng_read(prng *pr, void *vout, size_t size)
 void prng_add_entropy(prng *pr, unsigned source_id, ptrlen data)
 {
     prng_impl *pi = container_of(pr, prng_impl, Prng);
+    uint32_t counter;
+    size_t index;
 
     assert(source_id < NOISE_MAX_SOURCES);
-    uint32_t counter = ++pi->source_counters[source_id];
+    counter = ++pi->source_counters[source_id];
 
-    size_t index = 0;
+    index = 0;
     while (index+1 < NCOLLECTORS && !(counter & 1)) {
         counter >>= 1;
         index++;
     }
 
-    prngdebug("prng_add_entropy source=%u size=%"SIZEu" -> collector %zi\n",
-              source_id, data.len, index);
+    prngdebug(("prng_add_entropy source=%u size=%"SIZEu
+               " -> collector %"SIZEu"\n", source_id, data.len, index));
 
     put_datapl(pi->collectors[index], data);
 
@@ -261,13 +269,15 @@ void prng_add_entropy(prng *pr, unsigned source_id, ptrlen data)
 
     if (pi->until_reseed == 0 &&
         prng_reseed_time_ms() - pi->last_reseed_time >= 100) {
+        unsigned char buf[MAX_HASH_LEN];
+        uint32_t reseed_index;
+        size_t i;
         prng_seed_begin(&pi->Prng);
 
-        unsigned char buf[MAX_HASH_LEN];
-        uint32_t reseed_index = ++pi->reseeds;
-        prngdebug("prng entropy reseed #%"PRIu32"\n", reseed_index);
-        for (size_t i = 0; i < NCOLLECTORS; i++) {
-            prngdebug("emptying collector %"SIZEu"\n", i);
+        reseed_index = ++pi->reseeds;
+        prngdebug(("prng entropy reseed #%"PRIu32"\n", reseed_index));
+        for (i = 0; i < NCOLLECTORS; i++) {
+            prngdebug(("emptying collector %"SIZEu"\n", i));
             ssh_hash_digest(pi->collectors[i], buf);
             put_data(&pi->Prng, buf, pi->hashalg->hlen);
             ssh_hash_reset(pi->collectors[i]);

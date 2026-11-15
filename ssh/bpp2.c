@@ -50,12 +50,12 @@ static void ssh2_bpp_handle_output(BinaryPacketProtocol *bpp);
 static PktOut *ssh2_bpp_new_pktout(int type);
 
 static const BinaryPacketProtocolVtable ssh2_bpp_vtable = {
-    .free = ssh2_bpp_free,
-    .handle_input = ssh2_bpp_handle_input,
-    .handle_output = ssh2_bpp_handle_output,
-    .new_pktout = ssh2_bpp_new_pktout,
-    .queue_disconnect = ssh2_bpp_queue_disconnect, /* in common.c */
-    .packet_size_limit = 0xFFFFFFFF, /* no special limit for this bpp */
+    /* .free = */ ssh2_bpp_free,
+    /* .handle_input = */ ssh2_bpp_handle_input,
+    /* .handle_output = */ ssh2_bpp_handle_output,
+    /* .new_pktout = */ ssh2_bpp_new_pktout,
+    /* .queue_disconnect = */ ssh2_bpp_queue_disconnect, /* in common.c */
+    /* .packet_size_limit = */ 0xFFFFFFFF, /* no special limit for this bpp */
 };
 
 BinaryPacketProtocol *ssh2_bpp_new(
@@ -124,8 +124,8 @@ void ssh2_bpp_new_outgoing_crypto(
             (ssh_cipher_alg(s->out.cipher)->flags & SSH_CIPHER_IS_CBC) &&
             !(s->bpp.remote_bugs & BUG_CHOKES_ON_SSH2_IGNORE));
 
-        bpp_logevent("Initialised %s outbound encryption",
-                     ssh_cipher_alg(s->out.cipher)->text_name);
+        bpp_logevent(("Initialised %s outbound encryption",
+                      ssh_cipher_alg(s->out.cipher)->text_name));
     } else {
         s->out.cipher = NULL;
         s->cbc_ignore_workaround = false;
@@ -141,12 +141,12 @@ void ssh2_bpp_new_outgoing_crypto(
          */
         ssh2_mac_setkey(s->out.mac, make_ptrlen(mac_key, mac->keylen));
 
-        bpp_logevent("Initialised %s outbound MAC algorithm%s%s",
-                     ssh2_mac_text_name(s->out.mac),
-                     etm_mode ? " (in ETM mode)" : "",
-                     (s->out.cipher &&
+        bpp_logevent(("Initialised %s outbound MAC algorithm%s%s",
+                      ssh2_mac_text_name(s->out.mac),
+                      etm_mode ? " (in ETM mode)" : "",
+                      (s->out.cipher &&
                       ssh_cipher_alg(s->out.cipher)->required_mac ?
-                      " (required by cipher)" : ""));
+                      " (required by cipher)" : "")));
     } else {
         s->out.mac = NULL;
     }
@@ -158,8 +158,8 @@ void ssh2_bpp_new_outgoing_crypto(
         s->out.pending_compression = compression;
         s->out_comp = NULL;
 
-        bpp_logevent("Will enable %s compression after user authentication",
-                     s->out.pending_compression->text_name);
+        bpp_logevent(("Will enable %s compression after user authentication",
+                      s->out.pending_compression->text_name));
     } else {
         s->out.pending_compression = NULL;
 
@@ -169,8 +169,8 @@ void ssh2_bpp_new_outgoing_crypto(
         s->out_comp = ssh_compressor_new(compression);
 
         if (s->out_comp)
-            bpp_logevent("Initialised %s compression",
-                         ssh_compressor_alg(s->out_comp)->text_name);
+            bpp_logevent(("Initialised %s compression",
+                          ssh_compressor_alg(s->out_comp)->text_name));
     }
 }
 
@@ -192,8 +192,8 @@ void ssh2_bpp_new_incoming_crypto(
         ssh_cipher_setkey(s->in.cipher, ckey);
         ssh_cipher_setiv(s->in.cipher, iv);
 
-        bpp_logevent("Initialised %s inbound encryption",
-                     ssh_cipher_alg(s->in.cipher)->text_name);
+        bpp_logevent(("Initialised %s inbound encryption",
+                      ssh_cipher_alg(s->in.cipher)->text_name));
     } else {
         s->in.cipher = NULL;
     }
@@ -203,12 +203,12 @@ void ssh2_bpp_new_incoming_crypto(
         /* MAC setkey has to follow cipher, just as in outgoing_crypto above */
         ssh2_mac_setkey(s->in.mac, make_ptrlen(mac_key, mac->keylen));
 
-        bpp_logevent("Initialised %s inbound MAC algorithm%s%s",
-                     ssh2_mac_text_name(s->in.mac),
-                     etm_mode ? " (in ETM mode)" : "",
-                     (s->in.cipher &&
+        bpp_logevent(("Initialised %s inbound MAC algorithm%s%s",
+                      ssh2_mac_text_name(s->in.mac),
+                      etm_mode ? " (in ETM mode)" : "",
+                      (s->in.cipher &&
                       ssh_cipher_alg(s->in.cipher)->required_mac ?
-                      " (required by cipher)" : ""));
+                      " (required by cipher)" : "")));
     } else {
         s->in.mac = NULL;
     }
@@ -217,8 +217,8 @@ void ssh2_bpp_new_incoming_crypto(
         s->in.pending_compression = compression;
         s->in_decomp = NULL;
 
-        bpp_logevent("Will enable %s decompression after user authentication",
-                     s->in.pending_compression->text_name);
+        bpp_logevent(("Will enable %s decompression after user authentication",
+                      s->in.pending_compression->text_name));
     } else {
         s->in.pending_compression = NULL;
 
@@ -228,8 +228,8 @@ void ssh2_bpp_new_incoming_crypto(
         s->in_decomp = ssh_decompressor_new(compression);
 
         if (s->in_decomp)
-            bpp_logevent("Initialised %s decompression",
-                         ssh_decompressor_alg(s->in_decomp)->text_name);
+            bpp_logevent(("Initialised %s decompression",
+                          ssh_decompressor_alg(s->in_decomp)->text_name));
     }
 
     /* Clear the pending_newkeys flag, so that handle_input below will
@@ -259,14 +259,14 @@ static void ssh2_bpp_enable_pending_compression(struct ssh2_bpp_state *s)
 
     if (s->in.pending_compression) {
         s->in_decomp = ssh_decompressor_new(s->in.pending_compression);
-        bpp_logevent("Initialised delayed %s decompression",
-                     ssh_decompressor_alg(s->in_decomp)->text_name);
+        bpp_logevent(("Initialised delayed %s decompression",
+                      ssh_decompressor_alg(s->in_decomp)->text_name));
         s->in.pending_compression = NULL;
     }
     if (s->out.pending_compression) {
         s->out_comp = ssh_compressor_new(s->out.pending_compression);
-        bpp_logevent("Initialised delayed %s compression",
-                     ssh_compressor_alg(s->out_comp)->text_name);
+        bpp_logevent(("Initialised delayed %s compression",
+                      ssh_compressor_alg(s->out_comp)->text_name));
         s->out.pending_compression = NULL;
     }
 }
@@ -882,6 +882,8 @@ static void ssh2_bpp_format_packet(struct ssh2_bpp_state *s, PktOut *pkt)
             length += ssh2_mac_alg(s->out.mac)->len;
 
         if (length < pkt->minlen) {
+            size_t origlen;
+            size_t i;
             /*
              * We need an ignore message. Calculate its length.
              */
@@ -901,8 +903,8 @@ static void ssh2_bpp_format_packet(struct ssh2_bpp_state *s, PktOut *pkt)
 
             ignore_pkt = ssh2_bpp_new_pktout(SSH2_MSG_IGNORE);
             put_uint32(ignore_pkt, length);
-            size_t origlen = ignore_pkt->length;
-            for (size_t i = 0; i < length; i++)
+            origlen = ignore_pkt->length;
+            for (i = 0; i < length; i++)
                 put_byte(ignore_pkt, 0);  /* make space for random padding */
             random_read(ignore_pkt->data + origlen, length);
             ssh2_bpp_format_packet_inner(s, ignore_pkt);

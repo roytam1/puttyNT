@@ -13,9 +13,9 @@ ssh_key *ssh_key_clone(ssh_key *key)
      * clone by round-tripping through public and private blobs.
      */
     strbuf *pub = strbuf_new_nm();
+    ssh_key *copy;
     ssh_key_public_blob(key, BinarySink_UPCAST(pub));
 
-    ssh_key *copy;
 
     if (ssh_key_has_private(key)) {
         strbuf *priv = strbuf_new_nm();

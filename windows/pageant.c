@@ -21,14 +21,11 @@
 
 #include <shellapi.h>
 
-#include <aclapi.h>
-#ifdef DEBUG_IPC
-#define _WIN32_WINNT 0x0500            /* for ConvertSidToStringSid */
-#include <sddl.h>
-#endif
 
+#ifdef NIM_ADD
 #define WM_SYSTRAY   (WM_APP + 6)
 #define WM_SYSTRAY2  (WM_APP + 7)
+#endif
 
 #define APPNAME "Pageant"
 
@@ -46,6 +43,15 @@ static HWND keylist;
 static HWND aboutbox;
 static HMENU systray_menu, session_menu;
 static bool already_running;
+
+/*
+ * Whether Pageant's menu is on an icon in the system tray. If not
+ * (there is no tray in Windows NT 3.x, nor in NT 4.0 without
+ * Explorer), Pageant is a minimised window - an icon on the desktop
+ * or a button on the taskbar - and its menu is that window's system
+ * menu.
+ */
+static bool tray_icon = false;
 static FingerprintType fptype = SSH_FPTYPE_DEFAULT;
 
 static char *putty_path;
@@ -65,7 +71,6 @@ static filereq_saved_dir *keypath = NULL;
 #define IDM_ADDKEY_ENCRYPTED   0x0040
 #define IDM_REMOVE_ALL         0x0050
 #define IDM_REENCRYPT_ALL      0x0060
-#define IDM_HELP               0x0070
 #define IDM_ABOUT              0x0080
 #define IDM_PUTTY              0x0090
 #define IDM_SESSIONS_BASE      0x1000
@@ -93,7 +98,6 @@ void modalfatalbox(const char *fmt, ...)
 
 struct PassphraseProcStruct {
     bool modal;
-    const char *help_topic;
     PageantClientDialogId *dlgid;
     char *passphrase;
     const char *comment;
@@ -102,8 +106,8 @@ struct PassphraseProcStruct {
 /*
  * Dialog-box function for the Licence box.
  */
-static INT_PTR CALLBACK LicenceProc(HWND hwnd, UINT msg,
-                                    WPARAM wParam, LPARAM lParam)
+static BOOL CALLBACK LicenceProc(HWND hwnd, UINT msg,
+                                 WPARAM wParam, LPARAM lParam)
 {
     switch (msg) {
       case WM_INITDIALOG:
@@ -127,8 +131,8 @@ static INT_PTR CALLBACK LicenceProc(HWND hwnd, UINT msg,
 /*
  * Dialog-box function for the About box.
  */
-static INT_PTR CALLBACK AboutProc(HWND hwnd, UINT msg,
-                                  WPARAM wParam, LPARAM lParam)
+static BOOL CALLBACK AboutProc(HWND hwnd, UINT msg,
+                               WPARAM wParam, LPARAM lParam)
 {
     switch (msg) {
       case WM_INITDIALOG: {
@@ -175,10 +179,10 @@ static INT_PTR CALLBACK AboutProc(HWND hwnd, UINT msg,
 static HWND modal_passphrase_hwnd = NULL;
 static HWND nonmodal_passphrase_hwnd = NULL;
 
-static void end_passphrase_dialog(HWND hwnd, INT_PTR result)
+static void end_passphrase_dialog(HWND hwnd, int result)
 {
     struct PassphraseProcStruct *p = (struct PassphraseProcStruct *)
-        GetWindowLongPtr(hwnd, GWLP_USERDATA);
+        GetWindowLong(hwnd, GWL_USERDATA);
 
     if (p->modal) {
         EndDialog(hwnd, result);
@@ -195,7 +199,7 @@ static void end_passphrase_dialog(HWND hwnd, INT_PTR result)
          * previous value of nonmodal_passphrase_hwnd to have already
          * been cleaned up.
          */
-        SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR) NULL);
+        SetWindowLong(hwnd, GWL_USERDATA, (LONG) NULL);
         DestroyWindow(hwnd);
         nonmodal_passphrase_hwnd = NULL;
 
@@ -213,29 +217,30 @@ static void end_passphrase_dialog(HWND hwnd, INT_PTR result)
 /*
  * Dialog-box function for the passphrase box.
  */
-static INT_PTR CALLBACK PassphraseProc(HWND hwnd, UINT msg,
-                                       WPARAM wParam, LPARAM lParam)
+static BOOL CALLBACK PassphraseProc(HWND hwnd, UINT msg,
+                                    WPARAM wParam, LPARAM lParam)
 {
     struct PassphraseProcStruct *p;
 
     if (msg == WM_INITDIALOG) {
         p = (struct PassphraseProcStruct *) lParam;
-        SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR) p);
+        SetWindowLong(hwnd, GWL_USERDATA, (LONG) p);
     } else {
         p = (struct PassphraseProcStruct *)
-            GetWindowLongPtr(hwnd, GWLP_USERDATA);
+            GetWindowLong(hwnd, GWL_USERDATA);
     }
 
     switch (msg) {
       case WM_INITDIALOG: {
+        RECT rs;
+        RECT rd;
+        HWND hw;
         if (p->modal)
             modal_passphrase_hwnd = hwnd;
 
         /*
          * Centre the window.
          */
-        RECT rs, rd;
-        HWND hw;
 
         hw = GetDesktopWindow();
         if (GetWindowRect(hw, &rs) && GetWindowRect(hwnd, &rd))
@@ -254,11 +259,6 @@ static INT_PTR CALLBACK PassphraseProc(HWND hwnd, UINT msg,
         burnstr(p->passphrase);
         p->passphrase = dupstr("");
         SetDlgItemText(hwnd, IDC_PASSPHRASE_EDITBOX, p->passphrase);
-        if (!p->help_topic || !has_help()) {
-            HWND item = GetDlgItem(hwnd, IDHELP);
-            if (item)
-                DestroyWindow(item);
-        }
         return 0;
       }
       case WM_COMMAND:
@@ -271,10 +271,6 @@ static INT_PTR CALLBACK PassphraseProc(HWND hwnd, UINT msg,
             return 0;
           case IDCANCEL:
             end_passphrase_dialog(hwnd, 0);
-            return 0;
-          case IDHELP:
-            if (p->help_topic)
-                launch_help(hwnd, p->help_topic);
             return 0;
           case IDC_PASSPHRASE_EDITBOX:
             if ((HIWORD(wParam) == EN_CHANGE) && p->passphrase) {
@@ -332,6 +328,7 @@ static void keylist_update_callback(
     ptrlen fingerprint = ptrlen_from_asciz(fingerprints[this_type]);
 
     struct keylist_display_data *disp = snew(struct keylist_display_data);
+    SIZE sz;
     disp->alg = strbuf_new();
     disp->bits = strbuf_new();
     disp->hash = strbuf_new();
@@ -363,6 +360,7 @@ static void keylist_update_callback(
             ptrlen_from_strbuf(key->blob));
 
         ptrlen keytype_word = ptrlen_get_word(&fingerprint, " ");
+        ptrlen bits_word;
         if (alg) {
             /* Use our own human-legible algorithm names if available,
              * because they fit better in the space. (Certificate key
@@ -374,7 +372,7 @@ static void keylist_update_callback(
             put_datapl(disp->alg, keytype_word);
         }
 
-        ptrlen bits_word = ptrlen_get_word(&fingerprint, " ");
+        bits_word = ptrlen_get_word(&fingerprint, " ");
         if (alg && ssh_keyalg_variable_size(alg))
             put_datapl(disp->bits, bits_word);
 
@@ -384,7 +382,6 @@ static void keylist_update_callback(
 
     put_dataz(disp->comment, comment);
 
-    SIZE sz;
     if (disp->bits->len) {
         GetTextExtentPoint32(ctx->hdc, disp->alg->s, disp->alg->len, &sz);
         if (ctx->algwidth < sz.cx) ctx->algwidth = sz.cx;
@@ -398,9 +395,9 @@ static void keylist_update_callback(
     if (ctx->hashwidth < sz.cx) ctx->hashwidth = sz.cx;
 
     if (ext_flags & LIST_EXTENDED_FLAG_HAS_NO_CLEARTEXT_KEY) {
-        put_fmt(disp->info, "(encrypted)");
+        BinarySink_put_fmt(BinarySink_UPCAST(disp->info), "(encrypted)");
     } else if (ext_flags & LIST_EXTENDED_FLAG_HAS_ENCRYPTED_KEY_FILE) {
-        put_fmt(disp->info, "(re-encryptable)");
+        BinarySink_put_fmt(BinarySink_UPCAST(disp->info), "(re-encryptable)");
 
         /* At least one key can be re-encrypted */
         ctx->enable_reencrypt_controls = true;
@@ -422,6 +419,11 @@ static int colpos_bits, colpos_hash, colpos_comment;
 void keylist_update(void)
 {
     if (keylist) {
+        char *errmsg;
+        struct keylist_update_ctx ctx[1];
+        int status;
+        SIZE sz;
+        int gutter;
         /*
          * Clear the previous list box content and free their display
          * structures.
@@ -429,7 +431,8 @@ void keylist_update(void)
         {
             int nitems = SendDlgItemMessage(keylist, IDC_KEYLIST_LISTBOX,
                                             LB_GETCOUNT, 0, 0);
-            for (int i = 0; i < nitems; i++) {
+            int i;
+            for (i = 0; i < nitems; i++) {
                 struct keylist_display_data *disp =
                     (struct keylist_display_data *)SendDlgItemMessage(
                         keylist, IDC_KEYLIST_LISTBOX, LB_GETITEMDATA, i, 0);
@@ -444,21 +447,18 @@ void keylist_update(void)
         SendDlgItemMessage(keylist, IDC_KEYLIST_LISTBOX,
                            LB_RESETCONTENT, 0, 0);
 
-        char *errmsg;
-        struct keylist_update_ctx ctx[1];
         ctx->enable_remove_controls = false;
         ctx->enable_reencrypt_controls = false;
         ctx->algbitswidth = ctx->algwidth = 0;
         ctx->bitswidth = ctx->hashwidth = 0;
         ctx->hdc = GetDC(keylist);
         SelectObject(ctx->hdc, (HFONT)SendMessage(keylist, WM_GETFONT, 0, 0));
-        int status = pageant_enum_keys(keylist_update_callback, ctx, &errmsg);
+        status = pageant_enum_keys(keylist_update_callback, ctx, &errmsg);
 
-        SIZE sz;
         GetTextExtentPoint32(ctx->hdc, "MM", 2, &sz);
-        int gutter = sz.cx;
+        gutter = sz.cx;
 
-        DeleteDC(ctx->hdc);
+        ReleaseDC(keylist, ctx->hdc);
         colpos_hash = ctx->algwidth + ctx->bitswidth + 2*gutter;
         if (colpos_hash < ctx->algbitswidth + gutter)
             colpos_hash = ctx->algbitswidth + gutter;
@@ -499,10 +499,9 @@ static void win_add_keyfile(Filename *filename, bool encrypted)
      * comment to use in the passphrase prompt.
      */
     while (1) {
-        INT_PTR dlgret;
+        int dlgret;
         struct PassphraseProcStruct pps;
         pps.modal = true;
-        pps.help_topic = NULL;         /* this dialog has no help button */
         pps.dlgid = NULL;
         pps.passphrase = NULL;
         pps.comment = err;
@@ -543,15 +542,17 @@ static void win_add_keyfile(Filename *filename, bool encrypted)
  */
 static void prompt_add_keyfile(bool encrypted)
 {
+    struct request_multi_file_return *rmf;
     if (!keypath)
         keypath = filereq_saved_dir_new();
 
-    struct request_multi_file_return *rmf = request_multi_file(
+    rmf = request_multi_file(
         traywindow, "Select Private Key File", NULL, false,
         keypath, true, FILTER_KEY_FILES);
 
     if (rmf) {
-        for (size_t i = 0; i < rmf->nfilenames; i++)
+        size_t i;
+        for (i = 0; i < rmf->nfilenames; i++)
             win_add_keyfile(rmf->filenames[i], encrypted);
         request_multi_file_free(rmf);
 
@@ -563,8 +564,8 @@ static void prompt_add_keyfile(bool encrypted)
 /*
  * Dialog-box function for the key list box.
  */
-static INT_PTR CALLBACK KeyListProc(HWND hwnd, UINT msg,
-                                    WPARAM wParam, LPARAM lParam)
+static BOOL CALLBACK KeyListProc(HWND hwnd, UINT msg,
+                                 WPARAM wParam, LPARAM lParam)
 {
     static const struct {
         const char *name;
@@ -583,6 +584,8 @@ static INT_PTR CALLBACK KeyListProc(HWND hwnd, UINT msg,
          */
         RECT rs, rd;
         HWND hw;
+        int selection;
+        size_t i;
 
         hw = GetDesktopWindow();
         if (GetWindowRect(hw, &rs) && GetWindowRect(hwnd, &rd))
@@ -591,20 +594,10 @@ static INT_PTR CALLBACK KeyListProc(HWND hwnd, UINT msg,
                        (rs.bottom + rs.top + rd.top - rd.bottom) / 2,
                        rd.right - rd.left, rd.bottom - rd.top, true);
 
-        if (has_help())
-            SetWindowLongPtr(hwnd, GWL_EXSTYLE,
-                             GetWindowLongPtr(hwnd, GWL_EXSTYLE) |
-                             WS_EX_CONTEXTHELP);
-        else {
-            HWND item = GetDlgItem(hwnd, IDC_KEYLIST_HELP);
-            if (item)
-                DestroyWindow(item);
-        }
-
         keylist = hwnd;
 
-        int selection = 0;
-        for (size_t i = 0; i < lenof(fptypes); i++) {
+        selection = 0;
+        for (i = 0; i < lenof(fptypes); i++) {
             SendDlgItemMessage(hwnd, IDC_KEYLIST_FPTYPE, CB_ADDSTRING,
                                0, (LPARAM)fptypes[i].name);
             if (fptype == fptypes[i].value)
@@ -617,16 +610,17 @@ static INT_PTR CALLBACK KeyListProc(HWND hwnd, UINT msg,
         return 0;
       }
       case WM_MEASUREITEM: {
+        MEASUREITEMSTRUCT *mi;
+        RECT r;
         assert(wParam == IDC_KEYLIST_LISTBOX);
 
-        MEASUREITEMSTRUCT *mi = (MEASUREITEMSTRUCT *)lParam;
+        mi = (MEASUREITEMSTRUCT *)lParam;
 
         /*
          * Our list box is owner-drawn, but we put normal text in it.
          * So the line height is the same as it would normally be,
          * which is 8 dialog units.
          */
-        RECT r;
         r.left = r.right = r.top = 0;
         r.bottom = 8;
         MapDialogRect(hwnd, &r);
@@ -635,9 +629,10 @@ static INT_PTR CALLBACK KeyListProc(HWND hwnd, UINT msg,
         return 0;
       }
       case WM_DRAWITEM: {
+        DRAWITEMSTRUCT *di;
         assert(wParam == IDC_KEYLIST_LISTBOX);
 
-        DRAWITEMSTRUCT *di = (DRAWITEMSTRUCT *)lParam;
+        di = (DRAWITEMSTRUCT *)lParam;
 
         if (di->itemAction == ODA_FOCUS) {
             /* Just toggle the focus rectangle either on or off. This
@@ -656,16 +651,17 @@ static INT_PTR CALLBACK KeyListProc(HWND hwnd, UINT msg,
 
             HFONT font = (HFONT)SendMessage(hwnd, WM_GETFONT, 0, 0);
             HFONT oldfont = SelectObject(di->hDC, font);
+            struct keylist_display_data *disp;
+            RECT r;
+            strbuf *sb;
 
             /* ExtTextOut("") is an easy way to just draw the
              * background rectangle */
             ExtTextOut(di->hDC, di->rcItem.left, di->rcItem.top,
                        ETO_OPAQUE | ETO_CLIPPED, &di->rcItem, "", 0, NULL);
 
-            struct keylist_display_data *disp =
-                (struct keylist_display_data *)di->itemData;
+            disp = (struct keylist_display_data *)di->itemData;
 
-            RECT r;
 
             /* Apparently real list boxes start drawing at x=1, not x=0 */
             r.left = r.top = r.bottom = 0;
@@ -685,7 +681,7 @@ static INT_PTR CALLBACK KeyListProc(HWND hwnd, UINT msg,
                        di->rcItem.top, ETO_CLIPPED, &di->rcItem,
                        disp->hash->s, disp->hash->len, NULL);
 
-            strbuf *sb = strbuf_new();
+            sb = strbuf_new();
             put_datapl(sb, ptrlen_from_strbuf(disp->comment));
             if (disp->info->len) {
                 put_byte(sb, '\t');
@@ -793,12 +789,6 @@ static INT_PTR CALLBACK KeyListProc(HWND hwnd, UINT msg,
                 keylist_update();
             }
             return 0;
-          case IDC_KEYLIST_HELP:
-            if (HIWORD(wParam) == BN_CLICKED ||
-                HIWORD(wParam) == BN_DOUBLECLICKED) {
-                launch_help(hwnd, WINHELP_CTX_pageant_general);
-            }
-            return 0;
           case IDC_KEYLIST_FPTYPE:
             if (HIWORD(wParam) == CBN_SELCHANGE) {
                 int selection = SendDlgItemMessage(
@@ -811,27 +801,6 @@ static INT_PTR CALLBACK KeyListProc(HWND hwnd, UINT msg,
             return 0;
         }
         return 0;
-      case WM_HELP: {
-        int id = ((LPHELPINFO)lParam)->iCtrlId;
-        const char *topic = NULL;
-        switch (id) {
-          case IDC_KEYLIST_LISTBOX:
-          case IDC_KEYLIST_FPTYPE:
-          case IDC_KEYLIST_FPTYPE_STATIC:
-            topic = WINHELP_CTX_pageant_keylist; break;
-          case IDC_KEYLIST_ADDKEY: topic = WINHELP_CTX_pageant_addkey; break;
-          case IDC_KEYLIST_REMOVE: topic = WINHELP_CTX_pageant_remkey; break;
-          case IDC_KEYLIST_ADDKEY_ENC:
-          case IDC_KEYLIST_REENCRYPT:
-            topic = WINHELP_CTX_pageant_deferred; break;
-        }
-        if (topic) {
-            launch_help(hwnd, topic);
-        } else {
-            MessageBeep(0);
-        }
-        break;
-      }
       case WM_CLOSE:
         keylist = NULL;
         DestroyWindow(hwnd);
@@ -840,32 +809,23 @@ static INT_PTR CALLBACK KeyListProc(HWND hwnd, UINT msg,
     return 0;
 }
 
+#ifdef NIM_ADD
 /* Set up a system tray icon */
 static BOOL AddTrayIcon(HWND hwnd)
 {
-    BOOL res;
     NOTIFYICONDATA tnid;
-    HICON hicon;
-
-#ifdef NIM_SETVERSION
-    tnid.uVersion = 0;
-    res = Shell_NotifyIcon(NIM_SETVERSION, &tnid);
-#endif
 
     tnid.cbSize = sizeof(NOTIFYICONDATA);
     tnid.hWnd = hwnd;
     tnid.uID = 1;              /* unique within this systray use */
     tnid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     tnid.uCallbackMessage = WM_SYSTRAY;
-    tnid.hIcon = hicon = LoadIcon(hinst, MAKEINTRESOURCE(201));
+    tnid.hIcon = LoadIcon(hinst, MAKEINTRESOURCE(IDI_TRAYICON));
     strcpy(tnid.szTip, "Pageant (PuTTY authentication agent)");
 
-    res = Shell_NotifyIcon(NIM_ADD, &tnid);
-
-    if (hicon) DestroyIcon(hicon);
-
-    return res;
+    return Shell_NotifyIcon(NIM_ADD, &tnid);
 }
+#endif
 
 /* Update the saved-sessions menu. */
 static void update_sessions(void)
@@ -873,7 +833,6 @@ static void update_sessions(void)
     int num_entries;
     HKEY hkey;
     TCHAR buf[MAX_PATH + 1];
-    MENUITEMINFO mii;
     strbuf *sb;
 
     int index_key, index_menu;
@@ -898,14 +857,8 @@ static void update_sessions(void)
             strbuf_clear(sb);
             unescape_registry_key(buf, sb);
 
-            memset(&mii, 0, sizeof(mii));
-            mii.cbSize = sizeof(mii);
-            mii.fMask = MIIM_TYPE | MIIM_STATE | MIIM_ID;
-            mii.fType = MFT_STRING;
-            mii.fState = MFS_ENABLED;
-            mii.wID = (index_menu * 16) + IDM_SESSIONS_BASE;
-            mii.dwTypeData = sb->s;
-            InsertMenuItem(session_menu, index_menu, true, &mii);
+            InsertMenu(session_menu, index_menu, MF_BYPOSITION | MF_STRING,
+                       (index_menu * 16) + IDM_SESSIONS_BASE, sb->s);
             index_menu++;
         }
         index_key++;
@@ -914,14 +867,9 @@ static void update_sessions(void)
 
     RegCloseKey(hkey);
 
-    if (index_menu == 0) {
-        mii.cbSize = sizeof(mii);
-        mii.fMask = MIIM_TYPE | MIIM_STATE;
-        mii.fType = MFT_STRING;
-        mii.fState = MFS_GRAYED;
-        mii.dwTypeData = _T("(No sessions)");
-        InsertMenuItem(session_menu, index_menu, true, &mii);
-    }
+    if (index_menu == 0)
+        InsertMenu(session_menu, index_menu,
+                   MF_BYPOSITION | MF_STRING | MF_GRAYED, 0, "(No sessions)");
 }
 
 /*
@@ -942,8 +890,7 @@ PSID get_default_sid(void)
                             GetCurrentProcessId())) == NULL)
         goto cleanup;
 
-    if (p_GetSecurityInfo(proc, SE_KERNEL_OBJECT, OWNER_SECURITY_INFORMATION,
-                          &sid, NULL, NULL, NULL, &psd) != ERROR_SUCCESS)
+    if (!get_object_owner(proc, &sid, &psd))
         goto cleanup;
 
     sidlen = GetLengthSid(sid);
@@ -1002,13 +949,13 @@ static void wm_copydata_got_response(
 static bool ask_passphrase_common(PageantClientDialogId *dlgid,
                                   const char *comment)
 {
+    struct PassphraseProcStruct *pps;
     /* Pageant core should be serialising requests, so we never expect
      * a passphrase prompt to exist already at this point */
     assert(!nonmodal_passphrase_hwnd);
 
-    struct PassphraseProcStruct *pps = snew(struct PassphraseProcStruct);
+    pps = snew(struct PassphraseProcStruct);
     pps->modal = false;
-    pps->help_topic = WINHELP_CTX_pageant_deferred;
     pps->dlgid = dlgid;
     pps->passphrase = NULL;
     pps->comment = comment;
@@ -1064,9 +1011,9 @@ static bool wm_copydata_ask_passphrase(
 }
 
 static const PageantClientVtable wmcpc_vtable = {
-    .log = NULL, /* no logging in this client */
-    .got_response = wm_copydata_got_response,
-    .ask_passphrase = wm_copydata_ask_passphrase,
+    /* .log = */ NULL, /* no logging in this client */
+    /* .got_response = */ wm_copydata_got_response,
+    /* .ask_passphrase = */ wm_copydata_ask_passphrase,
 };
 
 static char *answer_filemapping_message(const char *mapname)
@@ -1085,7 +1032,7 @@ static char *answer_filemapping_message(const char *mapname)
     wmct.length = wmct.body = NULL;
 
 #ifdef DEBUG_IPC
-    debug("mapname = \"%s\"\n", mapname);
+    debug(("mapname = \"%s\"\n", mapname));
 #endif
 
     maphandle = OpenFileMapping(FILE_MAP_ALL_ACCESS, false, mapname);
@@ -1096,54 +1043,29 @@ static char *answer_filemapping_message(const char *mapname)
     }
 
 #ifdef DEBUG_IPC
-    debug("maphandle = %p\n", maphandle);
+    debug(("maphandle = %p\n", maphandle));
 #endif
 
-    if (should_have_security()) {
-        DWORD retd;
+    if ((expectedsid = get_user_sid()) == NULL) {
+        err = dupstr("unable to get user SID");
+        goto cleanup;
+    }
 
-        if ((expectedsid = get_user_sid()) == NULL) {
-            err = dupstr("unable to get user SID");
-            goto cleanup;
-        }
+    if ((expectedsid_bc = get_default_sid()) == NULL) {
+        err = dupstr("unable to get default SID");
+        goto cleanup;
+    }
 
-        if ((expectedsid_bc = get_default_sid()) == NULL) {
-            err = dupstr("unable to get default SID");
-            goto cleanup;
-        }
+    if (!get_object_owner(maphandle, &mapsid, &psd)) {
+        err = dupprintf("unable to get owner of file mapping: %s",
+                        win_strerror(GetLastError()));
+        goto cleanup;
+    }
 
-        if ((retd = p_GetSecurityInfo(
-                 maphandle, SE_KERNEL_OBJECT, OWNER_SECURITY_INFORMATION,
-                 &mapsid, NULL, NULL, NULL, &psd) != ERROR_SUCCESS)) {
-            err = dupprintf("unable to get owner of file mapping: "
-                            "GetSecurityInfo returned: %s",
-                            win_strerror(retd));
-            goto cleanup;
-        }
-
-#ifdef DEBUG_IPC
-        {
-            LPTSTR ours, ours2, theirs;
-            ConvertSidToStringSid(mapsid, &theirs);
-            ConvertSidToStringSid(expectedsid, &ours);
-            ConvertSidToStringSid(expectedsid_bc, &ours2);
-            debug("got sids:\n  oursnew=%s\n  oursold=%s\n"
-                  "  theirs=%s\n", ours, ours2, theirs);
-            LocalFree(ours);
-            LocalFree(ours2);
-            LocalFree(theirs);
-        }
-#endif
-
-        if (!EqualSid(mapsid, expectedsid) &&
-            !EqualSid(mapsid, expectedsid_bc)) {
-            err = dupstr("wrong owning SID of file mapping");
-            goto cleanup;
-        }
-    } else {
-#ifdef DEBUG_IPC
-        debug("security APIs not present\n");
-#endif
+    if (!EqualSid(mapsid, expectedsid) &&
+        !EqualSid(mapsid, expectedsid_bc)) {
+        err = dupstr("wrong owning SID of file mapping");
+        goto cleanup;
     }
 
     mapaddr = MapViewOfFile(maphandle, FILE_MAP_WRITE, 0, 0, 0);
@@ -1154,7 +1076,7 @@ static char *answer_filemapping_message(const char *mapname)
     }
 
 #ifdef DEBUG_IPC
-    debug("mapped address = %p\n", mapaddr);
+    debug(("mapped address = %p\n", mapaddr));
 #endif
 
     {
@@ -1175,7 +1097,7 @@ static char *answer_filemapping_message(const char *mapname)
         mapsize = mbi.RegionSize;
     }
 #ifdef DEBUG_IPC
-    debug("region size = %"SIZEu"\n", mapsize);
+    debug(("region size = %"SIZEu"\n", mapsize));
 #endif
     if (mapsize < 5) {
         err = dupstr("mapping smaller than smallest possible request");
@@ -1186,8 +1108,8 @@ static char *answer_filemapping_message(const char *mapname)
     msglen = GET_32BIT_MSB_FIRST(wmct.length);
 
 #ifdef DEBUG_IPC
-    debug("msg length=%08x, msg type=%02x\n",
-          msglen, (unsigned)((unsigned char *) mapaddr)[4]);
+    debug(("msg length=%08x, msg type=%02x\n",
+           msglen, (unsigned)((unsigned char *) mapaddr)[4]));
 #endif
 
     wmct.body = wmct.length + 4;
@@ -1232,15 +1154,18 @@ static void create_keylist_window(void)
 static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT message,
                                     WPARAM wParam, LPARAM lParam)
 {
+#ifdef NIM_ADD
     static bool menuinprogress;
     static UINT msgTaskbarCreated = 0;
+#endif
 
     switch (message) {
+#ifdef NIM_ADD
       case WM_CREATE:
         msgTaskbarCreated = RegisterWindowMessage(_T("TaskbarCreated"));
         break;
       default:
-        if (message==msgTaskbarCreated) {
+        if (message == msgTaskbarCreated && tray_icon) {
             /*
              * Explorer has been restarted, so the tray icon will
              * have been lost.
@@ -1273,6 +1198,18 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT message,
             menuinprogress = false;
         }
         break;
+#endif
+      case WM_INITMENU:
+        /* The system menu of the minimised window is about to appear */
+        if (!tray_icon)
+            update_sessions();
+        break;
+      case WM_QUERYOPEN:
+        /* Double-clicking the minimised window shows the key list,
+         * as double-clicking the tray icon does; the window stays
+         * minimised. */
+        PostMessage(hwnd, WM_COMMAND, IDM_VIEWKEYS, 0);
+        return 0;
       case WM_COMMAND:
       case WM_SYSCOMMAND: {
         unsigned command = wParam & ~0xF; /* low 4 bits reserved to Windows */
@@ -1283,8 +1220,8 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT message,
             if (restrict_putty_acl)
                 strcat(cmdline, "&R");
 
-            if ((INT_PTR)ShellExecute(hwnd, NULL, putty_path, cmdline,
-                                      _T(""), SW_SHOW) <= 32) {
+            if ((int)ShellExecute(hwnd, NULL, putty_path, cmdline,
+                                  _T(""), SW_SHOW) <= 32) {
                 MessageBox(NULL, "Unable to execute PuTTY!",
                            "Error", MB_OK | MB_ICONERROR);
             }
@@ -1339,30 +1276,20 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT message,
                              SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
             }
             break;
-          case IDM_HELP:
-            launch_help(hwnd, WINHELP_CTX_pageant_general);
-            break;
           default: {
-            if (wParam >= IDM_SESSIONS_BASE && wParam <= IDM_SESSIONS_MAX) {
-                MENUITEMINFO mii;
-                TCHAR buf[MAX_PATH + 1];
-                TCHAR param[MAX_PATH + 1];
-                memset(&mii, 0, sizeof(mii));
-                mii.cbSize = sizeof(mii);
-                mii.fMask = MIIM_TYPE;
-                mii.cch = MAX_PATH;
-                mii.dwTypeData = buf;
-                GetMenuItemInfo(session_menu, wParam, false, &mii);
-                param[0] = '\0';
-                if (restrict_putty_acl)
-                    strcat(param, "&R");
-                strcat(param, "@");
-                strcat(param, mii.dwTypeData);
-                if ((INT_PTR)ShellExecute(hwnd, NULL, putty_path, param,
-                                          _T(""), SW_SHOW) <= 32) {
+            if (command >= IDM_SESSIONS_BASE && command <= IDM_SESSIONS_MAX) {
+                char buf[MAX_PATH + 1];
+                char *param;
+                GetMenuString(session_menu, command, buf, sizeof(buf),
+                              MF_BYCOMMAND);
+                param = dupprintf("%s@%s", restrict_putty_acl ? "&R" : "",
+                                  buf);
+                if ((int)ShellExecute(hwnd, NULL, putty_path, param,
+                                      _T(""), SW_SHOW) <= 32) {
                     MessageBox(NULL, "Unable to execute PuTTY!", "Error",
                                MB_OK | MB_ICONERROR);
                 }
+                sfree(param);
             }
             break;
           }
@@ -1374,7 +1301,6 @@ static LRESULT CALLBACK TrayWndProc(HWND hwnd, UINT message,
         winselgui_response(message, wParam, lParam);
         return 0;
       case WM_DESTROY:
-        quit_help(hwnd);
         PostQuitMessage(0);
         return 0;
     }
@@ -1399,7 +1325,7 @@ static LRESULT CALLBACK wm_copydata_WndProc(HWND hwnd, UINT message,
         err = answer_filemapping_message(mapname);
         if (err) {
 #ifdef DEBUG_IPC
-            debug("IPC failed: %s\n", err);
+            debug(("IPC failed: %s\n", err));
 #endif
             sfree(err);
             return 0;
@@ -1419,9 +1345,9 @@ static DWORD WINAPI wm_copydata_threadfunc(void *param)
                                 WS_OVERLAPPEDWINDOW | WS_VSCROLL,
                                 CW_USEDEFAULT, CW_USEDEFAULT,
                                 100, 100, NULL, NULL, inst, NULL);
+    MSG msg;
     ShowWindow(ipchwnd, SW_HIDE);
 
-    MSG msg;
     while (GetMessage(&msg, NULL, 0, 0) == 1) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
@@ -1452,7 +1378,6 @@ void noise_ultralight(NoiseSourceId id, unsigned long data)
 
 void cleanup_exit(int code)
 {
-    shutdown_help();
     exit(code);
 }
 
@@ -1467,8 +1392,8 @@ struct winpgnt_client {
     PageantListenerClient plc;
 };
 static const PageantListenerClientVtable winpgnt_vtable = {
-    .log = NULL, /* no logging */
-    .ask_passphrase = winpgnt_listener_ask_passphrase,
+    /* .log = */ NULL, /* no logging */
+    /* .ask_passphrase = */ winpgnt_listener_ask_passphrase,
 };
 
 static struct winpgnt_client wpc[1];
@@ -1478,8 +1403,9 @@ HINSTANCE hinst;
 static NORETURN void opt_error(const char *fmt, ...)
 {
     va_list ap;
+    char *msg;
     va_start(ap, fmt);
-    char *msg = dupvprintf(fmt, ap);
+    msg = dupvprintf(fmt, ap);
     va_end(ap);
 
     MessageBox(NULL, msg, "Pageant command line error", MB_ICONERROR | MB_OK);
@@ -1487,7 +1413,6 @@ static NORETURN void opt_error(const char *fmt, ...)
     exit(1);
 }
 
-#ifdef LEGACY_WINDOWS
 BOOL sw_PeekMessage(LPMSG msg, HWND hwnd, UINT min, UINT max, UINT remove)
 {
     static bool unicode_unavailable = false;
@@ -1500,15 +1425,11 @@ BOOL sw_PeekMessage(LPMSG msg, HWND hwnd, UINT min, UINT max, UINT remove)
     }
     return PeekMessageA(msg, hwnd, min, max, remove);
 }
-#else
-#define sw_PeekMessage PeekMessageW
-#endif
 
 int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 {
     MSG msg;
     const char *command = NULL;
-    const char *unixsocket = NULL;
     bool show_keylist_on_startup = false;
     Filename *openssh_config_file = NULL;
 
@@ -1519,29 +1440,15 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
     CommandLineKey *clkeys = NULL;
     size_t nclkeys = 0, clkeysize = 0;
+    bool add_keys_encrypted;
+    AuxMatchOpt amo;
+    HANDLE mutex;
+    size_t i;
 
     dll_hijacking_protection();
     enable_dit();
 
     hinst = inst;
-
-    if (should_have_security()) {
-        /*
-         * Attempt to get the security API we need.
-         */
-        if (!got_advapi()) {
-            MessageBox(NULL,
-                       "Unable to access security APIs. Pageant will\n"
-                       "not run, in case it causes a security breach.",
-                       "Pageant Fatal Error", MB_ICONERROR | MB_OK);
-            return 1;
-        }
-    }
-
-    /*
-     * See if we can find our Help file.
-     */
-    init_help();
 
     /*
      * Look for the PuTTY binary (we will enable the saved session
@@ -1570,45 +1477,36 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
      * started up the main agent. Details of keys to be added are
      * stored in the 'clkeys' array.
      */
-    bool add_keys_encrypted = false;
-    AuxMatchOpt amo = aux_match_opt_init(opt_error);
+    add_keys_encrypted = false;
+    amo = aux_match_opt_init(opt_error);
     while (!aux_match_done(&amo)) {
         CmdlineArg *valarg;
-        #define match_opt(...) aux_match_opt( \
-            &amo, NULL, __VA_ARGS__, (const char *)NULL)
-        #define match_optval(...) aux_match_opt( \
-            &amo, &valarg, __VA_ARGS__, (const char *)NULL)
-
         if (aux_match_arg(&amo, &valarg)) {
+            CommandLineKey *clkey;
             /*
              * Non-option arguments are expected to be key files, and
              * added to clkeys.
              */
             sgrowarray(clkeys, clkeysize, nclkeys);
-            CommandLineKey *clkey = &clkeys[nclkeys++];
+            clkey = &clkeys[nclkeys++];
             clkey->fn = cmdline_arg_to_filename(valarg);
             clkey->add_encrypted = add_keys_encrypted;
-        } else if (match_opt("-pgpfp")) {
+        } else if (aux_match_opt(&amo, NULL, "-pgpfp", NULL)) {
             pgp_fingerprints_msgbox(NULL);
             return 0;
-        } else if (match_opt("-restrict-acl", "-restrict_acl",
-                             "-restrictacl")) {
+        } else if (aux_match_opt(&amo, NULL, "-restrict-acl", "-restrict_acl",
+                                 "-restrictacl", NULL)) {
             restrict_process_acl();
-        } else if (match_opt("-restrict-putty-acl", "-restrict_putty_acl")) {
+        } else if (aux_match_opt(&amo, NULL, "-restrict-putty-acl", "-restrict_putty_acl", NULL)) {
             restrict_putty_acl = true;
-        } else if (match_opt("-no-decrypt", "-no_decrypt",
-                             "-nodecrypt", "-encrypted")) {
+        } else if (aux_match_opt(&amo, NULL, "-no-decrypt", "-no_decrypt",
+                                 "-nodecrypt", "-encrypted", NULL)) {
             add_keys_encrypted = true;
-        } else if (match_opt("-keylist")) {
+        } else if (aux_match_opt(&amo, NULL, "-keylist", NULL)) {
             show_keylist_on_startup = true;
-        } else if (match_optval("-openssh-config", "-openssh_config")) {
+        } else if (aux_match_opt(&amo, &valarg, "-openssh-config", "-openssh_config", NULL)) {
             openssh_config_file = cmdline_arg_to_filename(valarg);
-        } else if (match_optval("-unix")) {
-            /* UNICODE: should this be a Unicode filename? Is there a
-             * Unicode version of connect() that lets you give a
-             * Unicode pathname when making an AF_UNIX socket? */
-            unixsocket = cmdline_arg_to_str(valarg);
-        } else if (match_opt("-c")) {
+        } else if (aux_match_opt(&amo, NULL, "-c", NULL)) {
             /*
              * If we see `-c', then the rest of the command line
              * should be treated as a command to be spawned.
@@ -1635,7 +1533,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
      * able to agree on which one becomes the server without a race
      * condition.
      */
-    HANDLE mutex;
     {
         char *err;
         char *mutexname = agent_mutex_name();
@@ -1657,6 +1554,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
      * running, so set up all the machinery to answer requests.
      */
     if (!already_running) {
+        DWORD wm_copydata_threadid;
+        HANDLE hThread;
         /*
          * Set up the window class for the hidden window that receives
          * all the messages to do with our presence in the system tray.
@@ -1692,7 +1591,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
          */
         wpc->plc.vt = &winpgnt_vtable;
         wpc->plc.suppress_logging = true;
-        if (should_have_security()) {
+        {
             Plug *pl_plug;
             struct pageant_listen_state *pl =
                 pageant_listener_new(&pl_plug, &wpc->plc);
@@ -1713,6 +1612,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
              */
             if (openssh_config_file) {
                 FILE *fp = f_open(openssh_config_file, "w", true);
+                const char *p;
                 if (!fp) {
                     char *err = dupprintf(
                         "Unable to write OpenSSH config file to %s",
@@ -1725,7 +1625,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                 /* Some versions of Windows OpenSSH prefer / to \ as the path
                  * separator; others don't mind, but as far as we know, no
                  * version _objects_ to /, so we use it unconditionally. */
-                for (const char *p = pipename; *p; p++) {
+                for (p = pipename; *p; p++) {
                     char c = *p;
                     if (c == '\\')
                         c = '/';
@@ -1736,30 +1636,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
             }
 
             sfree(pipename);
-        }
-
-        /*
-         * Set up an AF_UNIX listener too, if we were asked to.
-         */
-        if (unixsocket) {
-            sk_init();
-
-            /* FIXME: diagnose any error except file-not-found. Also,
-             * check the file type if possible? */
-            remove(unixsocket);
-
-            Plug *pl_plug;
-            struct pageant_listen_state *pl =
-                pageant_listener_new(&pl_plug, &wpc->plc);
-            Socket *sock = sk_newlistener_unix(unixsocket, pl_plug);
-            if (sk_socket_error(sock)) {
-                char *err = dupprintf("Unable to open AF_UNIX socket at %s "
-                                      "for SSH agent:\n%s", unixsocket,
-                                      sk_socket_error(sock));
-                MessageBox(NULL, err, "Pageant Error", MB_ICONERROR | MB_OK);
-                return 1;
-            }
-            pageant_listener_got_socket(pl, sock);
         }
 
         /*
@@ -1785,11 +1661,10 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         wmcpc.vt = &wmcpc_vtable;
         wmcpc.suppress_logging = true;
         pageant_register_client(&wmcpc);
-        DWORD wm_copydata_threadid;
         wmct.ev_msg_ready = CreateEvent(NULL, false, false, NULL);
         wmct.ev_reply_ready = CreateEvent(NULL, false, false, NULL);
-        HANDLE hThread = CreateThread(NULL, 0, wm_copydata_threadfunc,
-                                      &inst, 0, &wm_copydata_threadid);
+        hThread = CreateThread(NULL, 0, wm_copydata_threadfunc,
+                               &inst, 0, &wm_copydata_threadid);
         if (hThread)
             CloseHandle(hThread); /* we don't need the thread handle */
         add_handle_wait(wmct.ev_msg_ready, wm_copydata_got_msg, NULL);
@@ -1805,7 +1680,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     /*
      * Add any keys provided on the command line.
      */
-    for (size_t i = 0; i < nclkeys; i++) {
+    for (i = 0; i < nclkeys; i++) {
         CommandLineKey *clkey = &clkeys[i];
         win_add_keyfile(clkey->fn, clkey->add_encrypted);
         filename_free(clkey->fn);
@@ -1843,16 +1718,28 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         return 0;
     }
 
+#ifdef NIM_ADD
     /* Set up a system tray icon */
-    AddTrayIcon(traywindow);
+    tray_icon = AddTrayIcon(traywindow) != 0;
+#endif
 
     /* Accelerators used: nsvkxa */
-    systray_menu = CreatePopupMenu();
+    if (tray_icon) {
+        systray_menu = CreatePopupMenu();
+    } else {
+        /* The system menu becomes Move, then the tray icon's menu */
+        int pos;
+        systray_menu = GetSystemMenu(traywindow, false);
+        for (pos = GetMenuItemCount(systray_menu) - 1; pos >= 0; pos--)
+            if (GetMenuItemID(systray_menu, pos) != SC_MOVE)
+                DeleteMenu(systray_menu, pos, MF_BYPOSITION);
+        AppendMenu(systray_menu, MF_SEPARATOR, 0, 0);
+    }
     if (putty_path) {
         session_menu = CreateMenu();
         AppendMenu(systray_menu, MF_ENABLED, IDM_PUTTY, "&New Session");
         AppendMenu(systray_menu, MF_POPUP | MF_ENABLED,
-                   (UINT_PTR) session_menu, "&Saved Sessions");
+                   (UINT)session_menu, "&Saved Sessions");
         AppendMenu(systray_menu, MF_SEPARATOR, 0, 0);
     }
     AppendMenu(systray_menu, MF_ENABLED, IDM_VIEWKEYS,
@@ -1866,17 +1753,20 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     AppendMenu(systray_menu, MF_ENABLED, IDM_REENCRYPT_ALL,
                "Re-encrypt All Keys");
     AppendMenu(systray_menu, MF_SEPARATOR, 0, 0);
-    if (has_help())
-        AppendMenu(systray_menu, MF_ENABLED, IDM_HELP, "&Help");
     AppendMenu(systray_menu, MF_ENABLED, IDM_ABOUT, "&About");
     AppendMenu(systray_menu, MF_SEPARATOR, 0, 0);
     AppendMenu(systray_menu, MF_ENABLED, IDM_CLOSE, "E&xit");
     initial_menuitems_count = GetMenuItemCount(session_menu);
 
-    /* Set the default menu item. */
-    SetMenuDefaultItem(systray_menu, IDM_VIEWKEYS, false);
-
-    ShowWindow(traywindow, SW_HIDE);
+    if (tray_icon) {
+#ifdef NIM_ADD
+        /* Set the default menu item. */
+        SetMenuDefaultItem(systray_menu, IDM_VIEWKEYS, false);
+#endif
+        ShowWindow(traywindow, SW_HIDE);
+    } else {
+        ShowWindow(traywindow, SW_SHOWMINNOACTIVE);
+    }
 
     /* Open the visible key list window, if we've been asked to. */
     if (show_keylist_on_startup)
@@ -1918,8 +1808,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     }
   finished:
 
+#ifdef NIM_ADD
     /* Clean up the system tray icon */
-    {
+    if (tray_icon) {
         NOTIFYICONDATA tnid;
 
         tnid.cbSize = sizeof(NOTIFYICONDATA);
@@ -1930,6 +1821,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
         DestroyMenu(systray_menu);
     }
+#endif
 
     if (keypath)
         filereq_saved_dir_free(keypath);

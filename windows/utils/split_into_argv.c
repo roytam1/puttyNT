@@ -211,6 +211,7 @@ void FUNCTION(const CHAR *cmdline, bool includes_program_name,
 
     while (*p) {
         bool quote;
+        bool backslash_special;
 
         /* Skip whitespace searching for start of argument. */
         while (*p && is_word_sep(*p)) p++;
@@ -248,7 +249,7 @@ void FUNCTION(const CHAR *cmdline, bool includes_program_name,
          * then we must treat the 0th output argument specially, by
          * not considering backslashes to affect the quoting.
          */
-        bool backslash_special = !(outputargc == 0 && includes_program_name);
+        backslash_special = !(outputargc == 0 && includes_program_name);
 
         /* We have an argument; start it. */
         outputargv[outputargc] = q;

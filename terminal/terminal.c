@@ -215,6 +215,8 @@ static void clear_cc(termline *line, int col);
 static void add_cc(termline *line, int col, unsigned long chr)
 {
     int newcc;
+    size_t ncc;
+    int origcol;
 
     assert(col >= 0 && col < line->cols);
 
@@ -232,8 +234,8 @@ static void add_cc(termline *line, int col, unsigned long chr)
      * Walk the cc list of the cell in question to find its current
      * end point.
      */
-    size_t ncc = 0;
-    int origcol = col;
+    ncc = 0;
+    origcol = col;
     while (line->chars[col].cc_next) {
         col += line->chars[col].cc_next;
         if (++ncc >= CC_LIMIT) {
@@ -400,7 +402,6 @@ static void move_termchar(termline *line, termchar *dest, termchar *src)
 #endif
 }
 
-#ifndef NO_SCROLLBACK_COMPRESSION
 
 /*
  * Compress and decompress a termline into an RLE-based format for
@@ -481,11 +482,12 @@ static void makerle(strbuf *b, termline *ldata,
 
                 while (n > 0 && runlen < 129) {
                     int tmppos, tmplen;
+                    bool match;
                     tmppos = b->len;
                     oldstate = state;
                     makeliteral(b, c, &state);
                     tmplen = b->len - tmppos;
-                    bool match = tmplen == thislen &&
+                    match = tmplen == thislen &&
                         !memcmp(b->u + runpos+1, b->u + tmppos, tmplen);
                     strbuf_shrink_to(b, tmppos);
                     if (!match) {
@@ -700,6 +702,8 @@ static termline *decompressline_no_free(compressed_scrollback_line *line);
 static compressed_scrollback_line *compressline_no_free(termline *ldata)
 {
     strbuf *b = strbuf_new();
+    size_t linelen;
+    compressed_scrollback_line *line;
 
     /* Leave space for the header structure */
     strbuf_append(b, sizeof(compressed_scrollback_line));
@@ -749,9 +753,8 @@ static compressed_scrollback_line *compressline_no_free(termline *ldata)
     makerle(b, ldata, makeliteral_truecolour);
     makerle(b, ldata, makeliteral_cc);
 
-    size_t linelen = b->len - sizeof(compressed_scrollback_line);
-    compressed_scrollback_line *line =
-        (compressed_scrollback_line *)strbuf_to_str(b);
+    linelen = b->len - sizeof(compressed_scrollback_line);
+    line = (compressed_scrollback_line *)strbuf_to_str(b);
     line->len = linelen;
 
     /*
@@ -938,6 +941,7 @@ static termline *decompressline_no_free(compressed_scrollback_line *line)
     int ncols, byte, shift;
     BinarySource bs[1];
     termline *ldata;
+    int lattr;
 
     BinarySource_BARE_INIT(bs, line+1, line->len);
 
@@ -975,7 +979,7 @@ static termline *decompressline_no_free(compressed_scrollback_line *line)
     /*
      * Now read in the lattr.
      */
-    int lattr = shift = 0;
+    lattr = shift = 0;
     do {
         byte = get_byte(bs);
         lattr |= (byte & 0x7F) << shift;
@@ -1012,53 +1016,6 @@ static termline *decompressline_and_free(compressed_scrollback_line *cline)
     return ldata;
 }
 
-#else /* NO_SCROLLBACK_COMPRESSION */
-
-static termline *duptermline(termline *oldline)
-{
-    termline *newline = snew(termline);
-    *newline = *oldline;               /* copy the POD structure fields */
-    newline->chars = snewn(newline->size, termchar);
-    for (int j = 0; j < newline->size; j++)
-        newline->chars[j] = oldline->chars[j];
-    return newline;
-}
-
-typedef termline compressed_scrollback_line;
-
-static inline compressed_scrollback_line *compressline_and_free(
-    termline *ldata)
-{
-    return ldata;
-}
-
-static inline compressed_scrollback_line *compressline_no_free(termline *ldata)
-{
-    return duptermline(ldata);
-}
-
-static inline termline *decompressline_no_free(
-    compressed_scrollback_line *line)
-{
-    /* This will return a line without the 'temporary' flag, which
-     * means that unlineptr() is already set up to avoid freeing it */
-    return line;
-}
-
-static inline termline *decompressline_and_free(
-    compressed_scrollback_line *line)
-{
-    /* Same as decompressline_no_free, because the caller will free
-     * our returned termline, and that does all the freeing necessary */
-    return line;
-}
-
-static inline void free_compressed_line(compressed_scrollback_line *line)
-{
-    freetermline(line);
-}
-
-#endif /* NO_SCROLLBACK_COMPRESSION */
 
 /*
  * Resize a line to make it `cols' columns wide.
@@ -1164,10 +1121,10 @@ static void null_line_error(Terminal *term, int y, int lineno,
                   "Please contact <putty@projects.tartarus.org> "
                   "and pass on the above information.",
                   varname, lineno, y, term->cols, term->rows,
-                  term->scrollback, count234(term->scrollback),
-                  term->screen, count234(term->screen),
-                  term->alt_screen, count234(term->alt_screen),
-                  term->alt_sblines, whichtree, treeindex, commitid);
+                  (void *)term->scrollback, count234(term->scrollback),
+                  (void *)term->screen, count234(term->screen),
+                  (void *)term->alt_screen, count234(term->alt_screen),
+                  term->alt_sblines, (void *)whichtree, treeindex, commitid);
 }
 
 static inline int checkscr(int y, int lineno)
@@ -1904,7 +1861,7 @@ void term_setup_window_titles(Terminal *term, const char *title_hostname)
         term->icon_title = dupstr(conf_title);
     } else {
         if (title_hostname && *title_hostname)
-            term->window_title = dupcat(title_hostname, " - ", appname);
+            term->window_title = dupcat(title_hostname, " - ", appname, NULL);
         else
             term->window_title = dupstr(appname);
         term->icon_title = dupstr(term->window_title);
@@ -1917,6 +1874,7 @@ void term_setup_window_titles(Terminal *term, const char *title_hostname)
 static void palette_rebuild(Terminal *term)
 {
     unsigned min_changed = OSC4_NCOLOURS, max_changed = 0;
+    unsigned i;
 
     if (term->win_palette_pending) {
         /* Possibly extend existing range. */
@@ -1928,11 +1886,12 @@ static void palette_rebuild(Terminal *term)
         max_changed = 0;
     }
 
-    for (unsigned i = 0; i < OSC4_NCOLOURS; i++) {
+    for (i = 0; i < OSC4_NCOLOURS; i++) {
         rgb new_value;
         bool found = false;
+        unsigned j;
 
-        for (unsigned j = lenof(term->subpalettes); j-- > 0 ;) {
+        for (j = lenof(term->subpalettes); j-- > 0 ;) {
             if (term->subpalettes[j].present[i]) {
                 new_value = term->subpalettes[j].values[i];
                 found = true;
@@ -1978,13 +1937,14 @@ static void palette_rebuild(Terminal *term)
  */
 static void palette_reset(Terminal *term, bool keep_overrides)
 {
-    for (unsigned i = 0; i < OSC4_NCOLOURS; i++)
+    unsigned i;
+    for (i = 0; i < OSC4_NCOLOURS; i++)
         term->subpalettes[SUBPAL_CONF].present[i] = true;
 
     /*
      * Copy all the palette information out of the Conf.
      */
-    for (unsigned i = 0; i < CONF_NCOLOURS; i++) {
+    for (i = 0; i < CONF_NCOLOURS; i++) {
         rgb *col = &term->subpalettes[SUBPAL_CONF].values[
             colour_indices_conf_to_osc4[i]];
         col->r = conf_get_int_int(term->conf, CONF_colours, i*3+0);
@@ -1995,14 +1955,14 @@ static void palette_reset(Terminal *term, bool keep_overrides)
     /*
      * Directly invent the rest of the xterm-256 colours.
      */
-    for (unsigned i = 0; i < 216; i++) {
+    for (i = 0; i < 216; i++) {
         rgb *col = &term->subpalettes[SUBPAL_CONF].values[i + 16];
         int r = i / 36, g = (i / 6) % 6, b = i % 6;
         col->r = r ? r * 40 + 55 : 0;
         col->g = g ? g * 40 + 55 : 0;
         col->b = b ? b * 40 + 55 : 0;
     }
-    for (unsigned i = 0; i < 24; i++) {
+    for (i = 0; i < 24; i++) {
         rgb *col = &term->subpalettes[SUBPAL_CONF].values[i + 232];
         int shade = i * 10 + 8;
         col->r = col->g = col->b = shade;
@@ -2011,15 +1971,16 @@ static void palette_reset(Terminal *term, bool keep_overrides)
     /*
      * Re-fetch any OS-local overrides.
      */
-    for (unsigned i = 0; i < OSC4_NCOLOURS; i++)
+    for (i = 0; i < OSC4_NCOLOURS; i++)
         term->subpalettes[SUBPAL_PLATFORM].present[i] = false;
     win_palette_get_overrides(term->win, term);
 
     if (!keep_overrides) {
+        unsigned i;
         /*
          * Get rid of all escape-sequence configuration.
          */
-        for (unsigned i = 0; i < OSC4_NCOLOURS; i++)
+        for (i = 0; i < OSC4_NCOLOURS; i++)
             term->subpalettes[SUBPAL_SESSION].present[i] = false;
     }
 
@@ -2513,6 +2474,7 @@ static void swap_screen(Terminal *term, int which,
 
         if (term->erase_to_scrollback && term->alt_screen &&
             term->alt_which && term->disptop < 0) {
+            int limit;
             /*
              * Inverse of the adjustment at the top of this function.
              * This time, we're swapping _to_ the alternate screen, so
@@ -2526,7 +2488,7 @@ static void swap_screen(Terminal *term, int which,
              * from it and the other _after_ switching to it.
              */
             term->disptop -= term->alt_sblines;
-            int limit = -sblines(term);
+            limit = -sblines(term);
             if (term->disptop < limit)
                 term->disptop = limit;
         }
@@ -2564,8 +2526,9 @@ static void check_selection(Terminal *term, pos from, pos to)
 
 static void clear_line(Terminal *term, termline *line)
 {
+    int i;
     resizeline(term, line, term->cols);
-    for (int i = 0; i < term->cols; i++)
+    for (i = 0; i < term->cols; i++)
         copy_termchar(line, i, &term->erase_char);
     line->lattr = LATTR_NORM;
 }
@@ -2847,6 +2810,7 @@ static void erase_lots(Terminal *term,
     pos start, end;
     bool erase_lattr;
     bool erasing_lines_from_top = false;
+    pos boundary;
 
     if (line_only) {
         start.y = term->curs.y;
@@ -2864,7 +2828,7 @@ static void erase_lots(Terminal *term,
 
     /* This is the endpoint of the clearing operation that is not
      * either the start or end of the line / screen. */
-    pos boundary = term->curs;
+    boundary = term->curs;
 
     if (!from_begin) {
         /*
@@ -3295,6 +3259,7 @@ static void term_display_graphic_char(Terminal *term, unsigned long c)
 {
     termline *cline = scrlineptr(term->curs.y);
     int width = 0;
+    int linecols;
     if (DIRECT_CHAR(c))
         width = 1;
     if (!width)
@@ -3323,7 +3288,7 @@ static void term_display_graphic_char(Terminal *term, unsigned long c)
 
     check_trust_status(term, cline);
 
-    int linecols = term->cols;
+    linecols = term->cols;
     if (cline->trusted)
         linecols -= TRUST_SIGIL_WIDTH;
 
@@ -3465,11 +3430,12 @@ static strbuf *term_input_data_from_unicode(
     strbuf *buf = strbuf_new();
 
     if (in_utf(term)) {
+        size_t i;
         /*
          * Translate input wide characters into UTF-8 to go in the
          * terminal's input data queue.
          */
-        for (size_t i = 0; i < len; i++) {
+        for (i = 0; i < len; i++) {
             unsigned long ch = widebuf[i];
 
             if (IS_SURROGATE(ch)) {
@@ -3516,8 +3482,9 @@ static strbuf *term_input_data_from_charset(
         return buf;
     } else {
         strbuf *wide = strbuf_new();
+        strbuf *buf;
         put_mb_to_wc(wide, codepage, str, len);
-        strbuf *buf = term_input_data_from_unicode(
+        buf = term_input_data_from_unicode(
             term, (const wchar_t *)wide->s, wide->len / sizeof(wchar_t));
         strbuf_free(wide);
         return buf;
@@ -3535,10 +3502,11 @@ static inline void term_bracketed_paste_start(Terminal *term)
 
 static inline void term_bracketed_paste_stop(Terminal *term)
 {
+    ptrlen seq;
     if (!term->bracketed_paste_active)
         return;
 
-    ptrlen seq = PTRLEN_LITERAL("\033[201~");
+    seq = PTRLEN_LITERAL("\033[201~");
     if (term->ldisc)
         ldisc_send(term->ldisc, seq.ptr, seq.len, false);
     term->bracketed_paste_active = false;
@@ -3579,6 +3547,7 @@ unsigned long term_translate(
 {
     if (in_utf(term)) {
         switch (utf8->state) {
+          unsigned long t;
           case 0:
             if (c < 0x80) {
                 /* UTF-8 must be stateless so we ignore iso2022. */
@@ -3624,7 +3593,7 @@ unsigned long term_translate(
             if (--utf8->state)
                 return UCSINCOMPLETE;
 
-            unsigned long t = utf8->chr;
+            t = utf8->chr;
 
             /* Is somebody trying to be evil! */
             if (t < 0x80 ||
@@ -3765,6 +3734,7 @@ static void term_out(Terminal *term, bool called_from_term_data)
                 break;
 
             if (nchars_got == nchars_used) {
+                ptrlen data;
                 /* Delete the previous chunk from the bufchain */
                 bufchain_consume(&term->inbuf, nchars_used);
                 nchars_used = 0;
@@ -3772,7 +3742,7 @@ static void term_out(Terminal *term, bool called_from_term_data)
                 if (bufchain_size(&term->inbuf) == 0)
                     break;             /* no more data */
 
-                ptrlen data = bufchain_prefix(&term->inbuf);
+                data = bufchain_prefix(&term->inbuf);
                 chars = data.ptr;
                 nchars_got = data.len;
                 assert(chars != NULL);
@@ -3893,6 +3863,8 @@ static void term_out(Terminal *term, bool called_from_term_data)
                 }
                 break;
               case '\007': {            /* BEL: Bell */
+                struct beeptime *newbeep;
+                unsigned long ticks;
                 if (term->termstate == SEEN_OSC ||
                     term->termstate == SEEN_OSC_W) {
                     /*
@@ -3906,8 +3878,6 @@ static void term_out(Terminal *term, bool called_from_term_data)
                     break;
                 }
 
-                struct beeptime *newbeep;
-                unsigned long ticks;
 
                 ticks = GETTICKCOUNT();
 
@@ -3976,6 +3946,7 @@ static void term_out(Terminal *term, bool called_from_term_data)
                            (term->curs.y == 0 || !term->wrap)) {
                     /* do nothing */
                 } else if (term->curs.x == 0 && term->curs.y > 0) {
+                    termline *ldata;
                     term->curs.x = term->cols - 1, term->curs.y--;
 
                     /*
@@ -3994,7 +3965,7 @@ static void term_out(Terminal *term, bool called_from_term_data)
                      * of backspaces, it's still the right number even if a
                      * line break appeared in a maximally awkward position.
                      */
-                    termline *ldata = scrlineptr(term->curs.y);
+                    ldata = scrlineptr(term->curs.y);
                     if (term->curs.x > 0 && (ldata->lattr & LATTR_WRAPPED2))
                         term->curs.x--;
                 } else {
@@ -4218,10 +4189,12 @@ static void term_out(Terminal *term, bool called_from_term_data)
                     break;
 
                   case ANSI('8', '#'): { /* DECALN: fills screen with Es :-) */
-                    compatibility(VT100);
                     termline *ldata;
-                    int i, j;
-                    pos scrtop, scrbot;
+                    int i;
+                    int j;
+                    pos scrtop;
+                    pos scrbot;
+                    compatibility(VT100);
 
                     for (i = 0; i < term->rows; i++) {
                         ldata = scrlineptr(i);
@@ -4247,9 +4220,9 @@ static void term_out(Terminal *term, bool called_from_term_data)
                   case ANSI('4', '#'):
                   case ANSI('5', '#'):
                   case ANSI('6', '#'): {
-                    compatibility(VT100);
                     int nlattr;
                     termline *ldata;
+                    compatibility(VT100);
 
                     switch (ANSI(c, term->esc_query)) {
                       case ANSI('3', '#'): /* DECDHL: 2*height, top */
@@ -4360,6 +4333,7 @@ static void term_out(Terminal *term, bool called_from_term_data)
                 } else
 #define CLAMP(arg, lim) ((arg) = ((arg) > (lim)) ? (lim) : (arg))
                     switch (ANSI(c, term->esc_query)) {
+                      int i;
                       case 'A':       /* CUU: move up N lines */
                         CLAMP(term->esc_args[0], term->rows);
                         move(term, term->curs.x,
@@ -4529,14 +4503,14 @@ static void term_out(Terminal *term, bool called_from_term_data)
                       case 'h':       /* SM: toggle modes to high */
                       case ANSI_QUE('h'):
                         compatibility(VT100);
-                        for (int i = 0; i < term->esc_nargs; i++)
+                        for (i = 0; i < term->esc_nargs; i++)
                             toggle_mode(term, term->esc_args[i],
                                         term->esc_query, true);
                         break;
                       case 'i':         /* MC: Media copy */
                       case ANSI_QUE('i'): {
-                        compatibility(VT100);
                         char *printer;
+                        compatibility(VT100);
                         if (term->esc_nargs != 1) break;
                         if (term->esc_args[0] == 5 &&
                             (printer = conf_get_str(term->conf,
@@ -4554,7 +4528,7 @@ static void term_out(Terminal *term, bool called_from_term_data)
                       case 'l':       /* RM: toggle modes to low */
                       case ANSI_QUE('l'):
                         compatibility(VT100);
-                        for (int i = 0; i < term->esc_nargs; i++)
+                        for (i = 0; i < term->esc_nargs; i++)
                             toggle_mode(term, term->esc_args[i],
                                         term->esc_query, false);
                         break;
@@ -4632,7 +4606,7 @@ static void term_out(Terminal *term, bool called_from_term_data)
                          * The 39 and 49 attributes are likely to be
                          * unimplemented.
                          */
-                        for (int i = 0; i < term->esc_nargs; i++)
+                        for (i = 0; i < term->esc_nargs; i++)
                         switch (def(term->esc_args[i], 0)) {
                           case 0:       /* restore defaults */
                             term->curr_attr = term->default_attr;
@@ -4911,7 +4885,7 @@ static void term_out(Terminal *term, bool called_from_term_data)
                                 if (term->esc_nargs >= 2) {
                                     term->win_maximise_pending = true;
                                     term->win_maximise_enable =
-                                        term->esc_args[1];
+                                        term->esc_args[1] != 0;
                                     term_schedule_update(term);
                                 }
                                 break;
@@ -5042,14 +5016,17 @@ static void term_out(Terminal *term, bool called_from_term_data)
                         }
                         break;
                       case 'X': {   /* ECH: write N spaces w/o moving cursor */
+                        int n;
+                        pos cursplus;
+                        int p;
+                        termline *cline;
                         /* XXX VTTEST says this is vt220, vt510 manual
                          * says vt100 */
                         compatibility(ANSIMIN);
                         CLAMP(term->esc_args[0], term->cols);
-                        int n = def(term->esc_args[0], 1);
-                        pos cursplus;
-                        int p = term->curs.x;
-                        termline *cline = scrlineptr(term->curs.y);
+                        n = def(term->esc_args[0], 1);
+                        p = term->curs.x;
+                        cline = scrlineptr(term->curs.y);
 
                         check_trust_status(term, cline);
                         if (n > term->cols - term->curs.x)
@@ -5078,10 +5055,12 @@ static void term_out(Terminal *term, bool called_from_term_data)
                         }
                         break;
                       case 'Z': {         /* CBT */
+                        int i;
+                        pos old_curs;
                         compatibility(OTHER);
                         CLAMP(term->esc_args[0], term->cols);
-                        int i = def(term->esc_args[0], 1);
-                        pos old_curs = term->curs;
+                        i = def(term->esc_args[0], 1);
+                        old_curs = term->curs;
 
                         for (; i>0 && term->curs.x>0; i--) {
                             do {
@@ -5427,11 +5406,12 @@ static void term_out(Terminal *term, bool called_from_term_data)
                 term->osc_string[term->osc_strlen++] = val;
                 if (term->osc_strlen >= 7) {
                     unsigned oscp_index = term->osc_string[0];
+                    unsigned osc4_index;
+                    rgb *value;
                     assert(oscp_index < OSCP_NCOLOURS);
-                    unsigned osc4_index =
-                        colour_indices_oscp_to_osc4[oscp_index];
+                    osc4_index = colour_indices_oscp_to_osc4[oscp_index];
 
-                    rgb *value = &term->subpalettes[SUBPAL_SESSION].values[
+                    value = &term->subpalettes[SUBPAL_SESSION].values[
                         osc4_index];
                     value->r = term->osc_string[1] * 16 + term->osc_string[2];
                     value->g = term->osc_string[3] * 16 + term->osc_string[4];
@@ -5851,9 +5831,10 @@ static void term_bidi_cache_store(Terminal *term, int line, termchar *lbefore,
         int p = wcTo[i].index;
 
         if (p != BIDI_CHAR_INDEX_NONE) {
+            int x;
             assert(0 <= p && p < width);
 
-            for (int x = 0; x < wcTo[i].nchars; x++) {
+            for (x = 0; x < wcTo[i].nchars; x++) {
                 term->post_bidi_cache[line].backward[j+x] = p+x;
                 term->post_bidi_cache[line].forward[p+x] = j+x;
             }
@@ -5881,6 +5862,8 @@ static termchar *term_bidi_line(Terminal *term, struct termline *ldata,
 
         if (!term_bidi_cache_hit(term, scr_y, ldata->chars, term->cols,
                                  ldata->trusted)) {
+            int nbc;
+            int opos;
 
             if (term->wcFromTo_size < term->cols) {
                 term->wcFromTo_size = term->cols;
@@ -5934,7 +5917,7 @@ static termchar *term_bidi_line(Terminal *term, struct termline *ldata,
                 }
             }
 
-            int nbc = 0;
+            nbc = 0;
             for (it = 0; it < term->cols; it++) {
                 term->wcFrom[nbc] = term->wcFrom[it];
                 if (it+1 < term->cols && term->wcFrom[it+1].wc == UCSWIDE) {
@@ -5963,10 +5946,11 @@ static termchar *term_bidi_line(Terminal *term, struct termline *ldata,
 
             memcpy(term->ltemp, ldata->chars, ldata->size * TSIZE);
 
-            int opos = 0;
+            opos = 0;
             for (it=0; it<nbc; it++) {
                 int ipos = term->wcTo[it].index;
-                for (int j = 0; j < term->wcTo[it].nchars; j++) {
+                int j;
+                for (j = 0; j < term->wcTo[it].nchars; j++) {
                     if (ipos != BIDI_CHAR_INDEX_NONE) {
                         term->ltemp[opos] = ldata->chars[ipos];
                         if (term->ltemp[opos].cc_next)
@@ -6005,10 +5989,10 @@ static void do_paint_draw(Terminal *term, termline *ldata, int x, int y,
                           unsigned long attr, truecolour tc)
 {
     if (ch[0] == TRUST_SIGIL_CHAR) {
+        wchar_t tch[2];
         assert(ldata->trusted);
         assert(ccount == 1);
         assert(attr & ATTR_WIDE);
-        wchar_t tch[2];
         tch[0] = tch[1] = L' ';
         win_draw_text(term->win, x, y, tch, 2, term->basic_erase_char.attr,
                       ldata->lattr, term->basic_erase_char.truecolour);
@@ -6458,6 +6442,7 @@ static void do_paint(Terminal *term)
              * sequence together. */
             if (IS_REGIONAL_INDICATOR_LETTER(d->chr) &&
                 (j+1 < term->cols && IS_REGIONAL_INDICATOR_LETTER(d[1].chr))) {
+                unsigned long rchar;
                 j++;
                 d++;
 
@@ -6465,7 +6450,7 @@ static void do_paint(Terminal *term)
                 attr |= ATTR_WIDE;
 
                 /* Include the second letter in the text buffer */
-                unsigned long rchar = d->chr;
+                rchar = d->chr;
 #ifdef PLATFORM_IS_UTF16
                 sgrowarrayn(ch, chlen, ccount, 2);
                 ch[ccount++] = (wchar_t)HIGH_SURROGATE_OF(rchar);
@@ -7211,9 +7196,9 @@ void term_mouse(Terminal *term, Mouse_Button braw, Mouse_Button bcooked,
                       !(term->mouse_override && shift));
     int default_seltype;
 
-    // Don't do anything if mouse movement events weren't requested;
-    // Note: return early to avoid doing all of this code on every mouse move
-    // event only to throw it away.
+    /* Don't do anything if mouse movement events weren't requested;
+     * Note: return early to avoid doing all of this code on every mouse move
+     * event only to throw it away. */
     if (a == MA_MOVE && (!raw_mouse || term->xterm_mouse < 3)) {
         return;
     }
@@ -7313,7 +7298,7 @@ void term_mouse(Terminal *term, Mouse_Button braw, Mouse_Button bcooked,
                 break;
               case MBT_NOTHING:
                 assert( a == MA_MOVE );
-                encstate = 0x03; // release; no buttons pressed
+                encstate = 0x03; /* release; no buttons pressed */
                 wheel = false;
                 break;
               default:
@@ -7330,9 +7315,9 @@ void term_mouse(Terminal *term, Mouse_Button braw, Mouse_Button bcooked,
               case MA_DRAG:
                 if (term->xterm_mouse == 1)
                     return;
-                encstate += 0x20; // motion indicator
+                encstate += 0x20; /* motion indicator */
                 break;
-              case MA_MOVE:    // mouse move without buttons
+              case MA_MOVE:    /* mouse move without buttons */
                 assert( braw == MBT_NOTHING && bcooked == MBT_NOTHING  );
                 if (term->xterm_mouse < 3)
                     return;
@@ -7344,7 +7329,7 @@ void term_mouse(Terminal *term, Mouse_Button braw, Mouse_Button bcooked,
                 term->raw_mouse_reported_x = x;
                 term->raw_mouse_reported_y = y;
 
-                encstate += 0x20; // motion indicator
+                encstate += 0x20; /* motion indicator */
                 break;
               case MA_RELEASE:
                 /* If multiple extensions are enabled, the xterm 1006 is used, so it's okay to check for only that */
@@ -7609,11 +7594,13 @@ int format_function_key(char *buf, Terminal *term, int key_number,
         11, 12, 13, 14, 15, /*gap*/ 17, 18, 19, 20, 21, /*gap*/
         23, 24, 25, 26, /*gap*/ 28, 29, /*gap*/ 31, 32, 33, 34,
     };
+    int index;
+    int code;
 
     assert(key_number > 0);
     assert(key_number < lenof(key_number_to_tilde_code));
 
-    int index = key_number;
+    index = key_number;
     if (term->funky_type != FUNKY_XTERM_216 && term->funky_type != FUNKY_SCO) {
         if (shift && index <= 10) {
             shift = false;
@@ -7621,7 +7608,7 @@ int format_function_key(char *buf, Terminal *term, int key_number,
         }
     }
 
-    int code = key_number_to_tilde_code[index];
+    code = key_number_to_tilde_code[index];
 
     if (term->funky_type == FUNKY_SCO) {
         /* SCO function keys */
@@ -8004,10 +7991,10 @@ static void term_lineedit_special(
 
 static const TermLineEditorCallbackReceiverVtable
 term_userpass_lineedit_receiver_vt = {
-    .to_terminal = term_lineedit_to_terminal,
-    .to_backend = term_lineedit_to_backend,
-    .special = term_lineedit_special,
-    .newline = term_lineedit_newline,
+    /* .to_terminal = */ term_lineedit_to_terminal,
+    /* .to_backend = */ term_lineedit_to_backend,
+    /* .special = */ term_lineedit_special,
+    /* .newline = */ term_lineedit_newline,
 };
 
 static struct term_userpass_state *term_userpass_state_new(
@@ -8064,6 +8051,7 @@ bool set_legacy_charset_handling(bool newvalue)
  */
 SeatPromptResult term_get_userpass_input(Terminal *term, prompts_t *p)
 {
+    struct term_userpass_state *s;
     if (!term->ldisc) {
         /* Can't handle interactive prompts without an ldisc */
         return signal_prompts_t(term, p, SPR_SW_ABORT(
@@ -8076,7 +8064,7 @@ SeatPromptResult term_get_userpass_input(Terminal *term, prompts_t *p)
         return p->spr;
     }
 
-    struct term_userpass_state *s = (struct term_userpass_state *)p->data;
+    s = (struct term_userpass_state *)p->data;
 
     if (!s) {
         /*

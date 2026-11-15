@@ -2,10 +2,7 @@
  * sftp.c: the Windows-specific parts of PSFTP and PSCP.
  */
 
-#include <winsock2.h> /* need to put this first, for winelib builds */
 #include <assert.h>
-
-#define NEED_DECLARATION_OF_SELECT
 
 #include "putty.h"
 #include "psftp.h"
@@ -76,30 +73,34 @@ char *psftp_getcwd(void)
     return ret;
 }
 
-static inline uint64_t uint64_from_words(uint32_t hi, uint32_t lo)
+/* A FILETIME counts 100ns ticks from 1601-01-01; Unix time counts
+ * seconds from 1970-01-01, which is 11644473600 seconds later */
+#define EPOCH_DIFF uint64_make(0x2, 0xB6109100)
+
+static FILETIME time_posix_to_win(unsigned long t)
 {
-    return (((uint64_t)hi) << 32) | lo;
+    uint64 secs = uint64_add(uint64_make(0, t), EPOCH_DIFF);
+    uint64 ticks = uint64_mul32(secs.lo, 10000000);
+    FILETIME ft;
+    ticks.hi += secs.hi * 10000000;    /* secs < 2^35: no overflow */
+    ft.dwLowDateTime = ticks.lo;
+    ft.dwHighDateTime = ticks.hi;
+    return ft;
 }
 
-#define TIME_POSIX_TO_WIN(t, ft) do { \
-    ULARGE_INTEGER uli; \
-    uli.QuadPart = ((ULONGLONG)(t) + 11644473600ull) * 10000000ull; \
-    (ft).dwLowDateTime  = uli.LowPart; \
-    (ft).dwHighDateTime = uli.HighPart; \
-} while (0)
-#define TIME_WIN_TO_POSIX(ft, t) do { \
-    ULARGE_INTEGER uli; \
-    uli.LowPart  = (ft).dwLowDateTime; \
-    uli.HighPart = (ft).dwHighDateTime; \
-    uli.QuadPart = uli.QuadPart / 10000000ull - 11644473600ull; \
-    (t) = (unsigned long) uli.QuadPart; \
-} while (0)
+static unsigned long time_win_to_posix(FILETIME ft)
+{
+    uint64 ticks = uint64_make(ft.dwHighDateTime, ft.dwLowDateTime);
+    /* 10000000 ticks per second, divided in two steps of at most 65535 */
+    uint64 secs = uint64_divmod(uint64_divmod(ticks, 10000, NULL), 1000, NULL);
+    return uint64_sub(secs, EPOCH_DIFF).lo;
+}
 
 struct RFile {
     HANDLE h;
 };
 
-RFile *open_existing_file(const char *name, uint64_t *size,
+RFile *open_existing_file(const char *name, uint64 *size,
                           unsigned long *mtime, unsigned long *atime,
                           long *perms)
 {
@@ -117,16 +118,16 @@ RFile *open_existing_file(const char *name, uint64_t *size,
     if (size) {
         DWORD lo, hi;
         lo = GetFileSize(h, &hi);
-        *size = uint64_from_words(hi, lo);
+        *size = uint64_make(hi, lo);
     }
 
     if (mtime || atime) {
         FILETIME actime, wrtime;
         GetFileTime(h, NULL, &actime, &wrtime);
         if (atime)
-            TIME_WIN_TO_POSIX(actime, *atime);
+            *atime = time_win_to_posix(actime);
         if (mtime)
-            TIME_WIN_TO_POSIX(wrtime, *mtime);
+            *mtime = time_win_to_posix(wrtime);
     }
 
     if (perms)
@@ -170,7 +171,7 @@ WFile *open_new_file(const char *name, long perms)
     return f;
 }
 
-WFile *open_existing_wfile(const char *name, uint64_t *size)
+WFile *open_existing_wfile(const char *name, uint64 *size)
 {
     HANDLE h;
     WFile *f;
@@ -186,7 +187,7 @@ WFile *open_existing_wfile(const char *name, uint64_t *size)
     if (size) {
         DWORD lo, hi;
         lo = GetFileSize(h, &hi);
-        *size = uint64_from_words(hi, lo);
+        *size = uint64_make(hi, lo);
     }
 
     return f;
@@ -204,8 +205,8 @@ int write_to_file(WFile *f, void *buffer, int length)
 void set_file_times(WFile *f, unsigned long mtime, unsigned long atime)
 {
     FILETIME actime, wrtime;
-    TIME_POSIX_TO_WIN(atime, actime);
-    TIME_POSIX_TO_WIN(mtime, wrtime);
+    actime = time_posix_to_win(atime);
+    wrtime = time_posix_to_win(mtime);
     SetFileTime(f->h, NULL, &actime, &wrtime);
 }
 
@@ -217,7 +218,7 @@ void close_wfile(WFile *f)
 
 /* Seek offset bytes through file, from whence, where whence is
    FROM_START, FROM_CURRENT, or FROM_END */
-int seek_file(WFile *f, uint64_t offset, int whence)
+int seek_file(WFile *f, uint64 offset, int whence)
 {
     DWORD movemethod;
 
@@ -236,7 +237,7 @@ int seek_file(WFile *f, uint64_t offset, int whence)
     }
 
     {
-        LONG lo = offset & 0xFFFFFFFFU, hi = offset >> 32;
+        LONG lo = offset.lo, hi = offset.hi;
         SetFilePointer(f->h, lo, &hi, movemethod);
     }
 
@@ -246,12 +247,12 @@ int seek_file(WFile *f, uint64_t offset, int whence)
         return 0;
 }
 
-uint64_t get_file_posn(WFile *f)
+uint64 get_file_posn(WFile *f)
 {
     LONG lo, hi = 0;
 
     lo = SetFilePointer(f->h, 0L, &hi, FILE_CURRENT);
-    return uint64_from_words(hi, lo);
+    return uint64_make(hi, lo);
 }
 
 int file_type(const char *name)
@@ -280,7 +281,7 @@ DirHandle *open_directory(const char *name, const char **errmsg)
     DirHandle *dir;
 
     /* Enumerate files in dir `foo'. */
-    findfile = dupcat(name, "/*");
+    findfile = dupcat(name, "/*", NULL);
     h = FindFirstFile(findfile, &fdat);
     if (h == INVALID_HANDLE_VALUE) {
         *errmsg = win_strerror(GetLastError());
@@ -401,7 +402,7 @@ WildcardMatcher *begin_wildcard_matching(const char *name)
          (fdat.cFileName[1] == '.' && fdat.cFileName[2] == '\0')))
         dir->name = NULL;
     else
-        dir->name = dupcat(dir->srcpath, fdat.cFileName);
+        dir->name = dupcat(dir->srcpath, fdat.cFileName, NULL);
 
     return dir;
 }
@@ -419,7 +420,7 @@ char *wildcard_get_filename(WildcardMatcher *dir)
              (fdat.cFileName[1] == '.' && fdat.cFileName[2] == '\0')))
             dir->name = NULL;
         else
-            dir->name = dupcat(dir->srcpath, fdat.cFileName);
+            dir->name = dupcat(dir->srcpath, fdat.cFileName, NULL);
     }
 
     if (dir->name) {
@@ -461,7 +462,7 @@ char *dir_file_cat(const char *dir, const char *file)
     return dupcat(
         dir, (ptrlen_endswith(dir_pl, PTRLEN_LITERAL("\\"), NULL) ||
               ptrlen_endswith(dir_pl, PTRLEN_LITERAL("/"), NULL)) ? "" : "\\",
-        file);
+        file, NULL);
 }
 
 /* ----------------------------------------------------------------------
@@ -504,75 +505,18 @@ int do_eventsel_loop(HANDLE other_event)
 
 /*
  * Wait for some network data and process it.
- *
- * We have two variants of this function. One uses select() so that
- * it's compatible with WinSock 1. The other uses WSAEventSelect
- * and MsgWaitForMultipleObjects, so that we can consistently use
- * WSAEventSelect throughout; this enables us to also implement
- * ssh_sftp_get_cmdline() using a parallel mechanism.
  */
 int ssh_sftp_loop_iteration(void)
 {
-    if (p_WSAEventSelect == NULL) {
-        fd_set readfds;
-        int ret;
-        unsigned long now = GETTICKCOUNT(), then;
-        SOCKET skt = winselcli_unique_socket();
-
-        if (skt == INVALID_SOCKET)
-            return -1;                 /* doom */
-
-        if (socket_writable(skt))
-            select_result((WPARAM) skt, (LPARAM) FD_WRITE);
-
-        do {
-            unsigned long next;
-            long ticks;
-            struct timeval tv, *ptv;
-
-            if (run_timers(now, &next)) {
-                then = now;
-                now = GETTICKCOUNT();
-                if (now - then > next - then)
-                    ticks = 0;
-                else
-                    ticks = next - now;
-                tv.tv_sec = ticks / 1000;
-                tv.tv_usec = ticks % 1000 * 1000;
-                ptv = &tv;
-            } else {
-                ptv = NULL;
-            }
-
-            FD_ZERO(&readfds);
-            FD_SET(skt, &readfds);
-            ret = p_select(1, &readfds, NULL, NULL, ptv);
-
-            if (ret < 0)
-                return -1;                     /* doom */
-            else if (ret == 0)
-                now = next;
-            else
-                now = GETTICKCOUNT();
-
-        } while (ret == 0);
-
-        select_result((WPARAM) skt, (LPARAM) FD_READ);
-
-        return 0;
-    } else {
-        return do_eventsel_loop(INVALID_HANDLE_VALUE);
-    }
+    return do_eventsel_loop(INVALID_HANDLE_VALUE);
 }
 
 /*
  * Read a command line from standard input.
  *
- * In the presence of WinSock 2, we can use WSAEventSelect to
- * mediate between the socket and stdin, meaning we can send
- * keepalives and respond to server events even while waiting at
- * the PSFTP command prompt. Without WS2, we fall back to a simple
- * fgets.
+ * A second thread reads it, while this one goes on handling the
+ * network, so that we can send keepalives and respond to server
+ * events even while waiting at the PSFTP command prompt.
  */
 struct command_read_ctx {
     HANDLE event;
@@ -596,12 +540,12 @@ char *ssh_sftp_get_cmdline(const char *prompt, bool no_fds_ok)
     struct command_read_ctx ctx[1];
     DWORD threadid;
     HANDLE hThread;
+    int socketstate;
 
     fputs(prompt, stdout);
     fflush(stdout);
 
-    if ((winselcli_unique_socket() == INVALID_SOCKET && no_fds_ok) ||
-        p_WSAEventSelect == NULL) {
+    if (first_socket(&socketstate) == INVALID_SOCKET && no_fds_ok) {
         return fgetline(stdin);        /* very simple */
     }
 
@@ -636,6 +580,8 @@ char *ssh_sftp_get_cmdline(const char *prompt, bool no_fds_ok)
 
 void platform_psftp_pre_conn_setup(LogPolicy *lp)
 {
+    winselcli_setup();
+
     if (restricted_acl()) {
         lp_eventlog(lp, "Running with restricted process ACL");
     }
@@ -647,11 +593,12 @@ void platform_psftp_pre_conn_setup(LogPolicy *lp)
 int main(int argc, char *argv[])
 {
     int ret;
+    CmdlineArgList *arglist;
 
     dll_hijacking_protection();
     enable_dit();
 
-    CmdlineArgList *arglist = cmdline_arg_list_from_GetCommandLineW();
+    arglist = cmdline_arg_list_from_GetCommandLineW();
     ret = psftp_main(arglist);
 
     return ret;

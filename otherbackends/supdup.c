@@ -9,55 +9,62 @@
 #include "putty.h"
 
 /*
- * TTYOPT FUNCTION BITS (36-bit bitmasks)
+ * A 36-bit word is held as its left and right 18-bit halves, as the
+ * PDP-10 writes it (left,,right), because the C compilers this code
+ * is built with have no 64-bit integers.
  */
-#define TOALT   0200000000000LL         //  Characters 0175 and 0176 are converted to altmode (0033) on input
-#define TOCLC   0100000000000LL         //  (user option bit) Convert lower-case input to upper-case
-#define TOERS   0040000000000LL         //  Selective erase is supported
-#define TOMVB   0010000000000LL         //  Backspacing is supported
-#define TOSAI   0004000000000LL         //  Stanford/ITS extended ASCII graphics character set is supported
-#define TOSA1   0002000000000LL         //  (user option bit) Characters 0001-0037 displayed using Stanford/ITS chars
-#define TOOVR   0001000000000LL         //  Overprinting is supported
-#define TOMVU   0000400000000LL         //  Moving cursor upwards is supported
-#define TOMOR   0000200000000LL         //  (user option bit) System should provide **MORE** processing
-#define TOROL   0000100000000LL         //  (user option bit) Terminal should scroll instead of wrapping
-#define TOLWR   0000020000000LL         //  Lowercase characters are supported
-#define TOFCI   0000010000000LL         //  Terminal can generate CONTROL and META characters
-#define TOLID   0000002000000LL         //  Line insert/delete operations supported
-#define TOCID   0000001000000LL         //  Character insert/delete operations supported
-#define TPCBS   0000000000040LL         //  Terminal is using the "intelligent terminal protocol" (must be on)
-#define TPORS   0000000000010LL         //  Server should process output resets
 
-// Initialization words (36-bit constants)
-#define WORDS   0777773000000           //  Negative number of config words to send (6) in high 18 bits
-#define TCTYP   0000000000007           //  Defines the terminal type (MUST be 7)
-#define TTYROL  0000000000001           //  Scroll amount for terminal (1 line at a time)
+/*
+ * TTYOPT FUNCTION BITS (36-bit bitmasks). The TO bits are in the left
+ * half of the word, the TP bits in the right half.
+ */
+#define TOALT   0200000         /*  Characters 0175 and 0176 are converted to altmode (0033) on input */
+#define TOCLC   0100000         /*  (user option bit) Convert lower-case input to upper-case */
+#define TOERS   0040000         /*  Selective erase is supported */
+#define TOMVB   0010000         /*  Backspacing is supported */
+#define TOSAI   0004000         /*  Stanford/ITS extended ASCII graphics character set is supported */
+#define TOSA1   0002000         /*  (user option bit) Characters 0001-0037 displayed using Stanford/ITS chars */
+#define TOOVR   0001000         /*  Overprinting is supported */
+#define TOMVU   0000400         /*  Moving cursor upwards is supported */
+#define TOMOR   0000200         /*  (user option bit) System should provide **MORE** processing */
+#define TOROL   0000100         /*  (user option bit) Terminal should scroll instead of wrapping */
+#define TOLWR   0000020         /*  Lowercase characters are supported */
+#define TOFCI   0000010         /*  Terminal can generate CONTROL and META characters */
+#define TOLID   0000002         /*  Line insert/delete operations supported */
+#define TOCID   0000001         /*  Character insert/delete operations supported */
+#define TPCBS   0000040         /*  Terminal is using the "intelligent terminal protocol" (must be on) */
+#define TPORS   0000010         /*  Server should process output resets */
+
+/* Initialization words (36-bit constants, as left,,right halves) */
+#define WORDS   0777773, 0      /*  Negative number of config words to send (6) in high 18 bits */
+#define TCTYP   0, 0000007      /*  Defines the terminal type (MUST be 7) */
+#define TTYROL  0, 0000001      /*  Scroll amount for terminal (1 line at a time) */
 
 
-// %TD opcodes
-//
-#define TDMOV   0200                    // Cursor positioning
-#define TDMV1   0201                    // Internal cursor positioning
-#define TDEOF   0202                    // Erase to end of screen
-#define TDEOL   0203                    // Erase to end of line
-#define TDDLF   0204                    // Clear the character the cursor is on
-#define TDCRL   0207                    // Carriage return
-#define TDNOP   0210                    // No-op; should be ignored.
-#define TDBS    0211                    // Backspace (not in official SUPDUP spec)
-#define TDLF    0212                    // Linefeed (not in official SUPDUP spec)
-#define TDCR    0213                    // Carriage Return (ditto)
-#define TDORS   0214                    // Output reset
-#define TDQOT   0215                    // Quotes the following character
-#define TDFS    0216                    // Non-destructive forward space
-#define TDMV0   0217                    // General cursor positioning code
-#define TDCLR   0220                    // Erase the screen, home cursor
-#define TDBEL   0221                    // Generate an audio tone, bell, whatever
-#define TDILP   0223                    // Insert blank lines at the cursor
-#define TDDLP   0224                    // Delete lines at the cursor
-#define TDICP   0225                    // Insert blanks at cursor
-#define TDDCP   0226                    // Delete characters at cursor
-#define TDBOW   0227                    // Display black chars on white screen
-#define TDRST   0230                    // Reset %TDBOW
+/* %TD opcodes
+ * */
+#define TDMOV   0200                    /* Cursor positioning */
+#define TDMV1   0201                    /* Internal cursor positioning */
+#define TDEOF   0202                    /* Erase to end of screen */
+#define TDEOL   0203                    /* Erase to end of line */
+#define TDDLF   0204                    /* Clear the character the cursor is on */
+#define TDCRL   0207                    /* Carriage return */
+#define TDNOP   0210                    /* No-op; should be ignored. */
+#define TDBS    0211                    /* Backspace (not in official SUPDUP spec) */
+#define TDLF    0212                    /* Linefeed (not in official SUPDUP spec) */
+#define TDCR    0213                    /* Carriage Return (ditto) */
+#define TDORS   0214                    /* Output reset */
+#define TDQOT   0215                    /* Quotes the following character */
+#define TDFS    0216                    /* Non-destructive forward space */
+#define TDMV0   0217                    /* General cursor positioning code */
+#define TDCLR   0220                    /* Erase the screen, home cursor */
+#define TDBEL   0221                    /* Generate an audio tone, bell, whatever */
+#define TDILP   0223                    /* Insert blank lines at the cursor */
+#define TDDLP   0224                    /* Delete lines at the cursor */
+#define TDICP   0225                    /* Insert blanks at cursor */
+#define TDDCP   0226                    /* Delete characters at cursor */
+#define TDBOW   0227                    /* Display black chars on white screen */
+#define TDRST   0230                    /* Reset %TDBOW */
 
 /* Maximum number of octets following a %TD code. */
 #define TD_ARGS_MAX 4
@@ -75,7 +82,7 @@ struct supdup_tag
     int term_width, term_height;
     char *description;
 
-    long long ttyopt;
+    unsigned long ttyopt_lh, ttyopt_rh;
     long tcmxv;
     long tcmxh;
 
@@ -86,8 +93,8 @@ struct supdup_tag
     int bufsize;
 
     enum {
-        CONNECTING,     // waiting for %TDNOP from server after sending connection params
-        CONNECTED       // %TDNOP received, connected.
+        CONNECTING,     /* waiting for %TDNOP from server after sending connection params */
+        CONNECTED       /* %TDNOP received, connected. */
     } state;
 
     enum {
@@ -124,7 +131,7 @@ static void supdup_send_location(Supdup *supdup)
     char* locString = conf_get_str(supdup->conf, CONF_supdup_location);
 
     sk_write(supdup->s, locHeader, sizeof(locHeader));
-    sk_write(supdup->s, locString, strlen(locString) + 1);      // include NULL terminator
+    sk_write(supdup->s, locString, strlen(locString) + 1);      /* include NULL terminator */
 }
 
 static void print_ascii(strbuf *outbuf, int c)
@@ -196,21 +203,21 @@ static void print_waits(strbuf *outbuf, int c)
 
 static void do_toplevel(Supdup *supdup, strbuf *outbuf, int c)
 {
-    // Toplevel: Waiting for a %TD code or a printable character
+    /* Toplevel: Waiting for a %TD code or a printable character */
     if (c >= 0200) {
-        // Handle SUPDUP %TD codes (codes greater than or equal to 200)
+        /* Handle SUPDUP %TD codes (codes greater than or equal to 200) */
         supdup->td_argindex = 0;
         supdup->td_code = c;
         switch (c) {
           case TDMOV:
-            // %TD codes using 4 arguments
+            /* %TD codes using 4 arguments */
             supdup->td_argcount = 4;
             supdup->tdstate = TD_ARGS;
             break;
 
           case TDMV0:
           case TDMV1:
-            // %TD codes using 2 arguments
+            /* %TD codes using 2 arguments */
             supdup->td_argcount = 2;
             supdup->tdstate = TD_ARGS;
             break;
@@ -220,7 +227,7 @@ static void do_toplevel(Supdup *supdup, strbuf *outbuf, int c)
           case TDDLP:
           case TDICP:
           case TDDCP:
-            // %TD codes using 1 argument
+            /* %TD codes using 1 argument */
             supdup->td_argcount = 1;
             supdup->tdstate = TD_ARGS;
             break;
@@ -239,13 +246,13 @@ static void do_toplevel(Supdup *supdup, strbuf *outbuf, int c)
           case TDBS:
           case TDCR:
           case TDLF:
-            // %TD codes using 0 arguments
+            /* %TD codes using 0 arguments */
             supdup->td_argcount = 0;
             supdup->tdstate = TD_ARGSDONE;
             break;
 
           default:
-            // Unhandled, ignore
+            /* Unhandled, ignore */
             break;
         }
     } else {
@@ -255,18 +262,18 @@ static void do_toplevel(Supdup *supdup, strbuf *outbuf, int c)
 
 static void do_args(Supdup *supdup, strbuf *outbuf, int c)
 {
-    // Collect up args for %TD code
+    /* Collect up args for %TD code */
     if (supdup->td_argindex < TD_ARGS_MAX) {
         supdup->td_args[supdup->td_argindex] = c;
         supdup->td_argindex++;
 
         if (supdup->td_argcount == supdup->td_argindex) {
-            // No more args, %TD code is ready to go.
+            /* No more args, %TD code is ready to go. */
             supdup->tdstate = TD_ARGSDONE;
         }
     } else {
-        // Should never hit this state, if we do we will just
-        // return to TOPLEVEL.
+        /* Should never hit this state, if we do we will just
+         * return to TOPLEVEL. */
         supdup->tdstate = TD_TOPLEVEL;
     }
 }
@@ -276,8 +283,8 @@ static void do_argsdone(Supdup *supdup, strbuf *outbuf, int c)
     char buf[4];
     int x, y;
 
-    // Arguments for %TD code have been collected; dispatch based
-    // on the %TD code we're handling.
+    /* Arguments for %TD code have been collected; dispatch based
+     * on the %TD code we're handling. */
     switch (supdup->td_code) {
       case TDMOV:
         /*
@@ -288,8 +295,8 @@ static void do_argsdone(Supdup *supdup, strbuf *outbuf, int c)
           moved to this position.
         */
 
-        // We only care about the new position.
-        put_fmt(outbuf, "\033[%d;%dH", supdup->td_args[2]+1, supdup->td_args[3]+1);
+        /* We only care about the new position. */
+        BinarySink_put_fmt(BinarySink_UPCAST(outbuf), "\033[%d;%dH", supdup->td_args[2]+1, supdup->td_args[3]+1);
         break;
 
       case TDMV0:
@@ -298,7 +305,7 @@ static void do_argsdone(Supdup *supdup, strbuf *outbuf, int c)
           General cursor position code.  Followed by two bytes;
           the new vertical and horizontal positions.
         */
-        put_fmt(outbuf, "\033[%d;%dH", supdup->td_args[0]+1, supdup->td_args[1]+1);
+        BinarySink_put_fmt(BinarySink_UPCAST(outbuf), "\033[%d;%dH", supdup->td_args[0]+1, supdup->td_args[1]+1);
         break;
 
       case TDEOF:
@@ -312,7 +319,7 @@ static void do_argsdone(Supdup *supdup, strbuf *outbuf, int c)
           lines lower on the screen than the cursor.  The cursor
           does not move.
         */
-        put_fmt(outbuf, "\033[J");
+        BinarySink_put_fmt(BinarySink_UPCAST(outbuf), "\033[J");
         break;
 
       case TDEOL:
@@ -321,7 +328,7 @@ static void do_argsdone(Supdup *supdup, strbuf *outbuf, int c)
           position the cursor is at and all positions to the right
           on the same line.  The cursor does not move.
         */
-        put_fmt(outbuf, "\033[K");
+        BinarySink_put_fmt(BinarySink_UPCAST(outbuf), "\033[K");
         break;
 
       case TDDLF:
@@ -329,7 +336,7 @@ static void do_argsdone(Supdup *supdup, strbuf *outbuf, int c)
           Clear the character position the cursor is on.  The
           cursor does not move.
         */
-        put_fmt(outbuf, "\033[X");
+        BinarySink_put_fmt(BinarySink_UPCAST(outbuf), "\033[X");
         break;
 
       case TDCRL:
@@ -339,7 +346,7 @@ static void do_argsdone(Supdup *supdup, strbuf *outbuf, int c)
           that line.  If the cursor is at the bottom line, scroll
           up.
         */
-        put_fmt(outbuf, "\015\012\033[K");
+        BinarySink_put_fmt(BinarySink_UPCAST(outbuf), "\015\012\033[K");
         break;
 
       case TDNOP:
@@ -383,7 +390,7 @@ static void do_argsdone(Supdup *supdup, strbuf *outbuf, int c)
           line.
         */
 
-        put_fmt(outbuf, "\033[C");
+        BinarySink_put_fmt(BinarySink_UPCAST(outbuf), "\033[C");
         break;
 
       case TDCLR:
@@ -391,7 +398,7 @@ static void do_argsdone(Supdup *supdup, strbuf *outbuf, int c)
           Erase the screen.  Home the cursor to the top left hand
           corner of the screen.
         */
-        put_fmt(outbuf, "\033[2J\033[H");
+        BinarySink_put_fmt(BinarySink_UPCAST(outbuf), "\033[2J\033[H");
         break;
 
       case TDBEL:
@@ -399,7 +406,7 @@ static void do_argsdone(Supdup *supdup, strbuf *outbuf, int c)
           Generate an audio tone, bell, whatever.
         */
 
-        put_fmt(outbuf, "\007");
+        BinarySink_put_fmt(BinarySink_UPCAST(outbuf), "\007");
         break;
 
       case TDILP:
@@ -410,7 +417,7 @@ static void do_argsdone(Supdup *supdup, strbuf *outbuf, int c)
           on and all lines below it move down; lines moved off the
           bottom of the screen are lost.
         */
-        put_fmt(outbuf, "\033[%dL", supdup->td_args[0]);
+        BinarySink_put_fmt(BinarySink_UPCAST(outbuf), "\033[%dL", supdup->td_args[0]);
         break;
 
       case TDDLP:
@@ -421,7 +428,7 @@ static void do_argsdone(Supdup *supdup, strbuf *outbuf, int c)
           Newly- created lines at the bottom of the screen are
           blank.
         */
-        put_fmt(outbuf, "\033[%dM", supdup->td_args[0]);
+        BinarySink_put_fmt(BinarySink_UPCAST(outbuf), "\033[%dM", supdup->td_args[0]);
         break;
 
       case TDICP:
@@ -432,7 +439,7 @@ static void do_argsdone(Supdup *supdup, strbuf *outbuf, int c)
           current line move to the right; characters moved off the
           end of the line are lost.
         */
-        put_fmt(outbuf, "\033[%d@", supdup->td_args[0]);
+        BinarySink_put_fmt(BinarySink_UPCAST(outbuf), "\033[%d@", supdup->td_args[0]);
         break;
 
       case TDDCP:
@@ -442,7 +449,7 @@ static void do_argsdone(Supdup *supdup, strbuf *outbuf, int c)
           the one the cursor is on.  Newly-created characters at
           the end of the line are blank.
         */
-        put_fmt(outbuf, "\033[%dP", supdup->td_args[0]);
+        BinarySink_put_fmt(BinarySink_UPCAST(outbuf), "\033[%dP", supdup->td_args[0]);
         break;
 
       case TDBOW:
@@ -452,8 +459,8 @@ static void do_argsdone(Supdup *supdup, strbuf *outbuf, int c)
           HIGHLY OPTIONAL.
         */
 
-        // Since this is HIGHLY OPTIONAL, I'm not going
-        // to implement it yet.
+        /* Since this is HIGHLY OPTIONAL, I'm not going
+         * to implement it yet. */
         break;
 
         /*
@@ -486,8 +493,8 @@ static void do_argsdone(Supdup *supdup, strbuf *outbuf, int c)
         break;
     }
 
-    // Return to top level to pick up the next %TD code or
-    // printable character.
+    /* Return to top level to pick up the next %TD code or
+     * printable character. */
     supdup->tdstate = TD_TOPLEVEL;
 }
 
@@ -499,7 +506,7 @@ static void term_out_supdup(Supdup *supdup, strbuf *outbuf, int c)
         do_args (supdup, outbuf, c);
     }
 
-    // If all arguments for a %TD code are ready, we will execute the code now.
+    /* If all arguments for a %TD code are ready, we will execute the code now. */
     if (supdup->tdstate == TD_ARGSDONE) {
         do_argsdone (supdup, outbuf, c);
     }
@@ -513,26 +520,26 @@ static void do_supdup_read(Supdup *supdup, const char *buf, size_t len)
         int c = (unsigned char)*buf++;
         switch (supdup->state) {
           case CONNECTING:
-            // "Following the transmission of the terminal options by
-            //  the user, the server should respond with an ASCII
-            //  greeting message, terminated with a %TDNOP code..."
+            /* "Following the transmission of the terminal options by
+             *  the user, the server should respond with an ASCII
+             *  greeting message, terminated with a %TDNOP code..." */
             if (TDNOP == c) {
-                // Greeting done, switch to the CONNECTED state.
+                /* Greeting done, switch to the CONNECTED state. */
                 supdup->state = CONNECTED;
                 supdup->tdstate = TD_TOPLEVEL;
             } else {
-                // Forward the greeting message (which is straight
-                // ASCII, no controls) on so it gets displayed TODO:
-                // filter out only printable chars?
+                /* Forward the greeting message (which is straight
+                 * ASCII, no controls) on so it gets displayed TODO:
+                 * filter out only printable chars? */
                 put_byte(outbuf, c);
             }
             break;
 
           case CONNECTED:
-            // "All transmissions from the server after the %TDNOP
-            //  [see above] are either printing characters or virtual
-            //  terminal display codes."  Forward these on to the
-            //  frontend which will decide what to do with them.
+            /* "All transmissions from the server after the %TDNOP
+             *  [see above] are either printing characters or virtual
+             *  terminal display codes."  Forward these on to the
+             *  frontend which will decide what to do with them. */
             term_out_supdup(supdup, outbuf, c);
             /*
              * Hack to make Symbolics Genera SUPDUP happy: Wait until
@@ -616,30 +623,34 @@ static void supdup_sent(Plug *plug, size_t bufsize)
     seat_sent(supdup->seat, supdup->bufsize);
 }
 
-static void supdup_send_36bits(Supdup *supdup, unsigned long long thirtysix)
+static void supdup_send_36bits(Supdup *supdup, unsigned long lh,
+                               unsigned long rh)
 {
-    //
-    // From RFC734:
-    // "Each word is sent through the 8-bit connection as six
-    //  6-bit bytes, most-significant first."
-    //
-    // Split the 36-bit word into 6 6-bit "bytes", packed into
-    // 8-bit bytes and send, most-significant byte first.
-    //
-    for (int i = 5; i >= 0; i--) {
-        char sixBits = (thirtysix >> (i * 6)) & 077;
+    int i;
+    /*
+     * From RFC734:
+     * "Each word is sent through the 8-bit connection as six
+     *  6-bit bytes, most-significant first."
+     *
+     * Split the 36-bit word into 6 6-bit "bytes", packed into
+     * 8-bit bytes and send, most-significant byte first: three
+     * from the left half, then three from the right half.
+     * */
+    for (i = 5; i >= 0; i--) {
+        char sixBits = ((i >= 3 ? lh : rh) >> (i % 3 * 6)) & 077;
         sk_write(supdup->s, &sixBits, 1);
     }
 }
 
 static void supdup_send_config(Supdup *supdup)
 {
-    supdup_send_36bits(supdup, WORDS);          // negative length
-    supdup_send_36bits(supdup, TCTYP);          // terminal type
-    supdup_send_36bits(supdup, supdup->ttyopt); // options
-    supdup_send_36bits(supdup, supdup->tcmxv);  // height
-    supdup_send_36bits(supdup, supdup->tcmxh);  // width
-    supdup_send_36bits(supdup, TTYROL);         // scroll amount
+    supdup_send_36bits(supdup, WORDS);          /* negative length */
+    supdup_send_36bits(supdup, TCTYP);          /* terminal type */
+    supdup_send_36bits(supdup, supdup->ttyopt_lh,
+                       supdup->ttyopt_rh);      /* options */
+    supdup_send_36bits(supdup, 0, supdup->tcmxv); /* height */
+    supdup_send_36bits(supdup, 0, supdup->tcmxh); /* width */
+    supdup_send_36bits(supdup, TTYROL);         /* scroll amount */
 }
 
 static char *supdup_description(Interactor *itr)
@@ -667,10 +678,10 @@ static void supdup_set_seat(Interactor *itr, Seat *seat)
 }
 
 static const InteractorVtable Supdup_interactorvt = {
-    .description = supdup_description,
-    .logpolicy = supdup_logpolicy,
-    .get_seat = supdup_get_seat,
-    .set_seat = supdup_set_seat,
+    /* .description = */ supdup_description,
+    /* .logpolicy = */ supdup_logpolicy,
+    /* .get_seat = */ supdup_get_seat,
+    /* .set_seat = */ supdup_set_seat,
 };
 
 /*
@@ -688,10 +699,10 @@ static char *supdup_init(const BackendVtable *x, Seat *seat,
                          bool nodelay, bool keepalive)
 {
     static const PlugVtable fn_table = {
-        .log = supdup_log,
-        .closing = supdup_closing,
-        .receive = supdup_receive,
-        .sent = supdup_sent,
+        /* .log = */ supdup_log,
+        /* .closing = */ supdup_closing,
+        /* .receive = */ supdup_receive,
+        /* .sent = */ supdup_sent,
     };
     SockAddr *addr;
     const char *err;
@@ -699,6 +710,9 @@ static char *supdup_init(const BackendVtable *x, Seat *seat,
     char *loghost;
     int addressfamily;
     const char *utf8 = "\033%G";
+    int ascii_set;
+    int more_processing;
+    int scrolling;
 
     supdup = snew(struct supdup_tag);
     memset(supdup, 0, sizeof(Supdup));
@@ -787,10 +801,10 @@ static char *supdup_init(const BackendVtable *x, Seat *seat,
     /*
      * Set up TTYOPTS based on config
      */
-    int ascii_set = conf_get_int(supdup->conf, CONF_supdup_ascii_set);
-    int more_processing = conf_get_bool(supdup->conf, CONF_supdup_more);
-    int scrolling = conf_get_bool(supdup->conf, CONF_supdup_scroll);
-    supdup->ttyopt =
+    ascii_set = conf_get_int(supdup->conf, CONF_supdup_ascii_set);
+    more_processing = conf_get_bool(supdup->conf, CONF_supdup_more);
+    scrolling = conf_get_bool(supdup->conf, CONF_supdup_scroll);
+    supdup->ttyopt_lh =
         TOERS |
         TOMVB |
         (ascii_set == SUPDUP_CHARSET_ASCII ? 0 : TOSAI | TOSA1) |
@@ -798,12 +812,13 @@ static char *supdup_init(const BackendVtable *x, Seat *seat,
         TOLWR |
         TOLID |
         TOCID |
-        TPCBS |
         (scrolling ? TOROL : 0) |
-        (more_processing ? TOMOR : 0) |
+        (more_processing ? TOMOR : 0);
+    supdup->ttyopt_rh =
+        TPCBS |
         TPORS;
 
-    supdup->tcmxh = supdup->term_width - 1;             // -1 "..one column is used to indicate line continuation."
+    supdup->tcmxh = supdup->term_width - 1;             /* -1 "..one column is used to indicate line continuation." */
     supdup->tcmxv = supdup->term_height;
 
     /*
@@ -887,10 +902,10 @@ static void supdup_size(Backend *be, int width, int height)
     supdup->term_width = width;
     supdup->term_height = height;
 
-    //
-    // SUPDUP does not support resizing the terminal after connection
-    // establishment.
-    //
+    /*
+     * SUPDUP does not support resizing the terminal after connection
+     * establishment.
+     * */
 }
 
 /*
@@ -956,25 +971,27 @@ static int supdup_cfg_info(Backend *be)
 }
 
 const BackendVtable supdup_backend = {
-    .init = supdup_init,
-    .free = supdup_free,
-    .reconfig = supdup_reconfig,
-    .send = supdup_send,
-    .sendbuffer = supdup_sendbuffer,
-    .size = supdup_size,
-    .special = supdup_special,
-    .get_specials = supdup_get_specials,
-    .connected = supdup_connected,
-    .exitcode = supdup_exitcode,
-    .sendok = supdup_sendok,
-    .ldisc_option_state = supdup_ldisc,
-    .provide_ldisc = supdup_provide_ldisc,
-    .unthrottle = supdup_unthrottle,
-    .cfg_info = supdup_cfg_info,
-    .id = "supdup",
-    .displayname_tc = "SUPDUP",
-    .displayname_lc = "SUPDUP", /* proper name, so capitalise it anyway */
-    .protocol = PROT_SUPDUP,
-    .default_port = 0137,
-    .flags = BACKEND_RESIZE_FORBIDDEN | BACKEND_NEEDS_TERMINAL,
+    /* .init = */ supdup_init,
+    /* .free = */ supdup_free,
+    /* .reconfig = */ supdup_reconfig,
+    /* .send = */ supdup_send,
+    /* .sendbuffer = */ supdup_sendbuffer,
+    /* .size = */ supdup_size,
+    /* .special = */ supdup_special,
+    /* .get_specials = */ supdup_get_specials,
+    /* .connected = */ supdup_connected,
+    /* .exitcode = */ supdup_exitcode,
+    /* .sendok = */ supdup_sendok,
+    /* .ldisc_option_state = */ supdup_ldisc,
+    /* .provide_ldisc = */ supdup_provide_ldisc,
+    /* .unthrottle = */ supdup_unthrottle,
+    /* .cfg_info = */ supdup_cfg_info,
+    /* .test_for_upstream = */ NULL,
+    /* .close_warn_text = */ NULL,
+    /* .id = */ "supdup",
+    /* .displayname_tc = */ "SUPDUP",
+    /* .displayname_lc = */ "SUPDUP", /* proper name, so capitalise it anyway */
+    /* .protocol = */ PROT_SUPDUP,
+    /* .default_port = */ 0137,
+    /* .flags = */ BACKEND_RESIZE_FORBIDDEN | BACKEND_NEEDS_TERMINAL,
 };

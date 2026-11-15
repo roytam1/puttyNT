@@ -146,9 +146,10 @@ struct BinarySink {
 #define put_datalit(bs, val) \
     BinarySink_put_datapl(BinarySink_UPCAST(bs), PTRLEN_LITERAL(val))
 
-/* Emit printf-formatted data, with no terminator. */
-#define put_fmt(bs, ...) \
-    BinarySink_put_fmt(BinarySink_UPCAST(bs), __VA_ARGS__)
+/* Emit printf-formatted data, with no terminator. (NT port: upstream
+ * has a variadic macro put_fmt(bs, fmt, ...) for this. The compilers of
+ * 1993-1996 have no variadic macros, so callers write it out in full:
+ * BinarySink_put_fmt(BinarySink_UPCAST(bs), fmt, ...).) */
 #define put_fmtv(bs, fmt, ap) \
     BinarySink_put_fmtv(BinarySink_UPCAST(bs), fmt, ap)
 
@@ -183,7 +184,7 @@ void BinarySink_put_byte(BinarySink *, unsigned char);
 void BinarySink_put_bool(BinarySink *, bool);
 void BinarySink_put_uint16(BinarySink *, unsigned long);
 void BinarySink_put_uint32(BinarySink *, unsigned long);
-void BinarySink_put_uint64(BinarySink *, uint64_t);
+void BinarySink_put_uint64(BinarySink *, uint64);
 void BinarySink_put_string(BinarySink *, const void *data, size_t len);
 void BinarySink_put_stringpl(BinarySink *, ptrlen);
 void BinarySink_put_stringz(BinarySink *, const char *str);
@@ -344,7 +345,7 @@ unsigned char BinarySource_get_byte(BinarySource *);
 bool BinarySource_get_bool(BinarySource *);
 unsigned BinarySource_get_uint16(BinarySource *);
 unsigned long BinarySource_get_uint32(BinarySource *);
-uint64_t BinarySource_get_uint64(BinarySource *);
+uint64 BinarySource_get_uint64(BinarySource *);
 ptrlen BinarySource_get_string(BinarySource *);
 const char *BinarySource_get_asciz(BinarySource *);
 ptrlen BinarySource_get_chars(BinarySource *, const char *include_set);

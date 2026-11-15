@@ -45,7 +45,7 @@ struct psocks_state {
     int listen_port;
     bool acceptall;
     PortFwdManager *portfwdmgr;
-    uint64_t next_conn_index;
+    unsigned long next_conn_index;
     FILE *logging_fp;
     unsigned log_flags;
     RecordDestination rec_dest;
@@ -63,7 +63,7 @@ struct psocks_connection {
     SockAddr *addr;
     Socket *socket;
     bool connecting, eof_pfmgr_to_socket, eof_socket_to_pfmgr;
-    uint64_t index;
+    unsigned long index;
     PsocksDataSink *rec_sink;
 
     Plug plug;
@@ -75,7 +75,9 @@ static SshChannel *psocks_lportfwd_open(
     const char *description, const SocketEndpointInfo *pi, Channel *chan);
 
 static const ConnectionLayerVtable psocks_clvt = {
-    .lportfwd_open = psocks_lportfwd_open,
+    /* .rportfwd_alloc = */ NULL,
+    /* .rportfwd_remove = */ NULL,
+    /* .lportfwd_open = */ psocks_lportfwd_open,
     /* everything else is NULL */
 };
 
@@ -86,10 +88,10 @@ static void psocks_sc_initiate_close(SshChannel *sc, const char *err);
 static void psocks_sc_unthrottle(SshChannel *sc, size_t bufsize);
 
 static const SshChannelVtable psocks_scvt = {
-    .write = psocks_sc_write,
-    .write_eof = psocks_sc_write_eof,
-    .initiate_close = psocks_sc_initiate_close,
-    .unthrottle = psocks_sc_unthrottle,
+    /* .write = */ psocks_sc_write,
+    /* .write_eof = */ psocks_sc_write_eof,
+    /* .initiate_close = */ psocks_sc_initiate_close,
+    /* .unthrottle = */ psocks_sc_unthrottle,
     /* all the rest are NULL */
 };
 
@@ -102,22 +104,23 @@ static void psocks_plug_receive(Plug *p, int urgent,
 static void psocks_plug_sent(Plug *p, size_t bufsize);
 
 static const PlugVtable psocks_plugvt = {
-    .log = psocks_plug_log,
-    .closing = psocks_plug_closing,
-    .receive = psocks_plug_receive,
-    .sent = psocks_plug_sent,
+    /* .log = */ psocks_plug_log,
+    /* .closing = */ psocks_plug_closing,
+    /* .receive = */ psocks_plug_receive,
+    /* .sent = */ psocks_plug_sent,
 };
 
 static void psocks_conn_log(psocks_connection *conn, const char *fmt, ...)
 {
+    va_list ap;
+    char *msg;
     if (!conn->ps->logging_fp)
         return;
 
-    va_list ap;
     va_start(ap, fmt);
-    char *msg = dupvprintf(fmt, ap);
+    msg = dupvprintf(fmt, ap);
     va_end(ap);
-    fprintf(conn->ps->logging_fp, "c#%"PRIu64": %s\n", conn->index, msg);
+    fprintf(conn->ps->logging_fp, "c#%lu: %s\n", conn->index, msg);
     sfree(msg);
     fflush(conn->ps->logging_fp);
 }
@@ -131,13 +134,13 @@ static void psocks_conn_log_data(psocks_connection *conn, PsocksDirection dir,
             const char *nl = memchr(data, '\n', len);
             size_t thislen = nl ? (nl+1) - data : len;
             const char *thisdata = data;
+            static const char *const direction_names[2] = {
+                /* [UP] = */ "send", /* [DN] = */ "recv" };
             data += thislen;
             len -= thislen;
 
-            static const char *const direction_names[2] = {
-                [UP] = "send", [DN] = "recv" };
 
-            fprintf(conn->ps->logging_fp, "c#%"PRIu64": %s \"", conn->index,
+            fprintf(conn->ps->logging_fp, "c#%lu: %s \"", conn->index,
                     direction_names[dir]);
             write_c_string_literal(conn->ps->logging_fp,
                                    make_ptrlen(thisdata, thislen));
@@ -178,10 +181,11 @@ static SshChannel *psocks_lportfwd_open(
             bool ok = true;
 
             static const char *const direction_names[2] = {
-                [UP] = "sockout", [DN] = "sockin" };
+                /* [UP] = */ "sockout", /* [DN] = */ "sockin" };
+            size_t i;
 
-            for (size_t i = 0; i < 2; i++) {
-                fnames[i] = dupprintf("%s.%"PRIu64, direction_names[i],
+            for (i = 0; i < 2; i++) {
+                fnames[i] = dupprintf("%s.%lu", direction_names[i],
                                       conn->index);
                 fp[i] = fopen(fnames[i], "wb");
                 if (!fp[i]) {
@@ -197,22 +201,23 @@ static SshChannel *psocks_lportfwd_open(
                                     fnames[0], fnames[1]);
                 conn->rec_sink = pds_stdio(fp);
             } else {
-                for (size_t i = 0; i < 2; i++) {
+                size_t i;
+                for (i = 0; i < 2; i++) {
                     if (fp[i]) {
                         remove(fnames[i]);
                         fclose(fp[i]);
                     }
                 }
             }
-            for (size_t i = 0; i < 2; i++)
+            for (i = 0; i < 2; i++)
                 sfree(fnames[i]);
         }
         break;
       case REC_PIPE:
         {
             static const char *const direction_args[2] = {
-                [UP] = "out", [DN] = "in" };
-            char *index_arg = dupprintf("%"PRIu64, conn->index);
+                /* [UP] = */ "out", /* [DN] = */ "in" };
+            char *index_arg = dupprintf("%lu", conn->index);
             char *err;
             conn->rec_sink = conn->ps->platform->open_pipes(
                 conn->ps->rec_cmd, direction_args, index_arg, &err);
@@ -251,13 +256,14 @@ static void psocks_conn_free(psocks_connection *conn)
 static void psocks_connection_establish(void *vctx)
 {
     psocks_connection *conn = (psocks_connection *)vctx;
+    const char *err;
 
     /*
      * Look up destination host name.
      */
     conn->addr = sk_namelookup(conn->host, &conn->realhost, ADDRTYPE_UNSPEC);
 
-    const char *err = sk_addr_error(conn->addr);
+    err = sk_addr_error(conn->addr);
     if (err) {
         char *msg = dupprintf("name lookup failed: %s", err);
         chan_open_failed(conn->chan, msg);
@@ -445,7 +451,7 @@ void psocks_cmdline(psocks_state *ps, CmdlineArgList *arglist)
                             "platform\n");
 		    exit(1);
                 }
-		if (arglist->args[arglistpos] > 0) {
+		if (arglist->args[arglistpos] != NULL) {
 		    ps->rec_cmd = dupstr(
                         cmdline_arg_to_str(arglist->args[arglistpos++]));
 		} else {
@@ -511,8 +517,9 @@ void psocks_cmdline(psocks_state *ps, CmdlineArgList *arglist)
 void psocks_start(psocks_state *ps)
 {
     Conf *conf = conf_new();
+    char *key;
     conf_set_bool(conf, CONF_lport_acceptall, ps->acceptall);
-    char *key = dupprintf("AL%d", ps->listen_port);
+    key = dupprintf("AL%d", ps->listen_port);
     conf_set_str_str(conf, CONF_portfwd, key, "D");
     sfree(key);
 
@@ -551,8 +558,9 @@ typedef struct PsocksDataSinkStdio {
 static void stdio_free(PsocksDataSink *pds)
 {
     PsocksDataSinkStdio *pdss = container_of(pds, PsocksDataSinkStdio, pds);
+    size_t i;
 
-    for (size_t i = 0; i < 2; i++)
+    for (i = 0; i < 2; i++)
         fclose(pdss->sink[i].fp);
 
     sfree(pdss);
@@ -561,8 +569,9 @@ static void stdio_free(PsocksDataSink *pds)
 PsocksDataSink *pds_stdio(FILE *fp[2])
 {
     PsocksDataSinkStdio *pdss = snew(PsocksDataSinkStdio);
+    size_t i;
 
-    for (size_t i = 0; i < 2; i++) {
+    for (i = 0; i < 2; i++) {
         setvbuf(fp[i], NULL, _IONBF, 0);
         stdio_sink_init(&pdss->sink[i], fp[i]);
         pdss->pds.s[i] = BinarySink_UPCAST(&pdss->sink[i]);

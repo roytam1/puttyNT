@@ -32,10 +32,11 @@ static bool aes_sw_available(void)
 static inline void dumpslices_uint16_t(
     const char *prefix, const uint16_t slices[8])
 {
+    unsigned byte, bit, byteval;
     printf("%-30s", prefix);
-    for (unsigned byte = 0; byte < 16; byte++) {
-        unsigned byteval = 0;
-        for (unsigned bit = 0; bit < 8; bit++)
+    for (byte = 0; byte < 16; byte++) {
+        byteval = 0;
+        for (bit = 0; bit < 8; bit++)
             byteval |= (1 & (slices[bit] >> byte)) << bit;
         printf("%02x", byteval);
     }
@@ -45,11 +46,12 @@ static inline void dumpslices_uint16_t(
 static inline void dumpslices_BignumInt(
     const char *prefix, const BignumInt slices[8])
 {
+    unsigned iter, byte, bit, byteval;
     printf("%-30s", prefix);
-    for (unsigned iter = 0; iter < SLICE_PARALLELISM; iter++) {
-        for (unsigned byte = 0; byte < 16; byte++) {
-            unsigned byteval = 0;
-            for (unsigned bit = 0; bit < 8; bit++)
+    for (iter = 0; iter < SLICE_PARALLELISM; iter++) {
+        for (byte = 0; byte < 16; byte++) {
+            byteval = 0;
+            for (bit = 0; bit < 8; bit++)
                 byteval |= (1 & (slices[bit] >> (iter*16+byte))) << bit;
             printf("%02x", byteval);
         }
@@ -70,65 +72,93 @@ static inline void dumpslices_BignumInt(
  * is, bit j of input[i] == bit i of output[j].
  */
 
-#define SWAPWORDS(shift) do                                     \
+/*
+ * The 16 bytes are held in four 32-bit words: w0,w1 are bytes 0-7
+ * (w0 the low half) and w2,w3 are bytes 8-15. Upstream PuTTY holds
+ * them in two 64-bit words; this is the same network of bit swaps
+ * done on 32-bit halves, because the NT 3.1 compilers have no 64-bit
+ * integer type.
+ */
+
+/* Swap the bits of x selected by mask with the bits 'shift' places
+ * above them. */
+#define SWAPBITS(x, mask, shift) do                             \
     {                                                           \
-        uint64_t mask = ~(uint64_t)0 / ((1ULL << shift) + 1);   \
-        uint64_t diff = ((i0 >> shift) ^ i1) & mask;            \
-        i0 ^= diff << shift;                                    \
-        i1 ^= diff;                                             \
+        uint32_t diff = (((x) >> (shift)) ^ (x)) & (mask);      \
+        (x) ^= diff ^ (diff << (shift));                        \
     } while (0)
 
-#define SWAPINWORD(i, bigshift, smallshift) do                  \
+/* The same across a pair of words making up a 64-bit one: swap the
+ * bits of lo selected by 0xF0F0F0F0 with the bits 28 places above
+ * them, which are in hi. */
+#define SWAPHALVES(lo, hi) do                                           \
+    {                                                                   \
+        uint32_t diff = ((((lo) >> 28) | ((hi) << 4)) ^ (lo)) & 0xF0F0F0F0; \
+        (lo) ^= diff;                                                   \
+        (hi) ^= diff >> 4;                                              \
+    } while (0)
+
+/* Swap the high byte of each 16-bit half of a with the low byte of
+ * the same half of b. */
+#define SWAPBYTES(a, b) do                                      \
     {                                                           \
-        uint64_t mask = ~(uint64_t)0;                           \
-        mask /= ((1ULL << bigshift) + 1);                       \
-        mask /= ((1ULL << smallshift) + 1);                     \
-        mask <<= smallshift;                                    \
-        unsigned shift = bigshift - smallshift;                 \
-        uint64_t diff = ((i >> shift) ^ i) & mask;              \
-        i ^= diff ^ (diff << shift);                            \
+        uint32_t diff = (((a) >> 8) ^ (b)) & 0x00FF00FF;        \
+        (a) ^= diff << 8;                                       \
+        (b) ^= diff;                                            \
+    } while (0)
+
+#define SWAPBITS_ALL(mask, shift) do                            \
+    {                                                           \
+        SWAPBITS(w0, mask, shift);                              \
+        SWAPBITS(w1, mask, shift);                              \
+        SWAPBITS(w2, mask, shift);                              \
+        SWAPBITS(w3, mask, shift);                              \
     } while (0)
 
 #define TO_BITSLICES(slices, bytes, uintN_t, assign_op, shift) do       \
     {                                                                   \
-        uint64_t i0 = GET_64BIT_LSB_FIRST(bytes);                       \
-        uint64_t i1 = GET_64BIT_LSB_FIRST(bytes + 8);                   \
-        SWAPINWORD(i0, 8, 1);                                           \
-        SWAPINWORD(i1, 8, 1);                                           \
-        SWAPINWORD(i0, 16, 2);                                          \
-        SWAPINWORD(i1, 16, 2);                                          \
-        SWAPINWORD(i0, 32, 4);                                          \
-        SWAPINWORD(i1, 32, 4);                                          \
-        SWAPWORDS(8);                                                   \
-        slices[0] assign_op (uintN_t)((i0 >>  0) & 0xFFFF) << (shift);  \
-        slices[2] assign_op (uintN_t)((i0 >> 16) & 0xFFFF) << (shift);  \
-        slices[4] assign_op (uintN_t)((i0 >> 32) & 0xFFFF) << (shift);  \
-        slices[6] assign_op (uintN_t)((i0 >> 48) & 0xFFFF) << (shift);  \
-        slices[1] assign_op (uintN_t)((i1 >>  0) & 0xFFFF) << (shift);  \
-        slices[3] assign_op (uintN_t)((i1 >> 16) & 0xFFFF) << (shift);  \
-        slices[5] assign_op (uintN_t)((i1 >> 32) & 0xFFFF) << (shift);  \
-        slices[7] assign_op (uintN_t)((i1 >> 48) & 0xFFFF) << (shift);  \
+        uint32_t w0 = GET_32BIT_LSB_FIRST(bytes);                       \
+        uint32_t w1 = GET_32BIT_LSB_FIRST((bytes) + 4);                 \
+        uint32_t w2 = GET_32BIT_LSB_FIRST((bytes) + 8);                 \
+        uint32_t w3 = GET_32BIT_LSB_FIRST((bytes) + 12);                \
+        SWAPBITS_ALL(0x00AA00AA, 7);                                    \
+        SWAPBITS_ALL(0x0000CCCC, 14);                                   \
+        SWAPHALVES(w0, w1);                                             \
+        SWAPHALVES(w2, w3);                                             \
+        SWAPBYTES(w0, w2);                                              \
+        SWAPBYTES(w1, w3);                                              \
+        slices[0] assign_op (uintN_t)(w0 & 0xFFFF) << (shift);          \
+        slices[2] assign_op (uintN_t)(w0 >> 16) << (shift);             \
+        slices[4] assign_op (uintN_t)(w1 & 0xFFFF) << (shift);          \
+        slices[6] assign_op (uintN_t)(w1 >> 16) << (shift);             \
+        slices[1] assign_op (uintN_t)(w2 & 0xFFFF) << (shift);          \
+        slices[3] assign_op (uintN_t)(w2 >> 16) << (shift);             \
+        slices[5] assign_op (uintN_t)(w3 & 0xFFFF) << (shift);          \
+        slices[7] assign_op (uintN_t)(w3 >> 16) << (shift);             \
     } while (0)
 
-#define FROM_BITSLICES(bytes, slices, shift) do                 \
-    {                                                           \
-        uint64_t i1 = ((slices[7] >> (shift)) & 0xFFFF);        \
-        i1 = (i1 << 16) | ((slices[5] >> (shift)) & 0xFFFF);    \
-        i1 = (i1 << 16) | ((slices[3] >> (shift)) & 0xFFFF);    \
-        i1 = (i1 << 16) | ((slices[1] >> (shift)) & 0xFFFF);    \
-        uint64_t i0 = ((slices[6] >> (shift)) & 0xFFFF);        \
-        i0 = (i0 << 16) | ((slices[4] >> (shift)) & 0xFFFF);    \
-        i0 = (i0 << 16) | ((slices[2] >> (shift)) & 0xFFFF);    \
-        i0 = (i0 << 16) | ((slices[0] >> (shift)) & 0xFFFF);    \
-        SWAPWORDS(8);                                           \
-        SWAPINWORD(i0, 32, 4);                                  \
-        SWAPINWORD(i1, 32, 4);                                  \
-        SWAPINWORD(i0, 16, 2);                                  \
-        SWAPINWORD(i1, 16, 2);                                  \
-        SWAPINWORD(i0, 8, 1);                                   \
-        SWAPINWORD(i1, 8, 1);                                   \
-        PUT_64BIT_LSB_FIRST(bytes, i0);                         \
-        PUT_64BIT_LSB_FIRST((bytes) + 8, i1);                   \
+#define SLICE16(slices, k, shift) ((uint32_t)((slices[k] >> (shift)) & 0xFFFF))
+
+#define FROM_BITSLICES(bytes, slices, shift) do                         \
+    {                                                                   \
+        uint32_t w0 = (SLICE16(slices, 2, shift) << 16) |               \
+                      SLICE16(slices, 0, shift);                        \
+        uint32_t w1 = (SLICE16(slices, 6, shift) << 16) |               \
+                      SLICE16(slices, 4, shift);                        \
+        uint32_t w2 = (SLICE16(slices, 3, shift) << 16) |               \
+                      SLICE16(slices, 1, shift);                        \
+        uint32_t w3 = (SLICE16(slices, 7, shift) << 16) |               \
+                      SLICE16(slices, 5, shift);                        \
+        SWAPBYTES(w0, w2);                                              \
+        SWAPBYTES(w1, w3);                                              \
+        SWAPHALVES(w0, w1);                                             \
+        SWAPHALVES(w2, w3);                                             \
+        SWAPBITS_ALL(0x0000CCCC, 14);                                   \
+        SWAPBITS_ALL(0x00AA00AA, 7);                                    \
+        PUT_32BIT_LSB_FIRST(bytes, w0);                                 \
+        PUT_32BIT_LSB_FIRST((bytes) + 4, w1);                           \
+        PUT_32BIT_LSB_FIRST((bytes) + 8, w2);                           \
+        PUT_32BIT_LSB_FIRST((bytes) + 12, w3);                          \
     } while (0)
 
 /* -----
@@ -315,10 +345,10 @@ static inline void dumpslices_BignumInt(
         uintN_t t64 = z4 ^ t59;                         \
         uintN_t t65 = t61 ^ t62;                        \
         uintN_t t66 = z1 ^ t63;                         \
+        uintN_t t67 = t64 ^ t65;                        \
         output[7] = t59 ^ t63;                          \
         output[1] = t56 ^ t62;                          \
         output[0] = t48 ^ t60;                          \
-        uintN_t t67 = t64 ^ t65;                        \
         output[4] = t53 ^ t66;                          \
         output[3] = t51 ^ t66;                          \
         output[2] = t47 ^ t65;                          \
@@ -327,8 +357,8 @@ static inline void dumpslices_BignumInt(
         /* end */
 
 #define BITSLICED_SUBBYTES(output, input, uintN_t) do { \
-        SBOX_FORWARD_TOP_TRANSFORM(input, uintN_t);      \
-        SBOX_CORE(uintN_t);                             \
+        SBOX_FORWARD_TOP_TRANSFORM(input, uintN_t)      \
+        SBOX_CORE(uintN_t)                              \
         SBOX_FORWARD_BOTTOM_TRANSFORM(output, uintN_t);  \
     } while (0)
 
@@ -379,34 +409,37 @@ static inline void dumpslices_BignumInt(
     uintN_t otmp27 = z1 ^ otmp26;                       \
     uintN_t otmp28 = z14 ^ otmp27;                      \
     uintN_t otmp29 = otmp28 ^ z10;                      \
+    uintN_t otmp30, otmp31, otmp32, otmp33, otmp34,     \
+        otmp35, otmp36, otmp37, otmp38, otmp39,         \
+        otmp40, otmp41, otmp42, otmp43, otmp44;         \
     output[4] = z2 ^ otmp23;                            \
     output[7] = z5 ^ otmp24;                            \
-    uintN_t otmp30 = z11 ^ otmp29;                      \
+    otmp30 = z11 ^ otmp29;                              \
     output[5] = z13 ^ otmp30;                           \
-    uintN_t otmp31 = otmp25 ^ z8;                       \
+    otmp31 = otmp25 ^ z8;                               \
     output[1] = z7 ^ otmp31;                            \
-    uintN_t otmp32 = z11 ^ z9;                          \
-    uintN_t otmp33 = z17 ^ otmp32;                      \
-    uintN_t otmp34 = otmp30 ^ otmp33;                   \
+    otmp32 = z11 ^ z9;                                  \
+    otmp33 = z17 ^ otmp32;                              \
+    otmp34 = otmp30 ^ otmp33;                           \
     output[0] = z15 ^ otmp33;                           \
-    uintN_t otmp35 = z12 ^ otmp34;                      \
+    otmp35 = z12 ^ otmp34;                              \
     output[6] = otmp35 ^ z16;                           \
-    uintN_t otmp36 = z1 ^ otmp23;                       \
-    uintN_t otmp37 = z5 ^ otmp36;                       \
+    otmp36 = z1 ^ otmp23;                               \
+    otmp37 = z5 ^ otmp36;                               \
     output[2] = z4 ^ otmp37;                            \
-    uintN_t otmp38 = z11 ^ output[1];                   \
-    uintN_t otmp39 = z2 ^ otmp38;                       \
-    uintN_t otmp40 = z17 ^ otmp39;                      \
-    uintN_t otmp41 = z0 ^ otmp40;                       \
-    uintN_t otmp42 = z5 ^ otmp41;                       \
-    uintN_t otmp43 = otmp42 ^ z10;                      \
-    uintN_t otmp44 = otmp43 ^ z3;                       \
+    otmp38 = z11 ^ output[1];                           \
+    otmp39 = z2 ^ otmp38;                               \
+    otmp40 = z17 ^ otmp39;                              \
+    otmp41 = z0 ^ otmp40;                               \
+    otmp42 = z5 ^ otmp41;                               \
+    otmp43 = otmp42 ^ z10;                              \
+    otmp44 = otmp43 ^ z3;                               \
     output[3] = otmp44 ^ z16;                           \
     /* end */
 
 #define BITSLICED_INVSUBBYTES(output, input, uintN_t) do {      \
-        SBOX_BACKWARD_TOP_TRANSFORM(input, uintN_t);             \
-        SBOX_CORE(uintN_t);                                     \
+        SBOX_BACKWARD_TOP_TRANSFORM(input, uintN_t)             \
+        SBOX_CORE(uintN_t)                                      \
         SBOX_BACKWARD_BOTTOM_TRANSFORM(output, uintN_t);         \
     } while (0)
 
@@ -551,24 +584,21 @@ static inline void dumpslices_BignumInt(
  */
 #define BITSLICED_INVMIXCOLUMNS(output, input, uintN_t) do      \
     {                                                           \
-        /* We need input * X^i for i=1,...,3 */                 \
-        uintN_t X[8], X2[8], X3[8];                             \
+        /* We need input * X^i for i=1,...,3; S, A, B are below */ \
+        uintN_t X[8], X2[8], X3[8], S[8], A[8], B[8];           \
         BITSLICED_MUL_BY_X(X, input, uintN_t);                  \
         BITSLICED_MUL_BY_X(X2, X, uintN_t);                     \
         BITSLICED_MUL_BY_X(X3, X2, uintN_t);                    \
         /* Sum them all and multiply by 1+Y+Y^2+Y^3. */         \
-        uintN_t S[8];                                           \
         BITSLICED_ADD(S, input, X);                             \
         BITSLICED_ADD(S, S, X2);                                \
         BITSLICED_ADD(S, S, X3);                                \
         ITERATE(BITSLICED_MUL_BY_1_Y3, S, S, uintN_t);          \
         ITERATE(BITSLICED_MUL_BY_1_Y2, S, S, uintN_t);          \
         /* Compute the X(Y+Y^2) term. */                        \
-        uintN_t A[8];                                           \
         ITERATE(BITSLICED_MUL_BY_1_Y3, A, X, uintN_t);          \
         ITERATE(BITSLICED_MUL_BY_Y2, A, A, uintN_t);            \
         /* Compute the X^2(Y+Y^3) term. */                      \
-        uintN_t B[8];                                           \
         ITERATE(BITSLICED_MUL_BY_1_Y2, B, X2, uintN_t);         \
         ITERATE(BITSLICED_MUL_BY_Y3, B, B, uintN_t);            \
         /* And add all the pieces together. */                  \
@@ -633,21 +663,27 @@ static void aes_sliced_key_setup(
     const unsigned char *key = (const unsigned char *)vkey;
 
     size_t key_words = keybits / 32;
+    size_t sched_words;
+    unsigned rconpos;
+    uint16_t *outslices;
+    unsigned outshift;
+    uint8_t inblk[16];
+    uint16_t slices[8];
+    size_t i;
     sk->rounds = key_words + 6;
-    size_t sched_words = (sk->rounds + 1) * 4;
+    sched_words = (sk->rounds + 1) * 4;
 
-    unsigned rconpos = 0;
+    rconpos = 0;
 
-    uint16_t *outslices = sk->roundkeys_serial;
-    unsigned outshift = 0;
+    outslices = sk->roundkeys_serial;
+    outshift = 0;
 
     memset(sk->roundkeys_serial, 0, sizeof(sk->roundkeys_serial));
 
-    uint8_t inblk[16];
     memset(inblk, 0, 16);
-    uint16_t slices[8];
 
-    for (size_t i = 0; i < sched_words; i++) {
+    for (i = 0; i < sched_words; i++) {
+        unsigned b;
         /*
          * Prepare a word of round key in the low 4 bits of each
          * integer in slices[].
@@ -658,22 +694,26 @@ static void aes_sliced_key_setup(
         } else {
             unsigned wordindex, bitshift;
             uint16_t *prevslices;
+            bool rotate_and_round_constant;
+            bool sub;
+            size_t j;
 
             /* Fetch the (i-1)th key word */
             wordindex = i-1;
             bitshift = 4 * (wordindex & 3);
             prevslices = sk->roundkeys_serial + 8 * (wordindex >> 2);
-            for (size_t i = 0; i < 8; i++)
-                slices[i] = prevslices[i] >> bitshift;
+            for (j = 0; j < 8; j++)
+                slices[j] = prevslices[j] >> bitshift;
 
             /* Decide what we're doing in this expansion stage */
-            bool rotate_and_round_constant = (i % key_words == 0);
-            bool sub = rotate_and_round_constant ||
+            rotate_and_round_constant = (i % key_words == 0);
+            sub = rotate_and_round_constant ||
                 (key_words == 8 && i % 8 == 4);
 
             if (rotate_and_round_constant) {
-                for (size_t i = 0; i < 8; i++)
-                    slices[i] = ((slices[i] << 3) | (slices[i] >> 1)) & 0xF;
+                size_t j;
+                for (j = 0; j < 8; j++)
+                    slices[j] = ((slices[j] << 3) | (slices[j] >> 1)) & 0xF;
             }
 
             if (sub) {
@@ -689,24 +729,26 @@ static void aes_sliced_key_setup(
             }
 
             if (rotate_and_round_constant) {
+                uint8_t rcon;
+                size_t j;
                 assert(rconpos < lenof(aes_key_setup_round_constants));
-                uint8_t rcon = aes_key_setup_round_constants[rconpos++];
-                for (size_t i = 0; i < 8; i++)
-                    slices[i] ^= 1 & (rcon >> i);
+                rcon = aes_key_setup_round_constants[rconpos++];
+                for (j = 0; j < 8; j++)
+                    slices[j] ^= 1 & (rcon >> j);
             }
 
             /* Combine with the (i-Nk)th key word */
             wordindex = i - key_words;
             bitshift = 4 * (wordindex & 3);
             prevslices = sk->roundkeys_serial + 8 * (wordindex >> 2);
-            for (size_t i = 0; i < 8; i++)
-                slices[i] ^= prevslices[i] >> bitshift;
+            for (j = 0; j < 8; j++)
+                slices[j] ^= prevslices[j] >> bitshift;
         }
 
         /*
          * Now copy it into sk.
          */
-        for (unsigned b = 0; b < 8; b++)
+        for (b = 0; b < 8; b++)
             outslices[b] |= (slices[b] & 0xF) << outshift;
         outshift += 4;
         if (outshift == 16) {
@@ -722,7 +764,7 @@ static void aes_sliced_key_setup(
      * Add the S-box constant to every round key after the first one,
      * compensating for it being left out in the main cipher.
      */
-    for (size_t i = 8; i < 8 * (sched_words/4); i += 8) {
+    for (i = 8; i < 8 * (sched_words/4); i += 8) {
         sk->roundkeys_serial[i+0] ^= 0xFFFF;
         sk->roundkeys_serial[i+1] ^= 0xFFFF;
         sk->roundkeys_serial[i+5] ^= 0xFFFF;
@@ -733,7 +775,7 @@ static void aes_sliced_key_setup(
      * Replicate that set of round keys into larger integers for the
      * parallel versions of the cipher.
      */
-    for (size_t i = 0; i < 8 * (sched_words / 4); i++) {
+    for (i = 0; i < 8 * (sched_words / 4); i++) {
         sk->roundkeys_parallel[i] = sk->roundkeys_serial[i] *
             ((BignumInt)~(BignumInt)0 / 0xFFFF);
     }
@@ -749,20 +791,22 @@ static void aes_sliced_key_setup(
         uint8_t *output, const uint8_t *input, const aes_sliced_key *sk) \
     {                                                                   \
         uintN_t state[8];                                               \
+        const uintN_t *keys;                                            \
+        unsigned i;                                                     \
         TO_BITSLICES(state, input, uintN_t, =, 0);                      \
-        for (unsigned i = 1; i < nblocks; i++) {                        \
+        for (i = 1; i < nblocks; i++) {                                 \
             input += 16;                                                \
             TO_BITSLICES(state, input, uintN_t, |=, i*16);              \
         }                                                               \
-        const uintN_t *keys = sk->roundkeys_##suffix;                   \
+        keys = sk->roundkeys_##suffix;                                  \
         BITSLICED_ADD(state, state, keys);                              \
         keys += 8;                                                      \
-        for (unsigned i = 0; i < sk->rounds-1; i++) {                   \
+        for (i = 0; i < sk->rounds-1; i++) {                            \
             aes_sliced_round_e_##suffix(state, state, keys);            \
             keys += 8;                                                  \
         }                                                               \
         aes_sliced_round_e_##suffix##_last(state, state, keys);         \
-        for (unsigned i = 0; i < nblocks; i++) {                        \
+        for (i = 0; i < nblocks; i++) {                                 \
             FROM_BITSLICES(output, state, i*16);                        \
             output += 16;                                               \
         }                                                               \
@@ -773,20 +817,22 @@ static void aes_sliced_key_setup(
         uint8_t *output, const uint8_t *input, const aes_sliced_key *sk) \
     {                                                                   \
         uintN_t state[8];                                               \
+        const uintN_t *keys;                                            \
+        unsigned i;                                                     \
         TO_BITSLICES(state, input, uintN_t, =, 0);                      \
-        for (unsigned i = 1; i < nblocks; i++) {                        \
+        for (i = 1; i < nblocks; i++) {                                 \
             input += 16;                                                \
             TO_BITSLICES(state, input, uintN_t, |=, i*16);              \
         }                                                               \
-        const uintN_t *keys = sk->roundkeys_##suffix + 8*sk->rounds;    \
+        keys = sk->roundkeys_##suffix + 8*sk->rounds;                   \
         aes_sliced_round_d_##suffix##_first(state, state, keys);        \
         keys -= 8;                                                      \
-        for (unsigned i = 0; i < sk->rounds-1; i++) {                   \
+        for (i = 0; i < sk->rounds-1; i++) {                            \
             aes_sliced_round_d_##suffix(state, state, keys);            \
             keys -= 8;                                                  \
         }                                                               \
         BITSLICED_ADD(state, state, keys);                              \
-        for (unsigned i = 0; i < nblocks; i++) {                        \
+        for (i = 0; i < nblocks; i++) {                                 \
             FROM_BITSLICES(output, state, i*16);                        \
             output += 16;                                               \
         }                                                               \
@@ -832,7 +878,7 @@ struct aes_sw_context {
              * sections: one fixed, one that increments per message
              * sent and MACed, and one that increments per cipher
              * block. */
-            uint64_t msg_counter;
+            uint64 msg_counter;
             uint32_t fixed_iv, block_counter;
             /* But we keep the precomputed keystream chunks just like
              * SDCTR mode. */
@@ -873,9 +919,10 @@ static void aes_sw_setiv_sdctr(ssh_cipher *ciph, const void *viv)
 {
     aes_sw_context *ctx = container_of(ciph, aes_sw_context, ciph);
     const uint8_t *iv = (const uint8_t *)viv;
+    unsigned i;
 
     /* Import the initial counter value into the internal representation */
-    for (unsigned i = 0; i < SDCTR_WORDS; i++)
+    for (i = 0; i < SDCTR_WORDS; i++)
         ctx->iv.sdctr.counter[i] =
             GET_BIGNUMINT_MSB_FIRST(
                 iv + 16 - BIGNUM_INT_BYTES - i*BIGNUM_INT_BYTES);
@@ -905,7 +952,7 @@ static void aes_sw_next_message_gcm(ssh_cipher *ciph)
 {
     aes_sw_context *ctx = container_of(ciph, aes_sw_context, ciph);
 
-    ctx->iv.gcm.msg_counter++;
+    ctx->iv.gcm.msg_counter = uint64_add32(ctx->iv.gcm.msg_counter, 1);
     ctx->iv.gcm.block_counter = 1;
     ctx->iv.gcm.keystream_pos =
         ctx->iv.gcm.keystream + sizeof(ctx->iv.gcm.keystream);
@@ -917,20 +964,19 @@ static inline void memxor16(void *vout, const void *vlhs, const void *vrhs)
 {
     uint8_t *out = (uint8_t *)vout;
     const uint8_t *lhs = (const uint8_t *)vlhs, *rhs = (const uint8_t *)vrhs;
-    uint64_t w;
+    unsigned i;
 
-    w = GET_64BIT_LSB_FIRST(lhs);
-    w ^= GET_64BIT_LSB_FIRST(rhs);
-    PUT_64BIT_LSB_FIRST(out, w);
-    w = GET_64BIT_LSB_FIRST(lhs + 8);
-    w ^= GET_64BIT_LSB_FIRST(rhs + 8);
-    PUT_64BIT_LSB_FIRST(out + 8, w);
+    for (i = 0; i < 16; i += 4)
+        PUT_32BIT_LSB_FIRST(out + i, GET_32BIT_LSB_FIRST(lhs + i) ^
+                            GET_32BIT_LSB_FIRST(rhs + i));
 }
 
 static inline void aes_cbc_sw_encrypt(
     ssh_cipher *ciph, void *vblk, int blklen)
 {
     aes_sw_context *ctx = container_of(ciph, aes_sw_context, ciph);
+    uint8_t *blk;
+    uint8_t *finish;
 
     /*
      * CBC encryption has to be done serially, because the input to
@@ -938,7 +984,7 @@ static inline void aes_cbc_sw_encrypt(
      * run.
      */
 
-    for (uint8_t *blk = (uint8_t *)vblk, *finish = blk + blklen;
+    for (blk = (uint8_t *)vblk, finish = blk + blklen;
          blk < finish; blk += 16) {
         /*
          * We use the IV array itself as the location for the
@@ -985,6 +1031,7 @@ static inline void aes_cbc_sw_decrypt(
          * anyway. */
         size_t blocks = (blocks_remaining < SLICE_PARALLELISM ?
                          blocks_remaining : SLICE_PARALLELISM);
+        size_t i;
 
         /* Parallel-decrypt the input, in a separate array so we still
          * have the cipher stream available for XORing. */
@@ -992,7 +1039,7 @@ static inline void aes_cbc_sw_decrypt(
         aes_sliced_d_parallel(data, data, &ctx->sk);
 
         /* Write the output and update the IV */
-        for (size_t i = 0; i < blocks; i++) {
+        for (i = 0; i < blocks; i++) {
             uint8_t *decrypted = data + 16*i;
             uint8_t *output = blk + 16*i;
 
@@ -1022,25 +1069,30 @@ static inline void aes_sdctr_sw(
 
     uint8_t *keystream_end =
         ctx->iv.sdctr.keystream + sizeof(ctx->iv.sdctr.keystream);
+    uint8_t *blk;
+    uint8_t *finish;
 
-    for (uint8_t *blk = (uint8_t *)vblk, *finish = blk + blklen;
+    for (blk = (uint8_t *)vblk, finish = blk + blklen;
          blk < finish; blk += 16) {
 
         if (ctx->iv.sdctr.keystream_pos == keystream_end) {
+            uint8_t *block;
             /*
              * Generate some keystream.
              */
-            for (uint8_t *block = ctx->iv.sdctr.keystream;
+            for (block = ctx->iv.sdctr.keystream;
                  block < keystream_end; block += 16) {
+                BignumCarry carry;
+                unsigned i;
                 /* Format the counter value into the buffer. */
-                for (unsigned i = 0; i < SDCTR_WORDS; i++)
+                for (i = 0; i < SDCTR_WORDS; i++)
                     PUT_BIGNUMINT_MSB_FIRST(
                         block + 16 - BIGNUM_INT_BYTES - i*BIGNUM_INT_BYTES,
                         ctx->iv.sdctr.counter[i]);
 
                 /* Increment the counter. */
-                BignumCarry carry = 1;
-                for (unsigned i = 0; i < SDCTR_WORDS; i++)
+                carry = 1;
+                for (i = 0; i < SDCTR_WORDS; i++)
                     BignumADC(ctx->iv.sdctr.counter[i], carry,
                               ctx->iv.sdctr.counter[i], 0, carry);
             }
@@ -1076,15 +1128,18 @@ static inline void aes_gcm_sw(
 
     uint8_t *keystream_end =
         ctx->iv.gcm.keystream + sizeof(ctx->iv.gcm.keystream);
+    uint8_t *blk;
+    uint8_t *finish;
 
-    for (uint8_t *blk = (uint8_t *)vblk, *finish = blk + blklen;
+    for (blk = (uint8_t *)vblk, finish = blk + blklen;
          blk < finish; blk += 16) {
 
         if (ctx->iv.gcm.keystream_pos == keystream_end) {
+            uint8_t *block;
             /*
              * Generate some keystream.
              */
-            for (uint8_t *block = ctx->iv.gcm.keystream;
+            for (block = ctx->iv.gcm.keystream;
                  block < keystream_end; block += 16) {
                 /* Format the counter value into the buffer. */
                 PUT_32BIT_MSB_FIRST(block, ctx->iv.gcm.fixed_iv);

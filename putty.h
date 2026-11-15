@@ -556,12 +556,6 @@ struct keyvalwhere {
     int where;
 };
 
-#ifndef NO_GSSAPI
-extern const int ngsslibs;
-extern const char *const gsslibnames[]; /* for displaying in configuration */
-extern const struct keyvalwhere gsslibkeywords[]; /* for settings.c */
-#endif
-
 extern const char *const ttymodes[];
 
 enum {
@@ -590,23 +584,7 @@ enum {
 /* In (no)sshproxy.c */
 extern const bool ssh_proxy_supported;
 
-/*
- * This structure type wraps a Seat pointer, in a way that has no
- * purpose except to be a different type.
- *
- * The Seat wrapper functions that present interactive prompts all
- * expect one of these in place of their ordinary Seat pointer. You
- * get one by calling interactor_announce (defined below), which will
- * print a message (if not already done) identifying the Interactor
- * that originated the prompt.
- *
- * This arranges that the C type system itself will check that no call
- * to any of those Seat methods has omitted the mandatory call to
- * interactor_announce beforehand.
- */
-struct InteractionReadySeat {
-    Seat *seat;
-};
+/* struct InteractionReadySeat is in defs.h */
 
 /*
  * The Interactor trait is implemented by anything that is capable of
@@ -818,53 +796,7 @@ extern const char *const appname;
  */
 typedef void (*toplevel_callback_fn_t)(void *ctx);
 
-/* Enum of result types in SeatPromptResult below */
-typedef enum SeatPromptResultKind {
-    /* Answer not yet available at all; either try again later or wait
-     * for a callback (depending on the request's API) */
-    SPRK_INCOMPLETE,
-
-    /* We're abandoning the connection because the user interactively
-     * told us to. (Hence, no need to present an error message
-     * telling the user we're doing that: they already know.) */
-    SPRK_USER_ABORT,
-
-    /* We're abandoning the connection for some other reason (e.g. we
-     * were unable to present the prompt at all, or a batch-mode
-     * configuration told us to give the answer no). This may
-     * ultimately have stemmed from some user configuration, but they
-     * didn't _tell us right now_ to abandon this connection, so we
-     * still need to inform them that we've done so. */
-    SPRK_SW_ABORT,
-
-    /* We're proceeding with the connection and have all requested
-     * information (if any) */
-    SPRK_OK
-} SeatPromptResultKind;
-
-/* Small struct to present the results of interactive requests from
- * backend to Seat (see below) */
-struct SeatPromptResult {
-    SeatPromptResultKind kind;
-
-    /*
-     * In the case of SPRK_SW_ABORT, the frontend provides an error
-     * message to present to the user. But dynamically allocating it
-     * up front would mean having to make sure it got freed at any
-     * call site where one of these structs is received (and freed
-     * _once_ no matter how many times the struct is copied). So
-     * instead we provide a function that will generate the error
-     * message into a BinarySink.
-     */
-    void (*errfn)(SeatPromptResult, BinarySink *);
-
-    /*
-     * And some fields the error function can use to construct the
-     * message (holding, e.g. an OS error code).
-     */
-    const char *errdata_lit; /* statically allocated, e.g. a string literal */
-    unsigned errdata_u;
-};
+/* SeatPromptResult and SeatPromptResultKind are in defs.h */
 
 /* Helper function to construct the simple versions of these
  * structures inline */
@@ -1774,7 +1706,8 @@ NORETURN void cleanup_exit(int);
 
 /* The master list of option keywords lives in conf.h */
 enum config_primary_key {
-    #define CONF_OPTION(keyword, ...) CONF_ ## keyword,
+    #define CONF_OPTION(keyword, vtype, stype, def, kw, senum, flags) \
+        CONF_ ## keyword,
     #include "conf.h"
     #undef CONF_OPTION
 
@@ -1844,15 +1777,17 @@ struct ConfKeyInfo {
     int subkey_type;
     int value_type;
 
-    union {
+    /* NT port: a struct, not a union, so that conf_data.c can fill
+     * in any one of them with a C89 (positional) initialiser */
+    struct {
         bool bval;
         int ival;
         const char *sval;
     } default_value;
 
-    bool save_custom : 1;
-    bool load_custom : 1;
-    bool not_saved : 1;
+    unsigned save_custom : 1;
+    unsigned load_custom : 1;
+    unsigned not_saved : 1;
 
     const char *save_keyword;
     const ConfSaveEnumType *storage_enum;
@@ -2169,13 +2104,6 @@ void log_packet(LogContext *logctx, int direction, int type,
                 unsigned downstream_id, const char *additional_log_text);
 
 /*
- * Exports from testback.c
- */
-
-extern const struct BackendVtable null_backend;
-extern const struct BackendVtable loop_backend;
-
-/*
  * Exports from raw.c.
  */
 
@@ -2387,7 +2315,7 @@ void printer_finish_job(printer_job *);
  * cmdline.c).
  */
 struct cmdline_get_passwd_input_state { bool tried; };
-#define CMDLINE_GET_PASSWD_INPUT_STATE_INIT { .tried = false }
+#define CMDLINE_GET_PASSWD_INPUT_STATE_INIT { /* .tried = */ false }
 extern const cmdline_get_passwd_input_state cmdline_get_passwd_input_state_new;
 int cmdline_process_param(CmdlineArg *, CmdlineArg *, int, Conf *);
 void cmdline_run_saved(Conf *);
@@ -2475,31 +2403,31 @@ void conf_fontsel_handler(dlgcontrol *ctrl, dlgparam *dlg,
 struct conf_editbox_handler_type {
     /* Structure passed as context2 to conf_editbox_handler */
     enum { EDIT_STR, EDIT_INT, EDIT_FIXEDPOINT } type;
-    union {
-        /*
-         * EDIT_STR means the edit box is connected to a string
-         * field in Conf. No further parameters needed.
-         */
+    /*
+     * EDIT_STR means the edit box is connected to a string
+     * field in Conf. No further parameters needed.
+     */
 
-        /*
-         * EDIT_INT means the edit box is connected to an int field in
-         * Conf, and the input string is interpreted as decimal. No
-         * further parameters needed. (But we could add one here later
-         * if for some reason we wanted int fields in hex.)
-         */
+    /*
+     * EDIT_INT means the edit box is connected to an int field in
+     * Conf, and the input string is interpreted as decimal. No
+     * further parameters needed. (But we could add one here later
+     * if for some reason we wanted int fields in hex.)
+     */
 
-        /*
-         * EDIT_FIXEDPOINT means the edit box is connected to an int
-         * field in Conf, but the input string is interpreted as
-         * _floating point_, and converted to/from the output int by
-         * means of a fixed denominator. That is,
-         *
-         *   (floating value in edit box) * denominator = value in Conf
-         */
-        struct {
-            double denominator;
-        };
-    };
+    /*
+     * EDIT_FIXEDPOINT means the edit box is connected to an int
+     * field in Conf, but the input string is interpreted as
+     * _floating point_, and converted to/from the output int by
+     * means of a fixed denominator. That is,
+     *
+     *   (floating value in edit box) * denominator = value in Conf
+     *
+     * (NT port: upstream keeps the parameters in an anonymous union,
+     * which the compilers of 1993-1996 can't initialise. There is
+     * only one, so it is a plain field here.)
+     */
+    double denominator;
 };
 
 extern const struct conf_editbox_handler_type conf_editbox_str;

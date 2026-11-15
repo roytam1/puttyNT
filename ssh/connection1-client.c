@@ -126,7 +126,7 @@ bool ssh1_handle_direction_specific_packet(
                 s->ppl.bpp, SSH1_MSG_CHANNEL_OPEN_FAILURE);
             put_uint32(pktout, remid);
             pq_push(s->ppl.out_pq, pktout);
-            ppl_logevent("Rejected X11 connect request");
+            ppl_logevent(("Rejected X11 connect request"));
         } else {
             c = snew(struct ssh1_channel);
             c->connlayer = s;
@@ -142,7 +142,7 @@ bool ssh1_handle_direction_specific_packet(
             put_uint32(pktout, c->remoteid);
             put_uint32(pktout, c->localid);
             pq_push(s->ppl.out_pq, pktout);
-            ppl_logevent("Opened X11 forward channel");
+            ppl_logevent(("Opened X11 forward channel"));
         }
 
         return true;
@@ -157,6 +157,9 @@ bool ssh1_handle_direction_specific_packet(
             put_uint32(pktout, remid);
             pq_push(s->ppl.out_pq, pktout);
         } else {
+            Plug *plug;
+            Channel *ch;
+            Socket *skt;
             c = snew(struct ssh1_channel);
             c->connlayer = s;
             ssh1_channel_init(c);
@@ -168,9 +171,8 @@ bool ssh1_handle_direction_specific_packet(
              * agent and set up an ordinary port-forwarding type
              * channel over it.
              */
-            Plug *plug;
-            Channel *ch = portfwd_raw_new(&s->cl, &plug, true);
-            Socket *skt = agent_connect(plug);
+            ch = portfwd_raw_new(&s->cl, &plug, true);
+            skt = agent_connect(plug);
             if (!sk_socket_error(skt)) {
                 portfwd_raw_setup(ch, skt, &c->sc);
                 c->chan = ch;
@@ -205,8 +207,8 @@ bool ssh1_handle_direction_specific_packet(
         pfp = find234(s->rportfwds, &pf, NULL);
 
         if (!pfp) {
-            ppl_logevent("Rejected remote port open request for %s:%d",
-                         pf.dhost, port);
+            ppl_logevent(("Rejected remote port open request for %s:%d",
+                          pf.dhost, port));
             pktout = ssh_bpp_new_pktout(
                 s->ppl.bpp, SSH1_MSG_CHANNEL_OPEN_FAILURE);
             put_uint32(pktout, remid);
@@ -216,14 +218,14 @@ bool ssh1_handle_direction_specific_packet(
 
             c = snew(struct ssh1_channel);
             c->connlayer = s;
-            ppl_logevent("Received remote port open request for %s:%d",
-                         pf.dhost, port);
+            ppl_logevent(("Received remote port open request for %s:%d",
+                          pf.dhost, port));
             err = portfwdmgr_connect(
                 s->portfwdmgr, &c->chan, pf.dhost, port,
                 &c->sc, pfp->addressfamily);
 
             if (err) {
-                ppl_logevent("Port open failed: %s", err);
+                ppl_logevent(("Port open failed: %s", err));
                 sfree(err);
                 ssh1_channel_free(c);
                 pktout = ssh_bpp_new_pktout(
@@ -239,7 +241,7 @@ bool ssh1_handle_direction_specific_packet(
                 put_uint32(pktout, c->remoteid);
                 put_uint32(pktout, c->localid);
                 pq_push(s->ppl.out_pq, pktout);
-                ppl_logevent("Forwarded port opened successfully");
+                ppl_logevent(("Forwarded port opened successfully"));
             }
         }
 
@@ -264,7 +266,7 @@ bool ssh1_handle_direction_specific_packet(
 
       case SSH1_SMSG_EXIT_STATUS: {
         int exitcode = get_uint32(pktin);
-        ppl_logevent("Server sent command exit status %d", exitcode);
+        ppl_logevent(("Server sent command exit status %d", exitcode));
         ssh_got_exitcode(s->ppl.ssh, exitcode);
 
         s->session_terminated = true;
@@ -442,19 +444,27 @@ static void ssh1mainchan_write_eof(SshChannel *sc)
 }
 
 static const SshChannelVtable ssh1mainchan_vtable = {
-    .write = ssh1mainchan_write,
-    .write_eof = ssh1mainchan_write_eof,
-    .request_x11_forwarding = ssh1mainchan_request_x11_forwarding,
-    .request_agent_forwarding = ssh1mainchan_request_agent_forwarding,
-    .request_pty = ssh1mainchan_request_pty,
-    .send_env_var = ssh1mainchan_send_env_var,
-    .start_shell = ssh1mainchan_start_shell,
-    .start_command = ssh1mainchan_start_command,
-    .start_subsystem = ssh1mainchan_start_subsystem,
-    .send_serial_break = ssh1mainchan_send_serial_break,
-    .send_signal = ssh1mainchan_send_signal,
-    .send_terminal_size_change = ssh1mainchan_send_terminal_size_change,
-    .hint_channel_is_simple = ssh1mainchan_hint_channel_is_simple,
+    /* .write = */ ssh1mainchan_write,
+    /* .write_eof = */ ssh1mainchan_write_eof,
+    /* .initiate_close = */ NULL,
+    /* .unthrottle = */ NULL,
+    /* .get_conf = */ NULL,
+    /* .window_override_removed = */ NULL,
+    /* .x11_sharing_handover = */ NULL,
+    /* .send_exit_status = */ NULL,
+    /* .send_exit_signal = */ NULL,
+    /* .send_exit_signal_numeric = */ NULL,
+    /* .request_x11_forwarding = */ ssh1mainchan_request_x11_forwarding,
+    /* .request_agent_forwarding = */ ssh1mainchan_request_agent_forwarding,
+    /* .request_pty = */ ssh1mainchan_request_pty,
+    /* .send_env_var = */ ssh1mainchan_send_env_var,
+    /* .start_shell = */ ssh1mainchan_start_shell,
+    /* .start_command = */ ssh1mainchan_start_command,
+    /* .start_subsystem = */ ssh1mainchan_start_subsystem,
+    /* .send_serial_break = */ ssh1mainchan_send_serial_break,
+    /* .send_signal = */ ssh1mainchan_send_signal,
+    /* .send_terminal_size_change = */ ssh1mainchan_send_terminal_size_change,
+    /* .hint_channel_is_simple = */ ssh1mainchan_hint_channel_is_simple,
     /* other methods are NULL */
 };
 
@@ -482,13 +492,14 @@ static void ssh1_rportfwd_response(struct ssh1_connection_state *s,
     struct ssh_rportfwd *rpf = (struct ssh_rportfwd *)ctx;
 
     if (success) {
-        ppl_logevent("Remote port forwarding from %s enabled",
-                     rpf->log_description);
+        ppl_logevent(("Remote port forwarding from %s enabled",
+                      rpf->log_description));
     } else {
-        ppl_logevent("Remote port forwarding from %s refused",
-                     rpf->log_description);
+        struct ssh_rportfwd *realpf;
+        ppl_logevent(("Remote port forwarding from %s refused",
+                      rpf->log_description));
 
-        struct ssh_rportfwd *realpf = del234(s->rportfwds, rpf);
+        realpf = del234(s->rportfwds, rpf);
         assert(realpf == rpf);
         portfwdmgr_close(s->portfwdmgr, rpf->pfr);
         free_rportfwd(rpf);
@@ -504,6 +515,7 @@ struct ssh_rportfwd *ssh1_rportfwd_alloc(
     struct ssh1_connection_state *s =
         container_of(cl, struct ssh1_connection_state, cl);
     struct ssh_rportfwd *rpf = snew(struct ssh_rportfwd);
+    PktOut *pktout;
 
     rpf->shost = dupstr(shost);
     rpf->sport = sport;
@@ -518,7 +530,7 @@ struct ssh_rportfwd *ssh1_rportfwd_alloc(
         return NULL;
     }
 
-    PktOut *pktout = ssh_bpp_new_pktout(
+    pktout = ssh_bpp_new_pktout(
         s->ppl.bpp, SSH1_CMSG_PORT_FORWARD_REQUEST);
     put_uint32(pktout, rpf->sport);
     put_stringz(pktout, rpf->dhost);

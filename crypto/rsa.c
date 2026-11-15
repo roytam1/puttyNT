@@ -96,6 +96,10 @@ bool rsa_ssh1_encrypt(unsigned char *data, int length, RSAKey *key)
     mp_int *b1, *b2;
     int i;
     unsigned char *p;
+    size_t npad;
+    size_t random_bits;
+    mp_int *randval;
+    mp_int *tmp;
 
     if (key->bytes < length + 4)
         return false;                  /* RSA key too short! */
@@ -104,7 +108,7 @@ bool rsa_ssh1_encrypt(unsigned char *data, int length, RSAKey *key)
     data[0] = 0;
     data[1] = 2;
 
-    size_t npad = key->bytes - length - 3;
+    npad = key->bytes - length - 3;
     /*
      * Generate a sequence of nonzero padding bytes. We do this in a
      * reasonably uniform way and without having to loop round
@@ -122,14 +126,15 @@ bool rsa_ssh1_encrypt(unsigned char *data, int length, RSAKey *key)
      * of integers each in [0,k). I'm just doing that scaled up by a
      * power of 2 to avoid the fractions.)
      */
-    size_t random_bits = (npad + 16) * 8;
-    mp_int *randval = mp_new(random_bits + 8);
-    mp_int *tmp = mp_random_bits(random_bits);
+    random_bits = (npad + 16) * 8;
+    randval = mp_new(random_bits + 8);
+    tmp = mp_random_bits(random_bits);
     mp_copy_into(randval, tmp);
     mp_free(tmp);
     for (i = 2; i < key->bytes - length - 1; i++) {
+        uint8_t byte;
         mp_mul_integer_into(randval, randval, 255);
-        uint8_t byte = mp_get_byte(randval, random_bits / 8);
+        byte = mp_get_byte(randval, random_bits / 8);
         assert(byte != 255);
         data[i] = byte + 1;
         mp_reduce_mod_2to(randval, random_bits);
@@ -163,6 +168,9 @@ static mp_int *crt_modpow(mp_int *base, mp_int *exp, mp_int *mod,
 {
     mp_int *pm1, *qm1, *pexp, *qexp, *presult, *qresult;
     mp_int *diff, *multiplier, *ret0, *ret;
+    mp_int *base_mod_p;
+    mp_int *base_mod_q;
+    unsigned presult_too_small;
 
     /*
      * Reduce the exponent mod phi(p) and phi(q), to save time when
@@ -179,10 +187,10 @@ static mp_int *crt_modpow(mp_int *base, mp_int *exp, mp_int *mod,
     /*
      * Do the two modpows.
      */
-    mp_int *base_mod_p = mp_mod(base, p);
+    base_mod_p = mp_mod(base, p);
     presult = mp_modpow(base_mod_p, pexp, p);
     mp_free(base_mod_p);
-    mp_int *base_mod_q = mp_mod(base, q);
+    base_mod_q = mp_mod(base, q);
     qresult = mp_modpow(base_mod_q, qexp, q);
     mp_free(base_mod_q);
 
@@ -198,7 +206,7 @@ static mp_int *crt_modpow(mp_int *base, mp_int *exp, mp_int *mod,
      *
      * (If presult-qresult < 0, we add p to it to keep it positive.)
      */
-    unsigned presult_too_small = mp_cmp_hs(qresult, presult);
+    presult_too_small = mp_cmp_hs(qresult, presult);
     mp_cond_add_into(presult, presult, p, presult_too_small);
 
     diff = mp_sub(presult, qresult);
@@ -251,7 +259,8 @@ bool rsa_ssh1_decrypt_pkcs1(mp_int *input, RSAKey *key,
 
     {
         mp_int *b = rsa_ssh1_decrypt(input, key);
-        for (size_t i = (mp_get_nbits(key->modulus) + 7) / 8; i-- > 0 ;) {
+        size_t i;
+        for (i = (mp_get_nbits(key->modulus) + 7) / 8; i-- > 0 ;) {
             put_byte(data, mp_get_byte(b, i));
         }
         mp_free(b);
@@ -280,11 +289,13 @@ bool rsa_ssh1_decrypt_pkcs1(mp_int *input, RSAKey *key,
 
 static void append_hex_to_strbuf(strbuf *sb, mp_int *x)
 {
+    char *hex;
+    size_t hexlen;
     if (sb->len > 0)
         put_byte(sb, ',');
     put_data(sb, "0x", 2);
-    char *hex = mp_get_hex(x);
-    size_t hexlen = strlen(hex);
+    hex = mp_get_hex(x);
+    hexlen = strlen(hex);
     put_data(sb, hex, hexlen);
     smemclr(hex, hexlen);
     sfree(hex);
@@ -309,6 +320,8 @@ char *rsa_ssh1_fingerprint(RSAKey *key)
     unsigned char digest[16];
     strbuf *out;
     int i;
+    size_t j;
+    ssh_hash *hash;
 
     /*
      * The hash preimage for SSH-1 key fingerprinting consists of the
@@ -318,19 +331,19 @@ char *rsa_ssh1_fingerprint(RSAKey *key)
      * between them.
      */
 
-    ssh_hash *hash = ssh_hash_new(&ssh_md5);
-    for (size_t i = (mp_get_nbits(key->modulus) + 7) / 8; i-- > 0 ;)
-        put_byte(hash, mp_get_byte(key->modulus, i));
-    for (size_t i = (mp_get_nbits(key->exponent) + 7) / 8; i-- > 0 ;)
-        put_byte(hash, mp_get_byte(key->exponent, i));
+    hash = ssh_hash_new(&ssh_md5);
+    for (j = (mp_get_nbits(key->modulus) + 7) / 8; j-- > 0 ;)
+        put_byte(hash, mp_get_byte(key->modulus, j));
+    for (j = (mp_get_nbits(key->exponent) + 7) / 8; j-- > 0 ;)
+        put_byte(hash, mp_get_byte(key->exponent, j));
     ssh_hash_final(hash, digest);
 
     out = strbuf_new();
-    put_fmt(out, "%"SIZEu" ", mp_get_nbits(key->modulus));
+    BinarySink_put_fmt(BinarySink_UPCAST(out), "%"SIZEu" ", mp_get_nbits(key->modulus));
     for (i = 0; i < 16; i++)
-        put_fmt(out, "%s%02x", i ? ":" : "", digest[i]);
+        BinarySink_put_fmt(BinarySink_UPCAST(out), "%s%02x", i ? ":" : "", digest[i]);
     if (key->comment)
-        put_fmt(out, " %s", key->comment);
+        BinarySink_put_fmt(BinarySink_UPCAST(out), " %s", key->comment);
     return strbuf_to_str(out);
 }
 
@@ -341,7 +354,8 @@ char *rsa_ssh1_fingerprint(RSAKey *key)
 char **rsa_ssh1_fake_all_fingerprints(RSAKey *key)
 {
     char **fingerprints = snewn(SSH_N_FPTYPES, char *);
-    for (unsigned i = 0; i < SSH_N_FPTYPES; i++)
+    unsigned i;
+    for (i = 0; i < SSH_N_FPTYPES; i++)
         fingerprints[i] = NULL;
     fingerprints[SSH_FPTYPE_MD5] = rsa_ssh1_fingerprint(key);
     return fingerprints;
@@ -356,6 +370,8 @@ bool rsa_verify(RSAKey *key)
 {
     mp_int *n, *ed, *pm1, *qm1;
     unsigned ok = 1;
+    mp_int *p_new;
+    mp_int *q_new;
 
     /* Preliminary checks: p,q can't be 0 or 1. (Of course no other
      * very small value is any good either, but these are the values
@@ -392,8 +408,8 @@ bool rsa_verify(RSAKey *key)
      * should instead flip them round into the canonical order of
      * p > q. This also involves regenerating iqmp.
      */
-    mp_int *p_new = mp_max(key->p, key->q);
-    mp_int *q_new = mp_min(key->p, key->q);
+    p_new = mp_max(key->p, key->q);
+    q_new = mp_min(key->p, key->q);
     mp_free(key->p);
     mp_free(key->q);
     mp_free(key->iqmp);
@@ -401,7 +417,7 @@ bool rsa_verify(RSAKey *key)
     key->q = q_new;
     key->iqmp = mp_invert(key->q, key->p);
 
-    return ok;
+    return ok != 0;
 }
 
 void rsa_ssh1_public_blob(BinarySink *bs, RSAKey *key,
@@ -739,12 +755,16 @@ static unsigned char *rsa_pkcs1_signature_string(
     size_t nbytes, const ssh_hashalg *halg, ptrlen data)
 {
     size_t fixed_parts = rsa_pkcs1_length_of_fixed_parts(halg);
+    size_t padding;
+    ptrlen asn1_prefix;
+    unsigned char *bytes;
+    ssh_hash *h;
     assert(nbytes >= fixed_parts);
-    size_t padding = nbytes - fixed_parts;
+    padding = nbytes - fixed_parts;
 
-    ptrlen asn1_prefix = rsa_pkcs1_prefix_for_hash(halg);
+    asn1_prefix = rsa_pkcs1_prefix_for_hash(halg);
 
-    unsigned char *bytes = snewn(nbytes, unsigned char);
+    bytes = snewn(nbytes, unsigned char);
 
     bytes[0] = 0;
     bytes[1] = 1;
@@ -753,7 +773,7 @@ static unsigned char *rsa_pkcs1_signature_string(
 
     memcpy(bytes + 2 + padding, asn1_prefix.ptr, asn1_prefix.len);
 
-    ssh_hash *h = ssh_hash_new(halg);
+    h = ssh_hash_new(halg);
     put_datapl(h, data);
     ssh_hash_final(h, bytes + 2 + padding + asn1_prefix.len);
 
@@ -775,6 +795,9 @@ static bool rsa2_verify(ssh_key *key, ptrlen sig, ptrlen data)
     /* Start by making sure the key is even long enough to encode a
      * signature. If not, everything fails to verify. */
     size_t nbytes = (mp_get_nbits(rsa->modulus) + 7) / 8;
+    unsigned diff;
+    unsigned char *bytes;
+    size_t i;
     if (nbytes < rsa_pkcs1_length_of_fixed_parts(halg))
         return false;
 
@@ -798,10 +821,10 @@ static bool rsa2_verify(ssh_key *key, ptrlen sig, ptrlen data)
     out = mp_modpow(in, rsa->exponent, rsa->modulus);
     mp_free(in);
 
-    unsigned diff = 0;
+    diff = 0;
 
-    unsigned char *bytes = rsa_pkcs1_signature_string(nbytes, halg, data);
-    for (size_t i = 0; i < nbytes; i++)
+    bytes = rsa_pkcs1_signature_string(nbytes, halg, data);
+    for (i = 0; i < nbytes; i++)
         diff |= bytes[nbytes-1 - i] ^ mp_get_byte(out, i);
     smemclr(bytes, nbytes);
     sfree(bytes);
@@ -822,6 +845,7 @@ static void rsa2_sign(ssh_key *key, ptrlen data,
 
     const struct ssh2_rsa_extra *extra =
         (const struct ssh2_rsa_extra *)key->vt->extra;
+    size_t i;
     flags |= extra->signflags;
 
     halg = rsa2_hash_alg_for_flags(flags, &sign_alg_name);
@@ -868,7 +892,7 @@ static void rsa2_sign(ssh_key *key, ptrlen data,
         nbytes = (mp_get_nbits(rsa->modulus) + 7) / 8;
     }
     put_uint32(bs, nbytes);
-    for (size_t i = 0; i < nbytes; i++)
+    for (i = 0; i < nbytes; i++)
         put_byte(bs, mp_get_byte(out, nbytes - 1 - i));
 
     mp_free(out);
@@ -911,48 +935,94 @@ static const struct ssh2_rsa_extra
     rsa_sha256_extra = { SSH_AGENT_RSA_SHA2_256 },
     rsa_sha512_extra = { SSH_AGENT_RSA_SHA2_512 };
 
-#define COMMON_KEYALG_FIELDS                    \
-    .new_pub = rsa2_new_pub,                    \
-    .new_priv = rsa2_new_priv,                  \
-    .new_priv_openssh = rsa2_new_priv_openssh,  \
-    .freekey = rsa2_freekey,                    \
-    .invalid = rsa2_invalid,                    \
-    .sign = rsa2_sign,                          \
-    .verify = rsa2_verify,                      \
-    .public_blob = rsa2_public_blob,            \
-    .private_blob = rsa2_private_blob,          \
-    .openssh_blob = rsa2_openssh_blob,          \
-    .has_private = rsa2_has_private,            \
-    .cache_str = rsa2_cache_str,                \
-    .components = rsa2_components,              \
-    .base_key = nullkey_base_key,               \
-    .pubkey_bits = rsa2_pubkey_bits,            \
-    .alg_desc = rsa2_alg_desc,                  \
-    .variable_size = nullkey_variable_size_yes, \
-    .cache_id = "rsa2"
-
 const ssh_keyalg ssh_rsa = {
-    COMMON_KEYALG_FIELDS,
-    .ssh_id = "ssh-rsa",
-    .supported_flags = ssh_rsa_supported_flags,
-    .alternate_ssh_id = ssh_rsa_alternate_ssh_id,
-    .extra = &rsa_extra,
+    /* .new_pub = */ rsa2_new_pub,
+    /* .new_priv = */ rsa2_new_priv,
+    /* .new_priv_openssh = */ rsa2_new_priv_openssh,
+    /* .freekey = */ rsa2_freekey,
+    /* .invalid = */ rsa2_invalid,
+    /* .sign = */ rsa2_sign,
+    /* .verify = */ rsa2_verify,
+    /* .public_blob = */ rsa2_public_blob,
+    /* .private_blob = */ rsa2_private_blob,
+    /* .openssh_blob = */ rsa2_openssh_blob,
+    /* .has_private = */ rsa2_has_private,
+    /* .cache_str = */ rsa2_cache_str,
+    /* .components = */ rsa2_components,
+    /* .base_key = */ nullkey_base_key,
+    /* .ca_public_blob = */ NULL,
+    /* .check_cert = */ NULL,
+    /* .cert_id_string = */ NULL,
+    /* .cert_info = */ NULL,
+    /* .pubkey_bits = */ rsa2_pubkey_bits,
+    /* .supported_flags = */ ssh_rsa_supported_flags,
+    /* .alternate_ssh_id = */ ssh_rsa_alternate_ssh_id,
+    /* .alg_desc = */ rsa2_alg_desc,
+    /* .variable_size = */ nullkey_variable_size_yes,
+    /* .related_alg = */ NULL,
+    /* .ssh_id = */ "ssh-rsa",
+    /* .cache_id = */ "rsa2",
+    /* .extra = */ &rsa_extra,
 };
 
 const ssh_keyalg ssh_rsa_sha256 = {
-    COMMON_KEYALG_FIELDS,
-    .ssh_id = "rsa-sha2-256",
-    .supported_flags = nullkey_supported_flags,
-    .alternate_ssh_id = nullkey_alternate_ssh_id,
-    .extra = &rsa_sha256_extra,
+    /* .new_pub = */ rsa2_new_pub,
+    /* .new_priv = */ rsa2_new_priv,
+    /* .new_priv_openssh = */ rsa2_new_priv_openssh,
+    /* .freekey = */ rsa2_freekey,
+    /* .invalid = */ rsa2_invalid,
+    /* .sign = */ rsa2_sign,
+    /* .verify = */ rsa2_verify,
+    /* .public_blob = */ rsa2_public_blob,
+    /* .private_blob = */ rsa2_private_blob,
+    /* .openssh_blob = */ rsa2_openssh_blob,
+    /* .has_private = */ rsa2_has_private,
+    /* .cache_str = */ rsa2_cache_str,
+    /* .components = */ rsa2_components,
+    /* .base_key = */ nullkey_base_key,
+    /* .ca_public_blob = */ NULL,
+    /* .check_cert = */ NULL,
+    /* .cert_id_string = */ NULL,
+    /* .cert_info = */ NULL,
+    /* .pubkey_bits = */ rsa2_pubkey_bits,
+    /* .supported_flags = */ nullkey_supported_flags,
+    /* .alternate_ssh_id = */ nullkey_alternate_ssh_id,
+    /* .alg_desc = */ rsa2_alg_desc,
+    /* .variable_size = */ nullkey_variable_size_yes,
+    /* .related_alg = */ NULL,
+    /* .ssh_id = */ "rsa-sha2-256",
+    /* .cache_id = */ "rsa2",
+    /* .extra = */ &rsa_sha256_extra,
 };
 
 const ssh_keyalg ssh_rsa_sha512 = {
-    COMMON_KEYALG_FIELDS,
-    .ssh_id = "rsa-sha2-512",
-    .supported_flags = nullkey_supported_flags,
-    .alternate_ssh_id = nullkey_alternate_ssh_id,
-    .extra = &rsa_sha512_extra,
+    /* .new_pub = */ rsa2_new_pub,
+    /* .new_priv = */ rsa2_new_priv,
+    /* .new_priv_openssh = */ rsa2_new_priv_openssh,
+    /* .freekey = */ rsa2_freekey,
+    /* .invalid = */ rsa2_invalid,
+    /* .sign = */ rsa2_sign,
+    /* .verify = */ rsa2_verify,
+    /* .public_blob = */ rsa2_public_blob,
+    /* .private_blob = */ rsa2_private_blob,
+    /* .openssh_blob = */ rsa2_openssh_blob,
+    /* .has_private = */ rsa2_has_private,
+    /* .cache_str = */ rsa2_cache_str,
+    /* .components = */ rsa2_components,
+    /* .base_key = */ nullkey_base_key,
+    /* .ca_public_blob = */ NULL,
+    /* .check_cert = */ NULL,
+    /* .cert_id_string = */ NULL,
+    /* .cert_info = */ NULL,
+    /* .pubkey_bits = */ rsa2_pubkey_bits,
+    /* .supported_flags = */ nullkey_supported_flags,
+    /* .alternate_ssh_id = */ nullkey_alternate_ssh_id,
+    /* .alg_desc = */ rsa2_alg_desc,
+    /* .variable_size = */ nullkey_variable_size_yes,
+    /* .related_alg = */ NULL,
+    /* .ssh_id = */ "rsa-sha2-512",
+    /* .cache_id = */ "rsa2",
+    /* .extra = */ &rsa_sha512_extra,
 };
 
 RSAKey *ssh_rsakex_newkey(ptrlen data)
@@ -1008,6 +1078,9 @@ strbuf *ssh_rsakex_encrypt(RSAKey *rsa, const ssh_hashalg *h, ptrlen in)
     int k, i;
     char *p;
     const int HLEN = h->hlen;
+    strbuf *toret;
+    int outlen;
+    unsigned char *out;
 
     /*
      * Here we encrypt using RSAES-OAEP. Essentially this means:
@@ -1043,9 +1116,9 @@ strbuf *ssh_rsakex_encrypt(RSAKey *rsa, const ssh_hashalg *h, ptrlen in)
     assert(in.len > 0 && in.len <= k - 2*HLEN - 2);
 
     /* The length of the output data wants to be precisely k. */
-    strbuf *toret = strbuf_new_nm();
-    int outlen = k;
-    unsigned char *out = strbuf_append(toret, outlen);
+    toret = strbuf_new_nm();
+    outlen = k;
+    out = strbuf_append(toret, outlen);
 
     /*
      * Now perform EME-OAEP encoding. First set up all the unmasked
@@ -1166,17 +1239,21 @@ static const struct ssh_rsa_kex_extra ssh_rsa_kex_extra_sha1 = { 1024 };
 static const struct ssh_rsa_kex_extra ssh_rsa_kex_extra_sha256 = { 2048 };
 
 static const ssh_kex ssh_rsa_kex_sha1 = {
-    .name = "rsa1024-sha1",
-    .main_type = KEXTYPE_RSA,
-    .hash = &ssh_sha1,
-    .extra = &ssh_rsa_kex_extra_sha1,
+    /* .name = */ "rsa1024-sha1",
+    /* .groupname = */ NULL,
+    /* .main_type = */ KEXTYPE_RSA,
+    /* .hash = */ &ssh_sha1,
+    /* .ecdh_vt = */ NULL,
+    /* .extra = */ &ssh_rsa_kex_extra_sha1,
 };
 
 static const ssh_kex ssh_rsa_kex_sha256 = {
-    .name = "rsa2048-sha256",
-    .main_type = KEXTYPE_RSA,
-    .hash = &ssh_sha256,
-    .extra = &ssh_rsa_kex_extra_sha256,
+    /* .name = */ "rsa2048-sha256",
+    /* .groupname = */ NULL,
+    /* .main_type = */ KEXTYPE_RSA,
+    /* .hash = */ &ssh_sha256,
+    /* .ecdh_vt = */ NULL,
+    /* .extra = */ &ssh_rsa_kex_extra_sha256,
 };
 
 static const ssh_kex *const rsa_kex_list[] = {

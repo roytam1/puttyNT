@@ -5,20 +5,10 @@
 #ifndef PUTTY_WINDOWS_PLATFORM_H
 #define PUTTY_WINDOWS_PLATFORM_H
 
-#include <winsock2.h>
 #include <windows.h>
+#include <winsock.h>     /* WinSock 1.1: all that NT 3.1 and 3.5 have */
 #include <stdio.h>                     /* for FILENAME_MAX */
-
-/* We use uintptr_t for Win32/Win64 portability, so we should in
- * principle include stdint.h, which defines it according to the C
- * standard. But older versions of Visual Studio don't provide
- * stdint.h at all, but do (non-standardly) define uintptr_t in
- * stddef.h. So here we try to make sure _some_ standard header is
- * included which defines uintptr_t. */
 #include <stddef.h>
-#if !HAVE_NO_STDINT_H
-#include <stdint.h>
-#endif
 
 #include "defs.h"
 #include "marshal.h"
@@ -27,20 +17,53 @@
 
 #include "help.h"
 
-#if defined _M_IX86 || defined _M_AMD64
-#define BUILDINFO_PLATFORM "x86 Windows"
-#elif defined _M_ARM || defined _M_ARM64
-#define BUILDINFO_PLATFORM "Arm Windows"
-#else
-#define BUILDINFO_PLATFORM "Windows"
+/*
+ * Names that the Win32 SDKs for Windows NT 3.1 and 3.5 lack. Each is
+ * the same as an older name, or a value that older versions of
+ * Windows never send or safely ignore.
+ */
+#ifndef WM_APP
+#define WM_APP 0x8000                  /* first private message number */
+#endif
+#ifndef MB_ICONERROR
+#define MB_ICONERROR MB_ICONHAND
+#endif
+#ifndef MB_ICONWARNING
+#define MB_ICONWARNING MB_ICONEXCLAMATION
+#endif
+#ifndef NONANTIALIASED_QUALITY
+#define NONANTIALIASED_QUALITY 3
+#endif
+#ifndef ANTIALIASED_QUALITY
+#define ANTIALIASED_QUALITY 4
+#endif
+#if defined WM_SETICON && !defined ICON_BIG
+#define ICON_BIG 1                     /* Visual C++ 4.1 has only WM_SETICON */
 #endif
 
-#if defined __GNUC__ || defined __clang__
-#define THREADLOCAL __thread
-#elif defined _MSC_VER
-#define THREADLOCAL __declspec(thread)
+/*
+ * Edit boxes, list boxes and combo boxes get a sunken 3-D edge with
+ * the SDK for Windows NT 4.0, and a plain border (edit boxes and list
+ * boxes; combo boxes draw their own) with the older SDKs.
+ */
+#ifdef WS_EX_CLIENTEDGE
+#define EDGE_STYLE 0
+#define EDGE_EXSTYLE WS_EX_CLIENTEDGE
 #else
-#error Do not know how to declare thread-local storage with this toolchain
+#define EDGE_STYLE WS_BORDER
+#define EDGE_EXSTYLE 0
+#endif
+
+#if defined _M_IX86
+#define BUILDINFO_PLATFORM "x86 Windows"
+#elif defined _M_MRX000 || defined _MIPS_
+#define BUILDINFO_PLATFORM "MIPS Windows"
+#elif defined _M_ALPHA || defined _ALPHA_
+#define BUILDINFO_PLATFORM "Alpha Windows"
+#elif defined _M_PPC || defined _PPC_
+#define BUILDINFO_PLATFORM "PowerPC Windows"
+#else
+#define BUILDINFO_PLATFORM "Windows"
 #endif
 
 /* Randomly-chosen dwData value identifying a WM_COPYDATA message as
@@ -96,44 +119,8 @@ struct FontSpec *fontspec_new(
     X(CLIP_SYSTEM, "system clipboard")              \
     /* end of list */
 
-/*
- * Where we can, we use GetWindowLongPtr and friends because they're
- * more useful on 64-bit platforms, but they're a relatively recent
- * innovation, missing from VC++ 6 and older MinGW.  Degrade nicely.
- * (NB that on some systems, some of these things are available but
- * not others...)
- */
-
-#ifndef GCLP_HCURSOR
-/* GetClassLongPtr and friends */
-#undef  GetClassLongPtr
-#define GetClassLongPtr GetClassLong
-#undef  SetClassLongPtr
-#define SetClassLongPtr SetClassLong
-#define GCLP_HCURSOR GCL_HCURSOR
-/* GetWindowLongPtr and friends */
-#undef  GetWindowLongPtr
-#define GetWindowLongPtr GetWindowLong
-#undef  SetWindowLongPtr
-#define SetWindowLongPtr SetWindowLong
-#undef  GWLP_USERDATA
-#define GWLP_USERDATA GWL_USERDATA
-#undef  DWLP_MSGRESULT
-#define DWLP_MSGRESULT DWL_MSGRESULT
-/* Since we've clobbered the above functions, we should clobber the
- * associated type regardless of whether it's defined. */
-#undef LONG_PTR
-#define LONG_PTR LONG
-#endif
-
-#if !HAVE_STRTOUMAX
-/* Work around lack of strtoumax in older MSVC libraries */
-static inline uintmax_t strtoumax(const char *nptr, char **endptr, int base)
-{ return _strtoui64(nptr, endptr, base); }
-#endif
-
-typedef INT_PTR (*ShinyDlgProc)(HWND hwnd, UINT msg, WPARAM wParam,
-                                LPARAM lParam, void *ctx);
+typedef BOOL (*ShinyDlgProc)(HWND hwnd, UINT msg, WPARAM wParam,
+                             LPARAM lParam, void *ctx);
 int ShinyDialogBox(HINSTANCE hinst, LPCTSTR tmpl, const char *winclass,
                    HWND hwndparent, ShinyDlgProc proc, void *ctx);
 void ShinyEndDialog(HWND hwnd, int ret);
@@ -215,38 +202,12 @@ int get_caret_blink_time(void);
 #define CP_437 437                     /* used for test suites */
 #define CP_ISO8859_1 0x10001           /* used for test suites */
 
-#ifndef NO_GSSAPI
-/*
- * GSS-API stuff
- */
-#define GSS_CC CALLBACK
-/*
-typedef struct Ssh_gss_buf {
-    size_t length;
-    char *value;
-} Ssh_gss_buf;
-
-#define SSH_GSS_EMPTY_BUF (Ssh_gss_buf) {0,NULL}
-typedef void *Ssh_gss_name;
-*/
-#endif
-
 /*
  * The all-important instance handle, saved from WinMain in every GUI
  * program and exported for other GUI code to pass back to the Windows
  * API.
  */
 extern HINSTANCE hinst;
-
-/*
- * Help file stuff in help.c.
- */
-void init_help(void);
-void shutdown_help(void);
-bool has_help(void);
-void launch_help(HWND hwnd, const char *topic);
-void quit_help(HWND hwnd);
-int has_embedded_chm(void);            /* 1 = yes, 0 = no, -1 = N/A */
 
 /*
  * GUI seat methods in dialog.c, so that the vtable definition in
@@ -304,6 +265,7 @@ void write_aclip(HWND hwnd, int clipboard, char *, int);
  */
 /* Report an event notification from WSA*Select */
 void select_result(WPARAM, LPARAM);
+bool sk_poll(void);
 /* Enumerate all currently live OS-level SOCKETs */
 SOCKET first_socket(int *);
 SOCKET next_socket(int *);
@@ -315,33 +277,16 @@ void socket_reselect_all(void);
 SockAddr *sk_namedpipe_addr(const char *pipename);
 /* Turn a WinSock error code into a string. */
 const char *winsock_error_string(int error);
-Socket *sk_newlistener_unix(const char *socketpath, Plug *plug);
 
 /*
- * network.c dynamically loads WinSock 2 or WinSock 1 depending on
- * what it can get, which means any WinSock routines used outside
- * that module must be exported from it as function pointers. So
- * here they are.
+ * network.c loads WinSock dynamically, which means any WinSock
+ * routines used outside that module must be exported from it as
+ * function pointers. So here they are.
  */
 DECL_WINDOWS_FUNCTION(extern, int, WSAAsyncSelect,
                       (SOCKET, HWND, u_int, LONG));
-DECL_WINDOWS_FUNCTION(extern, int, WSAEventSelect,
-                      (SOCKET, WSAEVENT, LONG));
 DECL_WINDOWS_FUNCTION(extern, int, WSAGetLastError, (void));
-DECL_WINDOWS_FUNCTION(extern, int, WSAEnumNetworkEvents,
-                      (SOCKET, WSAEVENT, LPWSANETWORKEVENTS));
-#ifdef NEED_DECLARATION_OF_SELECT
-/* This declaration is protected by an ifdef for the sake of building
- * against winelib, in which you have to include winsock2.h before
- * stdlib.h so that the right fd_set type gets defined. It would be a
- * pain to do that throughout this codebase, so instead I arrange that
- * only a modules actually needing to use (or define, or initialise)
- * this function pointer will see its declaration, and _those_ modules
- * - which will be Windows-specific anyway - can take more care. */
-DECL_WINDOWS_FUNCTION(extern, int, select,
-                      (int, fd_set FAR *, fd_set FAR *,
-                       fd_set FAR *, const struct timeval FAR *));
-#endif
+DECL_WINDOWS_FUNCTION(extern, int, ioctlsocket, (SOCKET, LONG, ULONG FAR *));
 
 /*
  * Implemented differently depending on the client of network.c, and
@@ -359,8 +304,7 @@ void winselgui_clear_hwnd(void);
 void winselgui_response(UINT message, WPARAM wParam, LPARAM lParam);
 
 void winselcli_setup(void);
-SOCKET winselcli_unique_socket(void);
-extern HANDLE winselcli_event;
+bool winselcli_polling(void);
 
 /*
  * Network-subsystem-related functions provided in other Windows modules.
@@ -526,8 +470,6 @@ void staticpassedit(struct ctlpos *cp, const char *stext,
                     int sid, int eid, int percentedit);
 void bigeditctrl(struct ctlpos *cp, const char *stext,
                  int sid, int eid, int lines);
-void ersatztab(struct ctlpos *cp, const char *stext, int sid, int lid,
-               int s2id);
 void editbutton(struct ctlpos *cp, const char *stext, int sid,
                 int eid, const char *btext, int bid);
 void sesssaver(struct ctlpos *cp, const char *text,
@@ -548,6 +490,9 @@ int handle_prefslist(struct prefslist *hdl,
                      int *array, int maxmemb,
                      bool is_dlmsg, HWND hwnd,
                      WPARAM wParam, LPARAM lParam);
+/* progressbar() makes our own progress bar, which takes two messages: */
+#define PROGBAR_SETRANGE (WM_USER + 1) /* lParam = MAKELPARAM(min, max) */
+#define PROGBAR_SETPOS (WM_USER + 2)   /* wParam = position */
 void progressbar(struct ctlpos *cp, int id);
 void fwdsetter(struct ctlpos *cp, int listid, const char *stext, int sid,
                const char *e1stext, int e1sid, int e1id,
@@ -618,7 +563,6 @@ void winctrl_layout(struct dlgparam *dp, struct winctrls *wc,
 bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
                             WPARAM wParam, LPARAM lParam);
 void winctrl_rem_shortcuts(struct dlgparam *dp, struct winctrl *c);
-bool winctrl_context_help(struct dlgparam *dp, HWND hwnd, int id);
 
 void dp_init(struct dlgparam *dp);
 void dp_add_tree(struct dlgparam *dp, struct winctrls *tree);
@@ -627,7 +571,7 @@ void dp_cleanup(struct dlgparam *dp);
 /*
  * Exports from config.c.
  */
-void win_setup_config_box(struct controlbox *b, HWND *hwndp, bool has_help,
+void win_setup_config_box(struct controlbox *b, HWND *hwndp,
                           bool midsession, int protocol);
 
 /*
@@ -640,19 +584,17 @@ void showeventlog(HWND);
 void showabout(HWND);
 void force_normal(HWND hwnd);
 void modal_about_box(HWND hwnd);
-void show_help(HWND hwnd);
 HWND event_log_window(void);
 
 /*
  * Exports from utils.
  */
-extern DWORD osMajorVersion, osMinorVersion, osPlatformId;
+extern DWORD osMajorVersion;
 void init_winver(void);
 void dll_hijacking_protection(void);
 const char *get_system_dir(void);
 HMODULE load_system32_dll(const char *libname);
 const char *win_strerror(int error);
-bool should_have_security(void);
 void restrict_process_acl(void);
 bool restricted_acl(void);
 void escape_registry_key(const char *in, strbuf *out);
@@ -667,13 +609,6 @@ bool is_console_handle(HANDLE);
 #endif
 #ifndef LOAD_LIBRARY_SEARCH_USER_DIRS
 #define LOAD_LIBRARY_SEARCH_USER_DIRS 0x00000400
-#endif
-#ifndef LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR
-#define LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR 0x00000100
-#endif
-#ifndef DLL_DIRECTORY_COOKIE
-typedef PVOID DLL_DIRECTORY_COOKIE;
-DECLSPEC_IMPORT DLL_DIRECTORY_COOKIE WINAPI AddDllDirectory (PCWSTR NewDirectory);
 #endif
 
 /*
@@ -792,13 +727,12 @@ char *get_jumplist_registry_entries(void);
 #define CLIPUI_DEFAULT_INS CLIPUI_EXPLICIT
 
 /* In utils */
-HKEY open_regkey_fn(bool create, bool write, HKEY base, const char *path, ...);
-#define open_regkey_ro(base, ...) \
-    open_regkey_fn(false, false, base, __VA_ARGS__, (const char *)NULL)
-#define open_regkey_rw(base, ...) \
-    open_regkey_fn(false, true, base, __VA_ARGS__, (const char *)NULL)
-#define create_regkey(base, ...) \
-    open_regkey_fn(true, true, base, __VA_ARGS__, (const char *)NULL)
+/* NT port: these are functions, not variadic macros (which the
+ * compilers of 1993-1996 don't have), so the caller ends the list of
+ * key names with NULL */
+HKEY open_regkey_ro(HKEY base, const char *path, ...);
+HKEY open_regkey_rw(HKEY base, const char *path, ...);
+HKEY create_regkey(HKEY base, const char *path, ...);
 void close_regkey(HKEY key);
 void del_regkey(HKEY key, const char *name);
 char *enum_regkey(HKEY key, int index);
@@ -819,12 +753,9 @@ void cli_main_loop(cliloop_pre_t pre, cliloop_post_t post, void *ctx);
 bool cliloop_null_pre(void *vctx, const HANDLE **, size_t *);
 bool cliloop_null_post(void *vctx, size_t);
 
-extern const struct BackendVtable conpty_backend;
-
-/* Functions that parametrise window.c between PuTTY and pterm */
+/* Functions in putty.c that window.c calls */
 void gui_term_process_cmdline(Conf *conf, char *cmdline);
 const struct BackendVtable *backend_vt_from_conf(Conf *conf);
-const wchar_t *get_app_user_model_id(void);
 /* And functions in window.c that those files call back to */
 char *handle_restrict_acl_cmdline_prefix(char *cmdline);
 bool handle_special_sessionname_cmdline(char *cmdline, Conf *conf);
@@ -852,8 +783,6 @@ bool aux_match_opt(AuxMatchOpt *amo, CmdlineArg **val,
                    const char *optname, ...);
 bool aux_match_done(AuxMatchOpt *amo);
 
-char *save_screenshot(HWND hwnd, Filename *outfile);
-void gui_terminal_ready(HWND hwnd, Seat *seat, Backend *backend);
 
 void setup_gui_timing(void);
 

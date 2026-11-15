@@ -14,12 +14,6 @@
 #include "security-api.h"
 #include "puttygen-rc.h"
 
-#include <commctrl.h>
-
-#ifdef MSVC4
-#define ICON_BIG        1
-#endif
-
 #define WM_DONEKEY (WM_APP + 1)
 
 #define DEFAULT_KEY_BITS 2048
@@ -27,8 +21,6 @@
 #define DEFAULT_EDCURVE_INDEX 0
 
 static Filename *cmdline_keyfile = NULL;
-static ptrlen cmdline_demo_keystr;
-static Filename *demo_screenshot_filename = NULL;
 
 /*
  * Print a modal (Really Bad) message box and perform a fatal exit.
@@ -88,29 +80,33 @@ struct progress {
 static ProgressPhase win_progress_add_linear(
     ProgressReceiver *prog, double overall_cost) {
     struct progress *p = container_of(prog, struct progress, rec);
+    int phase;
+    ProgressPhase ph;
 
     sgrowarray(p->phases, p->phasessize, p->nphases);
-    int phase = p->nphases++;
+    phase = p->nphases++;
 
     p->phases[phase].total = overall_cost;
 
-    ProgressPhase ph = { .n = phase };
+    ph.n = phase;
     return ph;
 }
 
 static ProgressPhase win_progress_add_probabilistic(
     ProgressReceiver *prog, double cost_per_attempt, double probability) {
     struct progress *p = container_of(prog, struct progress, rec);
+    int phase;
+    ProgressPhase ph;
 
     sgrowarray(p->phases, p->phasessize, p->nphases);
-    int phase = p->nphases++;
+    phase = p->nphases++;
 
     p->phases[phase].exp_probability = 1.0 - probability;
     p->phases[phase].exp_current_value = 1.0;
     /* Expected number of attempts = 1 / probability of attempt succeeding */
     p->phases[phase].total = cost_per_attempt / probability;
 
-    ProgressPhase ph = { .n = phase };
+    ph.n = phase;
     return ph;
 }
 
@@ -119,13 +115,15 @@ static void win_progress_ready(ProgressReceiver *prog)
     struct progress *p = container_of(prog, struct progress, rec);
 
     double total = 0;
-    for (int i = 0; i < p->nphases; i++) {
+    int i;
+    for (i = 0; i < p->nphases; i++) {
         p->phases[i].startpoint = total;
         total += p->phases[i].total;
     }
     p->scale = PROGRESSRANGE / total;
 
-    SendMessage(p->progbar, PBM_SETRANGE, 0, MAKELPARAM(0, PROGRESSRANGE));
+    SendMessage(p->progbar, PROGBAR_SETRANGE, 0,
+                MAKELPARAM(0, PROGRESSRANGE));
 }
 
 static void win_progress_start_phase(ProgressReceiver *prog,
@@ -147,7 +145,7 @@ static void win_progress_update(struct progress *p, double phasepos)
     if (position > PROGRESSRANGE)
         position = PROGRESSRANGE;
 
-    SendMessage(p->progbar, PBM_SETPOS, (WPARAM)position, 0);
+    SendMessage(p->progbar, PROGBAR_SETPOS, (WPARAM)position, 0);
 }
 
 static void win_progress_report(ProgressReceiver *prog, double progress)
@@ -173,13 +171,13 @@ static void win_progress_report_phase_complete(ProgressReceiver *prog)
 }
 
 static const ProgressReceiverVtable win_progress_vt = {
-    .add_linear = win_progress_add_linear,
-    .add_probabilistic = win_progress_add_probabilistic,
-    .ready = win_progress_ready,
-    .start_phase = win_progress_start_phase,
-    .report = win_progress_report,
-    .report_attempt = win_progress_report_attempt,
-    .report_phase_complete = win_progress_report_phase_complete,
+    /* .add_linear = */ win_progress_add_linear,
+    /* .add_probabilistic = */ win_progress_add_probabilistic,
+    /* .ready = */ win_progress_ready,
+    /* .start_phase = */ win_progress_start_phase,
+    /* .report = */ win_progress_report,
+    /* .report_attempt = */ win_progress_report_attempt,
+    /* .report_phase_complete = */ win_progress_report_phase_complete,
 };
 
 static void win_progress_initialise(struct progress *p)
@@ -202,8 +200,8 @@ struct PassphraseProcStruct {
 /*
  * Dialog-box function for the passphrase box.
  */
-static INT_PTR CALLBACK PassphraseProc(HWND hwnd, UINT msg,
-                                       WPARAM wParam, LPARAM lParam)
+static BOOL CALLBACK PassphraseProc(HWND hwnd, UINT msg,
+                                    WPARAM wParam, LPARAM lParam)
 {
     static char **passphrase = NULL;
     struct PassphraseProcStruct *p;
@@ -266,14 +264,15 @@ static INT_PTR CALLBACK PassphraseProc(HWND hwnd, UINT msg,
 static void try_get_dlg_item_uint32(HWND hwnd, int id, uint32_t *out)
 {
     char buf[128];
+    char *end;
+    unsigned long val;
     if (!GetDlgItemText(hwnd, id, buf, sizeof(buf)))
         return;
 
     if (!*buf)
         return;
 
-    char *end;
-    unsigned long val = strtoul(buf, &end, 10);
+    val = strtoul(buf, &end, 10);
     if (*end)
         return;
 
@@ -293,17 +292,17 @@ struct PPKParams {
 /*
  * Dialog-box function for the passphrase box.
  */
-static INT_PTR CALLBACK PPKParamsProc(HWND hwnd, UINT msg,
-                                      WPARAM wParam, LPARAM lParam)
+static BOOL CALLBACK PPKParamsProc(HWND hwnd, UINT msg,
+                                   WPARAM wParam, LPARAM lParam)
 {
     struct PPKParams *pp;
     char *buf;
 
     if (msg == WM_INITDIALOG) {
         pp = (struct PPKParams *)lParam;
-        SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)pp);
+        SetWindowLong(hwnd, GWL_USERDATA, (LONG)pp);
     } else {
-        pp = (struct PPKParams *)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+        pp = (struct PPKParams *)GetWindowLong(hwnd, GWL_USERDATA);
     }
 
     switch (msg) {
@@ -311,11 +310,6 @@ static INT_PTR CALLBACK PPKParamsProc(HWND hwnd, UINT msg,
         SetForegroundWindow(hwnd);
         SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-
-        if (has_help())
-            SetWindowLongPtr(hwnd, GWL_EXSTYLE,
-                             GetWindowLongPtr(hwnd, GWL_EXSTYLE) |
-                             WS_EX_CONTEXTHELP);
 
         /*
          * Centre the window.
@@ -424,36 +418,6 @@ static INT_PTR CALLBACK PPKParamsProc(HWND hwnd, UINT msg,
             return 0;
         }
         return 0;
-      case WM_HELP: {
-        int id = ((LPHELPINFO)lParam)->iCtrlId;
-        const char *topic = NULL;
-        switch (id) {
-          case IDC_PPKVER_STATIC:
-          case IDC_PPKVER_2:
-          case IDC_PPKVER_3:
-            topic = WINHELP_CTX_puttygen_ppkver; break;
-          case IDC_KDF_STATIC:
-          case IDC_KDF_ARGON2ID:
-          case IDC_KDF_ARGON2I:
-          case IDC_KDF_ARGON2D:
-          case IDC_ARGON2_MEM_STATIC:
-          case IDC_ARGON2_MEM:
-          case IDC_ARGON2_MEM_STATIC2:
-          case IDC_ARGON2_TIME_STATIC:
-          case IDC_ARGON2_TIME:
-          case IDC_PPK_AUTO_YES:
-          case IDC_PPK_AUTO_NO:
-          case IDC_ARGON2_PARALLEL_STATIC:
-          case IDC_ARGON2_PARALLEL:
-            topic = WINHELP_CTX_puttygen_kdfparam; break;
-        }
-        if (topic) {
-            launch_help(hwnd, topic);
-        } else {
-            MessageBeep(0);
-        }
-        break;
-      }
       case WM_CLOSE:
         EndDialog(hwnd, 0);
         return 0;
@@ -464,8 +428,8 @@ static INT_PTR CALLBACK PPKParamsProc(HWND hwnd, UINT msg,
 /*
  * Dialog-box function for the Licence box.
  */
-static INT_PTR CALLBACK LicenceProc(HWND hwnd, UINT msg,
-                                    WPARAM wParam, LPARAM lParam)
+static BOOL CALLBACK LicenceProc(HWND hwnd, UINT msg,
+                                 WPARAM wParam, LPARAM lParam)
 {
     switch (msg) {
       case WM_INITDIALOG: {
@@ -503,8 +467,8 @@ static INT_PTR CALLBACK LicenceProc(HWND hwnd, UINT msg,
 /*
  * Dialog-box function for the About box.
  */
-static INT_PTR CALLBACK AboutProc(HWND hwnd, UINT msg,
-                                  WPARAM wParam, LPARAM lParam)
+static BOOL CALLBACK AboutProc(HWND hwnd, UINT msg,
+                               WPARAM wParam, LPARAM lParam)
 {
     switch (msg) {
       case WM_INITDIALOG:
@@ -587,11 +551,12 @@ static DWORD WINAPI generate_key_thread(void *param)
     struct rsa_key_thread_params *params =
         (struct rsa_key_thread_params *) param;
     struct progress prog;
+    PrimeGenerationContext *pgc;
     prog.progbar = params->progressbar;
 
     win_progress_initialise(&prog);
 
-    PrimeGenerationContext *pgc = primegen_new_context(params->primepolicy);
+    pgc = primegen_new_context(params->primepolicy);
 
     if (params->keytype == DSA)
         dsa_generate(params->dsakey, params->key_bits, pgc, &prog.rec);
@@ -699,7 +664,6 @@ enum {
     IDC_EDCURVESTATIC, IDC_EDCURVE,
     IDC_NOTHINGSTATIC,
     IDC_ABOUT,
-    IDC_GIVEHELP,
     IDC_IMPORT,
     IDC_EXPORT_OPENSSH_AUTO, IDC_EXPORT_OPENSSH_NEW,
     IDC_EXPORT_SSHCOM,
@@ -708,6 +672,7 @@ enum {
 
 static void setupbigedit1(HWND hwnd, RSAKey *key)
 {
+    char *buffer;
     ShowWindow(GetDlgItem(hwnd, IDC_CERTSTATIC), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_CERTMOREINFO), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_PKSTATIC), SW_SHOW);
@@ -716,7 +681,7 @@ static void setupbigedit1(HWND hwnd, RSAKey *key)
     SetDlgItemText(hwnd, IDC_PKSTATIC,
                    "&Public key for pasting into authorized_keys file:");
 
-    char *buffer = ssh1_pubkey_str(key);
+    buffer = ssh1_pubkey_str(key);
     SetDlgItemText(hwnd, IDC_KEYDISPLAY, buffer);
     sfree(buffer);
 }
@@ -732,6 +697,7 @@ static void setupbigedit2(HWND hwnd, ssh2_userkey *key)
         SetDlgItemText(hwnd, IDC_CERTSTATIC,
                        "This public key contains an OpenSSH certificate.");
     } else {
+        char *buffer;
         ShowWindow(GetDlgItem(hwnd, IDC_CERTSTATIC), SW_HIDE);
         ShowWindow(GetDlgItem(hwnd, IDC_CERTMOREINFO), SW_HIDE);
         ShowWindow(GetDlgItem(hwnd, IDC_PKSTATIC), SW_SHOW);
@@ -740,7 +706,7 @@ static void setupbigedit2(HWND hwnd, ssh2_userkey *key)
         SetDlgItemText(hwnd, IDC_PKSTATIC, "&Public key for pasting into "
                        "OpenSSH authorized_keys file:");
 
-        char *buffer = ssh2_pubkey_openssh_str(key);
+        buffer = ssh2_pubkey_openssh_str(key);
         SetDlgItemText(hwnd, IDC_KEYDISPLAY, buffer);
         sfree(buffer);
     }
@@ -864,7 +830,7 @@ void ui_set_state(HWND hwnd, struct MainDlgState *state, int status)
         hidemany(hwnd, nokey_ids, true);
         hidemany(hwnd, generating_ids, true);
         hidemany(hwnd, gotkey_ids_unconditional, false);
-        // gotkey_ids_conditional will be unhidden by setupbigedit2
+        /* gotkey_ids_conditional will be unhidden by setupbigedit2 */
         EnableWindow(GetDlgItem(hwnd, IDC_GENERATE), 1);
         EnableWindow(GetDlgItem(hwnd, IDC_LOAD), 1);
         EnableWindow(GetDlgItem(hwnd, IDC_SAVE), 1);
@@ -907,6 +873,7 @@ void ui_set_state(HWND hwnd, struct MainDlgState *state, int status)
 
             if (state->ssh2 && state->ssh2key.key) {
                 const ssh_keyalg *alg = ssh_key_alg(state->ssh2key.key);
+                size_t i;
                 if (alg->is_certificate) {
                     /* If there's a certificate, we can remove it */
                     rem_cert_allowed = true;
@@ -915,7 +882,7 @@ void ui_set_state(HWND hwnd, struct MainDlgState *state, int status)
                 }
 
                 /* Now, do we have any certified version of this alg? */
-                for (size_t i = 0; i < n_keyalgs; i++) {
+                for (i = 0; i < n_keyalgs; i++) {
                     if (all_keyalgs[i]->base_alg == alg) {
                         add_cert_allowed = true;
                         break;
@@ -973,17 +940,28 @@ void ui_update_key_type_ctrls(HWND hwnd)
     hidemany(hwnd, edcurve_ids, which != EDCURVE);
     hidemany(hwnd, nothing_ids, which != NOTHING);
 }
+/*
+ * Check the menu item 'item' and uncheck the others with IDs from
+ * 'first' to 'last'. (CheckMenuRadioItem, which came with Windows NT
+ * 4.0, does this with round marks.)
+ */
+static void check_menu_item_of(HMENU menu, int first, int last, int item)
+{
+    int i;
+    for (i = first; i <= last; i++)
+        CheckMenuItem(menu, i, MF_BYCOMMAND |
+                      (i == item ? MF_CHECKED : MF_UNCHECKED));
+}
 void ui_set_key_type(HWND hwnd, struct MainDlgState *state, int button)
 {
     CheckRadioButton(hwnd, IDC_KEYSSH1, IDC_KEYSSH2EDDSA, button);
-    CheckMenuRadioItem(state->keymenu, IDC_KEYSSH1, IDC_KEYSSH2EDDSA,
-                       button, MF_BYCOMMAND);
+    check_menu_item_of(state->keymenu, IDC_KEYSSH1, IDC_KEYSSH2EDDSA, button);
     ui_update_key_type_ctrls(hwnd);
 }
 void ui_set_primepolicy(HWND hwnd, struct MainDlgState *state, int option)
 {
-    CheckMenuRadioItem(state->keymenu, IDC_PRIMEGEN_PROB,
-                       IDC_PRIMEGEN_MAURER_COMPLEX, option, MF_BYCOMMAND);
+    check_menu_item_of(state->keymenu, IDC_PRIMEGEN_PROB,
+                       IDC_PRIMEGEN_MAURER_COMPLEX, option);
     switch (option) {
       case IDC_PRIMEGEN_PROB:
         state->primepolicy = &primegen_probabilistic;
@@ -1026,8 +1004,8 @@ static int fptype_to_idc(FingerprintType fptype)
 }
 void ui_set_fptype(HWND hwnd, struct MainDlgState *state, int option)
 {
-    CheckMenuRadioItem(state->keymenu, IDC_FPTYPE_SHA256,
-                       IDC_FPTYPE_MD5, option, MF_BYCOMMAND);
+    check_menu_item_of(state->keymenu, IDC_FPTYPE_SHA256,
+                       IDC_FPTYPE_MD5, option);
 
     state->fptype = idc_to_fptype(option);
 
@@ -1045,8 +1023,9 @@ static void update_ui_after_ssh2_pubkey_change(
      * be told things like the passphrase, which we aren't changing
      * anyway */
     char *savecomment = state->ssh2key.comment;
+    char *fp;
     state->ssh2key.comment = NULL;
-    char *fp = ssh2_fingerprint(state->ssh2key.key, state->fptype);
+    fp = ssh2_fingerprint(state->ssh2key.key, state->fptype);
     state->ssh2key.comment = savecomment;
 
     SetDlgItemText(hwnd, IDC_FINGERPRINT, fp);
@@ -1218,6 +1197,17 @@ void add_certificate(HWND hwnd, struct MainDlgState *state,
                      Filename *filename)
 {
     int type = key_type(filename);
+    char *algname;
+    char *comment;
+    const char *error;
+    strbuf *pub;
+    const ssh_keyalg *alg;
+    strbuf *old_basepub;
+    ssh_key *new_pubkey;
+    strbuf *new_basepub;
+    bool match;
+    strbuf *priv;
+    ssh_key *newkey;
     if (type != SSH_KEYTYPE_SSH2_PUBLIC_RFC4716 &&
         type != SSH_KEYTYPE_SSH2_PUBLIC_OPENSSH) {
         char *msg = dupprintf("Couldn't load certificate (%s)",
@@ -1228,10 +1218,10 @@ void add_certificate(HWND hwnd, struct MainDlgState *state,
         return;
     }
 
-    char *algname = NULL;
-    char *comment = NULL;
-    const char *error = NULL;
-    strbuf *pub = strbuf_new();
+    algname = NULL;
+    comment = NULL;
+    error = NULL;
+    pub = strbuf_new();
     if (!ppk_loadpub_f(filename, &algname, BinarySink_UPCAST(pub), &comment,
                        &error)) {
         char *msg = dupprintf("Couldn't load certificate (%s)", error);
@@ -1244,7 +1234,7 @@ void add_certificate(HWND hwnd, struct MainDlgState *state,
 
     sfree(comment);
 
-    const ssh_keyalg *alg = find_pubkey_alg(algname);
+    alg = find_pubkey_alg(algname);
     if (!alg) {
         char *msg = dupprintf("Couldn't load certificate (unsupported "
                               "algorithm name '%s')", algname);
@@ -1259,18 +1249,18 @@ void add_certificate(HWND hwnd, struct MainDlgState *state,
     sfree(algname);
 
     /* Check the two public keys match apart from certificates */
-    strbuf *old_basepub = strbuf_new();
+    old_basepub = strbuf_new();
     ssh_key_public_blob(ssh_key_base_key(state->ssh2key.key),
                         BinarySink_UPCAST(old_basepub));
 
-    ssh_key *new_pubkey = ssh_key_new_pub(alg, ptrlen_from_strbuf(pub));
-    strbuf *new_basepub = strbuf_new();
+    new_pubkey = ssh_key_new_pub(alg, ptrlen_from_strbuf(pub));
+    new_basepub = strbuf_new();
     ssh_key_public_blob(ssh_key_base_key(new_pubkey),
                         BinarySink_UPCAST(new_basepub));
     ssh_key_free(new_pubkey);
 
-    bool match = ptrlen_eq_ptrlen(ptrlen_from_strbuf(old_basepub),
-                                  ptrlen_from_strbuf(new_basepub));
+    match = ptrlen_eq_ptrlen(ptrlen_from_strbuf(old_basepub),
+                             ptrlen_from_strbuf(new_basepub));
     strbuf_free(old_basepub);
     strbuf_free(new_basepub);
 
@@ -1283,9 +1273,9 @@ void add_certificate(HWND hwnd, struct MainDlgState *state,
         return;
     }
 
-    strbuf *priv = strbuf_new_nm();
+    priv = strbuf_new_nm();
     ssh_key_private_blob(state->ssh2key.key, BinarySink_UPCAST(priv));
-    ssh_key *newkey = ssh_key_new_priv(
+    newkey = ssh_key_new_priv(
         alg, ptrlen_from_strbuf(pub), ptrlen_from_strbuf(priv));
     strbuf_free(pub);
     strbuf_free(priv);
@@ -1321,11 +1311,12 @@ static void start_generating_key(HWND hwnd, struct MainDlgState *state)
 
     struct rsa_key_thread_params *params;
     DWORD threadid;
+    HANDLE hThread;
 
     SetDlgItemText(hwnd, IDC_GENERATING, generating_msg);
-    SendDlgItemMessage(hwnd, IDC_PROGRESS, PBM_SETRANGE, 0,
+    SendDlgItemMessage(hwnd, IDC_PROGRESS, PROGBAR_SETRANGE, 0,
                        MAKELPARAM(0, PROGRESSRANGE));
-    SendDlgItemMessage(hwnd, IDC_PROGRESS, PBM_SETPOS, 0, 0);
+    SendDlgItemMessage(hwnd, IDC_PROGRESS, PROGBAR_SETPOS, 0, 0);
 
     params = snew(struct rsa_key_thread_params);
     params->progressbar = GetDlgItem(hwnd, IDC_PROGRESS);
@@ -1338,8 +1329,8 @@ static void start_generating_key(HWND hwnd, struct MainDlgState *state)
     params->key = &state->key;
     params->dsakey = &state->dsakey;
 
-    HANDLE hThread = CreateThread(NULL, 0, generate_key_thread,
-                                  params, 0, &threadid);
+    hThread = CreateThread(NULL, 0, generate_key_thread,
+                           params, 0, &threadid);
     if (!hThread) {
         MessageBox(hwnd, "Out of thread resources",
                    "Key generation error",
@@ -1359,8 +1350,8 @@ struct certinfo_dialog_ctx {
     SeatDialogText *text;
 };
 
-static INT_PTR CertInfoProc(HWND hwnd, UINT msg, WPARAM wParam,
-                            LPARAM lParam, void *vctx)
+static BOOL CertInfoProc(HWND hwnd, UINT msg, WPARAM wParam,
+                         LPARAM lParam, void *vctx)
 {
     struct certinfo_dialog_ctx *ctx = (struct certinfo_dialog_ctx *)vctx;
 
@@ -1371,8 +1362,14 @@ static INT_PTR CertInfoProc(HWND hwnd, UINT msg, WPARAM wParam,
         WPARAM font = SendMessage(hwnd, WM_GETFONT, 0, 0);
 
         const char *key = NULL;
-        for (SeatDialogTextItem *item = ctx->text->items,
-                 *end = item + ctx->text->nitems; item < end; item++) {
+        RECT r;
+        HWND ctl;
+        int oldheight;
+        int newheight;
+        SeatDialogTextItem *item;
+        SeatDialogTextItem *end;
+        for (item = ctx->text->items, end = item + ctx->text->nitems;
+             item < end; item++) {
             switch (item->type) {
               case SDT_MORE_INFO_KEY:
                 key = item->text;
@@ -1382,6 +1379,7 @@ static INT_PTR CertInfoProc(HWND hwnd, UINT msg, WPARAM wParam,
                 RECT rk, rv;
                 DWORD editstyle = WS_CHILD | WS_VISIBLE | WS_TABSTOP |
                     ES_AUTOHSCROLL | ES_READONLY;
+                HWND ctl;
                 if (item->type == SDT_MORE_INFO_VALUE_BLOB) {
                     rk.left = 12;
                     rk.right = 286;
@@ -1410,17 +1408,17 @@ static INT_PTR CertInfoProc(HWND hwnd, UINT msg, WPARAM wParam,
                 }
 
                 MapDialogRect(hwnd, &rk);
-                HWND ctl = CreateWindowEx(
+                ctl = CreateWindowEx(
                     0, "STATIC", key, WS_CHILD | WS_VISIBLE,
                     rk.left, rk.top, rk.right, rk.bottom,
-                    hwnd, (HMENU)(ULONG_PTR)index++, hinst, NULL);
+                    hwnd, (HMENU)(UINT)index++, hinst, NULL);
                 SendMessage(ctl, WM_SETFONT, font, MAKELPARAM(true, 0));
 
                 MapDialogRect(hwnd, &rv);
                 ctl = CreateWindowEx(
-                    WS_EX_CLIENTEDGE, "EDIT", item->text, editstyle,
+                    EDGE_EXSTYLE, "EDIT", item->text, editstyle | EDGE_STYLE,
                     rv.left, rv.top, rv.right, rv.bottom,
-                    hwnd, (HMENU)(ULONG_PTR)index++, hinst, NULL);
+                    hwnd, (HMENU)(UINT)index++, hinst, NULL);
                 SendMessage(ctl, WM_SETFONT, font, MAKELPARAM(true, 0));
                 break;
               }
@@ -1433,24 +1431,23 @@ static INT_PTR CertInfoProc(HWND hwnd, UINT msg, WPARAM wParam,
          * Now resize the overall window, and move the Close button at
          * the bottom.
          */
-        RECT r;
         r.left = 176;
         r.top = y + 10;
         r.right = r.bottom = 0;
         MapDialogRect(hwnd, &r);
-        HWND ctl = GetDlgItem(hwnd, IDOK);
+        ctl = GetDlgItem(hwnd, IDOK);
         SetWindowPos(ctl, NULL, r.left, r.top, 0, 0,
                      SWP_NOSIZE | SWP_NOREDRAW | SWP_NOZORDER);
 
         r.left = r.top = r.right = 0;
         r.bottom = 300;
         MapDialogRect(hwnd, &r);
-        int oldheight = r.bottom;
+        oldheight = r.bottom;
 
         r.left = r.top = r.right = 0;
         r.bottom = y + 30;
         MapDialogRect(hwnd, &r);
-        int newheight = r.bottom;
+        newheight = r.bottom;
 
         GetWindowRect(hwnd, &r);
 
@@ -1478,34 +1475,28 @@ static INT_PTR CertInfoProc(HWND hwnd, UINT msg, WPARAM wParam,
 /*
  * Dialog-box function for the main PuTTYgen dialog box.
  */
-static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
-                                    WPARAM wParam, LPARAM lParam)
+static BOOL CALLBACK MainDlgProc(HWND hwnd, UINT msg,
+                                 WPARAM wParam, LPARAM lParam)
 {
-    const int DEMO_SCREENSHOT_TIMER_ID = 1230;
     static const char entropy_msg[] =
         "Please generate some randomness by moving the mouse over the blank area.";
     struct MainDlgState *state;
 
     switch (msg) {
+      struct InitialParams *params;
       case WM_INITDIALOG:
-        if (has_help())
-            SetWindowLongPtr(hwnd, GWL_EXSTYLE,
-                             GetWindowLongPtr(hwnd, GWL_EXSTYLE) |
-                             WS_EX_CONTEXTHELP);
-        else {
-            /*
-             * If we add a Help button, this is where we destroy it
-             * if the help file isn't present.
-             */
-        }
+#ifdef WM_SETICON
+        /* Windows NT 4.0 shows it in the title bar; the dialog can't
+         * be minimised, so older versions never show it */
         SendMessage(hwnd, WM_SETICON, (WPARAM) ICON_BIG,
                     (LPARAM) LoadIcon(hinst, MAKEINTRESOURCE(200)));
+#endif
 
         state = snew(struct MainDlgState);
         state->generation_thread_exists = false;
         state->entropy = NULL;
         state->key_exists = false;
-        SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR) state);
+        SetWindowLong(hwnd, GWL_USERDATA, (LONG) state);
         {
             HMENU menu, menu1;
 
@@ -1517,7 +1508,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
             AppendMenu(menu1, MF_ENABLED, IDC_SAVE, "&Save private key");
             AppendMenu(menu1, MF_SEPARATOR, 0, 0);
             AppendMenu(menu1, MF_ENABLED, IDC_QUIT, "E&xit");
-            AppendMenu(menu, MF_POPUP | MF_ENABLED, (UINT_PTR) menu1, "&File");
+            AppendMenu(menu, MF_POPUP | MF_ENABLED, (UINT)menu1, "&File");
             state->filemenu = menu1;
 
             menu1 = CreateMenu();
@@ -1551,7 +1542,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
                        "Show fingerprint as SHA256");
             AppendMenu(menu1, MF_ENABLED, IDC_FPTYPE_MD5,
                        "Show fingerprint as MD5");
-            AppendMenu(menu, MF_POPUP | MF_ENABLED, (UINT_PTR) menu1, "&Key");
+            AppendMenu(menu, MF_POPUP | MF_ENABLED, (UINT)menu1, "&Key");
             state->keymenu = menu1;
 
             menu1 = CreateMenu();
@@ -1563,15 +1554,13 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
                        "Export &OpenSSH key (force new file format)");
             AppendMenu(menu1, MF_ENABLED, IDC_EXPORT_SSHCOM,
                        "Export &ssh.com key");
-            AppendMenu(menu, MF_POPUP | MF_ENABLED, (UINT_PTR) menu1,
+            AppendMenu(menu, MF_POPUP | MF_ENABLED, (UINT)menu1,
                        "Con&versions");
             state->cvtmenu = menu1;
 
             menu1 = CreateMenu();
             AppendMenu(menu1, MF_ENABLED, IDC_ABOUT, "&About");
-            if (has_help())
-                AppendMenu(menu1, MF_ENABLED, IDC_GIVEHELP, "&Help");
-            AppendMenu(menu, MF_POPUP | MF_ENABLED, (UINT_PTR) menu1, "&Help");
+            AppendMenu(menu, MF_POPUP | MF_ENABLED, (UINT)menu1, "&Help");
 
             SetMenu(hwnd, menu);
         }
@@ -1608,9 +1597,9 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
             bigeditctrl(&cp2, NULL, -1, IDC_CERTSTATIC, 3);
             {
                 HWND child = GetDlgItem(hwnd, IDC_CERTSTATIC);
-                LONG_PTR style = GetWindowLongPtr(child, GWL_STYLE);
+                LONG style = GetWindowLong(child, GWL_STYLE);
                 style &= ~WS_VSCROLL;
-                SetWindowLongPtr(child, GWL_STYLE, style);
+                SetWindowLong(child, GWL_STYLE, style);
                 SendMessage(child, EM_SETREADONLY, true, 0);
             }
             MakeDlgItemBorderless(hwnd, IDC_CERTSTATIC);
@@ -1679,10 +1668,11 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
                 const ssh_keyalg *alg;
 
                 for (i = 0; i < n_ec_ed_curve_lengths; i++) {
+                    char *desc;
                     bits = ec_ed_curve_lengths[i];
                     ec_ed_alg_and_curve_by_bits(bits, &curve, &alg);
-                    char *desc = dupprintf("%s (%d bits)",
-                                           curve->textname, bits);
+                    desc = dupprintf("%s (%d bits)",
+                                     curve->textname, bits);
                     SendDlgItemMessage(hwnd, IDC_EDCURVE, CB_ADDSTRING, 0,
                                        (LPARAM)desc);
                     sfree(desc);
@@ -1696,7 +1686,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
             cp.ypos = ymax;
             endbox(&cp);
         }
-        struct InitialParams *params = (struct InitialParams *)lParam;
+        params = (struct InitialParams *)lParam;
         ui_set_key_type(hwnd, state, params->keybutton);
         ui_set_primepolicy(hwnd, state, params->primepolicybutton);
         ui_set_rsa_strong(hwnd, state, params->rsa_strong);
@@ -1718,36 +1708,12 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
         /*
          * Load a key file if one was provided on the command line.
          */
-        if (cmdline_keyfile) {
+        if (cmdline_keyfile)
             load_key_file(hwnd, state, cmdline_keyfile, false);
-        } else if (cmdline_demo_keystr.ptr) {
-            BinarySource src[1];
-            BinarySource_BARE_INIT_PL(src, cmdline_demo_keystr);
-            const char *errmsg;
-            ssh2_userkey *k = ppk_load_s(src, NULL, &errmsg);
-            assert(!errmsg);
-
-            update_ui_after_load(hwnd, state, "demo passphrase",
-                                 SSH_KEYTYPE_SSH2, NULL, k);
-
-            SetTimer(hwnd, DEMO_SCREENSHOT_TIMER_ID, TICKSPERSEC, NULL);
-        }
 
         return 1;
-      case WM_TIMER:
-        if ((UINT_PTR)wParam == DEMO_SCREENSHOT_TIMER_ID) {
-            KillTimer(hwnd, DEMO_SCREENSHOT_TIMER_ID);
-            char *err = save_screenshot(hwnd, demo_screenshot_filename);
-            if (err) {
-                MessageBox(hwnd, err, "Demo screenshot failure",
-                           MB_OK | MB_ICONERROR);
-                sfree(err);
-            }
-            EndDialog(hwnd, 0);
-        }
-        return 0;
       case WM_MOUSEMOVE:
-        state = (struct MainDlgState *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
+        state = (struct MainDlgState *) GetWindowLong(hwnd, GWL_USERDATA);
         if (state->entropy && state->entropy_got < state->entropy_required) {
             ULONG msgtime = GetMessageTime();
             put_uint32(state->entropy, lParam);
@@ -1756,7 +1722,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
                 state->entropy_got += 2;
                 state->entropy_prev_msgtime = msgtime;
             }
-            SendDlgItemMessage(hwnd, IDC_PROGRESS, PBM_SETPOS,
+            SendDlgItemMessage(hwnd, IDC_PROGRESS, PROGBAR_SETPOS,
                                state->entropy_got, 0);
             if (state->entropy_got >= state->entropy_required) {
                 /*
@@ -1778,7 +1744,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
           case IDC_KEYSSH2ECDSA:
           case IDC_KEYSSH2EDDSA: {
             state = (struct MainDlgState *)
-                GetWindowLongPtr(hwnd, GWLP_USERDATA);
+                GetWindowLong(hwnd, GWL_USERDATA);
             ui_set_key_type(hwnd, state, LOWORD(wParam));
             break;
           }
@@ -1786,25 +1752,26 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
           case IDC_PRIMEGEN_MAURER_SIMPLE:
           case IDC_PRIMEGEN_MAURER_COMPLEX: {
             state = (struct MainDlgState *)
-                GetWindowLongPtr(hwnd, GWLP_USERDATA);
+                GetWindowLong(hwnd, GWL_USERDATA);
             ui_set_primepolicy(hwnd, state, LOWORD(wParam));
             break;
           }
           case IDC_FPTYPE_SHA256:
           case IDC_FPTYPE_MD5: {
             state = (struct MainDlgState *)
-                GetWindowLongPtr(hwnd, GWLP_USERDATA);
+                GetWindowLong(hwnd, GWL_USERDATA);
             ui_set_fptype(hwnd, state, LOWORD(wParam));
             break;
           }
           case IDC_RSA_STRONG: {
             state = (struct MainDlgState *)
-                GetWindowLongPtr(hwnd, GWLP_USERDATA);
+                GetWindowLong(hwnd, GWL_USERDATA);
             ui_set_rsa_strong(hwnd, state, !state->rsa_strong);
             break;
           }
           case IDC_PPK_PARAMS: {
             struct PPKParams pp[1];
+            int dlgret;
             pp->params = save_params;
             if (pp->params.argon2_passes_auto) {
                 pp->time_ms = pp->params.argon2_milliseconds;
@@ -1813,8 +1780,8 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
                 pp->time_ms = 100;
                 pp->time_passes = pp->params.argon2_passes;
             }
-            int dlgret = DialogBoxParam(hinst, MAKEINTRESOURCE(215),
-                                        NULL, PPKParamsProc, (LPARAM)pp);
+            dlgret = DialogBoxParam(hinst, MAKEINTRESOURCE(215),
+                                    NULL, PPKParamsProc, (LPARAM)pp);
             if (dlgret) {
                 if (pp->params.argon2_passes_auto) {
                     pp->params.argon2_milliseconds = pp->time_ms;
@@ -1831,7 +1798,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
           case IDC_COMMENTEDIT:
             if (HIWORD(wParam) == EN_CHANGE) {
                 state = (struct MainDlgState *)
-                    GetWindowLongPtr(hwnd, GWLP_USERDATA);
+                    GetWindowLong(hwnd, GWL_USERDATA);
                 if (state->key_exists) {
                     HWND editctl = GetDlgItem(hwnd, IDC_COMMENTEDIT);
                     int len = GetWindowTextLength(editctl);
@@ -1853,18 +1820,12 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
             EnableWindow(hwnd, 1);
             SetActiveWindow(hwnd);
             return 0;
-          case IDC_GIVEHELP:
-            if (HIWORD(wParam) == BN_CLICKED ||
-                HIWORD(wParam) == BN_DOUBLECLICKED) {
-                launch_help(hwnd, WINHELP_CTX_puttygen_general);
-            }
-            return 0;
           case IDC_GENERATE:
             if (HIWORD(wParam) != BN_CLICKED &&
                 HIWORD(wParam) != BN_DOUBLECLICKED)
                 break;
             state =
-                (struct MainDlgState *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
+                (struct MainDlgState *) GetWindowLong(hwnd, GWL_USERDATA);
             if (!state->generation_thread_exists) {
                 unsigned raw_entropy_required;
                 unsigned char *raw_entropy_buf;
@@ -1883,16 +1844,18 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
                 } else if (IsDlgButtonChecked(hwnd, IDC_KEYSSH2DSA)) {
                     state->keytype = DSA;
                 } else if (IsDlgButtonChecked(hwnd, IDC_KEYSSH2ECDSA)) {
+                    int curveindex;
                     state->keytype = ECDSA;
-                    int curveindex = SendDlgItemMessage(hwnd, IDC_ECCURVE,
-                                                        CB_GETCURSEL, 0, 0);
+                    curveindex = SendDlgItemMessage(hwnd, IDC_ECCURVE,
+                                                    CB_GETCURSEL, 0, 0);
                     assert(curveindex >= 0);
                     assert(curveindex < n_ec_nist_curve_lengths);
                     state->curve_bits = ec_nist_curve_lengths[curveindex];
                 } else if (IsDlgButtonChecked(hwnd, IDC_KEYSSH2EDDSA)) {
+                    int curveindex;
                     state->keytype = EDDSA;
-                    int curveindex = SendDlgItemMessage(hwnd, IDC_EDCURVE,
-                                                        CB_GETCURSEL, 0, 0);
+                    curveindex = SendDlgItemMessage(hwnd, IDC_EDCURVE,
+                                                    CB_GETCURSEL, 0, 0);
                     assert(curveindex >= 0);
                     assert(curveindex < n_ec_ed_curve_lengths);
                     state->curve_bits = ec_ed_curve_lengths[curveindex];
@@ -1981,9 +1944,9 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
                 state->entropy = strbuf_new_nm();
                 state->entropy_prev_msgtime = GetMessageTime();
 
-                SendDlgItemMessage(hwnd, IDC_PROGRESS, PBM_SETRANGE, 0,
+                SendDlgItemMessage(hwnd, IDC_PROGRESS, PROGBAR_SETRANGE, 0,
                                    MAKELPARAM(0, state->entropy_required));
-                SendDlgItemMessage(hwnd, IDC_PROGRESS, PBM_SETPOS, 0, 0);
+                SendDlgItemMessage(hwnd, IDC_PROGRESS, PROGBAR_SETPOS, 0, 0);
 
                 smemclr(raw_entropy_buf, raw_entropy_required);
                 sfree(raw_entropy_buf);
@@ -1996,10 +1959,11 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
             if (HIWORD(wParam) != BN_CLICKED)
                 break;
             state =
-                (struct MainDlgState *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
+                (struct MainDlgState *) GetWindowLong(hwnd, GWL_USERDATA);
             if (state->key_exists) {
                 char *passphrase, *passphrase2;
                 int type, realtype;
+                Filename *fn;
 
                 if (state->ssh2)
                     realtype = SSH_KEYTYPE_SSH2;
@@ -2049,7 +2013,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
                         break;
                     }
                 }
-                Filename *fn = request_file(
+                fn = request_file(
                     hwnd, "Save private key as:", NULL, true, NULL, false,
                     (type==realtype ? FILTER_KEY_FILES : FILTER_ALL_FILES));
                 if (fn) {
@@ -2081,7 +2045,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
                                                  strlen(passphrase));
                             if (err) {
                                 char *newerr = dupcat(
-                                    "PPK parameters invalid: ", err);
+                                    "PPK parameters invalid: ", err, NULL);
                                 sfree(err);
                                 err = newerr;
                                 ret = -1;
@@ -2114,7 +2078,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
             if (HIWORD(wParam) != BN_CLICKED)
                 break;
             state =
-                (struct MainDlgState *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
+                (struct MainDlgState *) GetWindowLong(hwnd, GWL_USERDATA);
             if (state->key_exists) {
                 Filename *fn = request_file(
                     hwnd, "Save public key as:", NULL, true, NULL, false,
@@ -2165,7 +2129,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
             if (HIWORD(wParam) != BN_CLICKED)
                 break;
             state =
-                (struct MainDlgState *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
+                (struct MainDlgState *) GetWindowLong(hwnd, GWL_USERDATA);
             if (!state->generation_thread_exists) {
                 Filename *fn = request_file(
                     hwnd, "Load private key:", NULL, false, NULL, false,
@@ -2181,7 +2145,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
             if (HIWORD(wParam) != BN_CLICKED)
                 break;
             state =
-                (struct MainDlgState *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
+                (struct MainDlgState *) GetWindowLong(hwnd, GWL_USERDATA);
             if (state->key_exists && !state->generation_thread_exists) {
                 Filename *fn = request_file(
                     hwnd, "Load certificate:", NULL, false, NULL, false,
@@ -2196,22 +2160,22 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
             if (HIWORD(wParam) != BN_CLICKED)
                 break;
             state =
-                (struct MainDlgState *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
+                (struct MainDlgState *) GetWindowLong(hwnd, GWL_USERDATA);
             if (state->key_exists && !state->generation_thread_exists) {
                 remove_certificate(hwnd, state);
             }
             break;
           case IDC_CERTMOREINFO: {
+            struct certinfo_dialog_ctx ctx[1];
             if (HIWORD(wParam) != BN_CLICKED)
                 break;
             state =
-                (struct MainDlgState *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
+                (struct MainDlgState *) GetWindowLong(hwnd, GWL_USERDATA);
             if (!state->key_exists || !state->ssh2 || !state->ssh2key.key)
                 break;
             if (!ssh_key_alg(state->ssh2key.key)->is_certificate)
                 break;
 
-            struct certinfo_dialog_ctx ctx[1];
             ctx->text = ssh_key_cert_info(state->ssh2key.key);
             ShinyDialogBox(hinst, MAKEINTRESOURCE(216),
                            "PuTTYgenCertInfo", hwnd, CertInfoProc, ctx);
@@ -2221,12 +2185,13 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
         }
         return 0;
       case WM_DONEKEY:
-        state = (struct MainDlgState *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
+        state = (struct MainDlgState *) GetWindowLong(hwnd, GWL_USERDATA);
         state->generation_thread_exists = false;
         state->key_exists = true;
-        SendDlgItemMessage(hwnd, IDC_PROGRESS, PBM_SETRANGE, 0,
+        SendDlgItemMessage(hwnd, IDC_PROGRESS, PROGBAR_SETRANGE, 0,
                            MAKELPARAM(0, PROGRESSRANGE));
-        SendDlgItemMessage(hwnd, IDC_PROGRESS, PBM_SETPOS, PROGRESSRANGE, 0);
+        SendDlgItemMessage(hwnd, IDC_PROGRESS, PROGBAR_SETPOS,
+                           PROGRESSRANGE, 0);
         if (state->ssh2) {
             if (state->keytype == DSA) {
                 state->ssh2key.key = &state->dsakey.sshk;
@@ -2305,64 +2270,9 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
          */
         ui_set_state(hwnd, state, 2);
         break;
-      case WM_HELP: {
-        int id = ((LPHELPINFO)lParam)->iCtrlId;
-        const char *topic = NULL;
-        switch (id) {
-          case IDC_GENERATING:
-          case IDC_PROGRESS:
-          case IDC_GENSTATIC:
-          case IDC_GENERATE:
-            topic = WINHELP_CTX_puttygen_generate; break;
-          case IDC_PKSTATIC:
-          case IDC_KEYDISPLAY:
-            topic = WINHELP_CTX_puttygen_pastekey; break;
-          case IDC_FPSTATIC:
-          case IDC_FINGERPRINT:
-            topic = WINHELP_CTX_puttygen_fingerprint; break;
-          case IDC_COMMENTSTATIC:
-          case IDC_COMMENTEDIT:
-            topic = WINHELP_CTX_puttygen_comment; break;
-          case IDC_PASSPHRASE1STATIC:
-          case IDC_PASSPHRASE1EDIT:
-          case IDC_PASSPHRASE2STATIC:
-          case IDC_PASSPHRASE2EDIT:
-            topic = WINHELP_CTX_puttygen_passphrase; break;
-          case IDC_LOADSTATIC:
-          case IDC_LOAD:
-            topic = WINHELP_CTX_puttygen_load; break;
-          case IDC_SAVESTATIC:
-          case IDC_SAVE:
-            topic = WINHELP_CTX_puttygen_savepriv; break;
-          case IDC_SAVEPUB:
-            topic = WINHELP_CTX_puttygen_savepub; break;
-          case IDC_TYPESTATIC:
-          case IDC_KEYSSH1:
-          case IDC_KEYSSH2RSA:
-          case IDC_KEYSSH2DSA:
-          case IDC_KEYSSH2ECDSA:
-          case IDC_KEYSSH2EDDSA:
-            topic = WINHELP_CTX_puttygen_keytype; break;
-          case IDC_BITSSTATIC:
-          case IDC_BITS:
-            topic = WINHELP_CTX_puttygen_bits; break;
-          case IDC_IMPORT:
-          case IDC_EXPORT_OPENSSH_AUTO:
-          case IDC_EXPORT_OPENSSH_NEW:
-          case IDC_EXPORT_SSHCOM:
-            topic = WINHELP_CTX_puttygen_conversions; break;
-        }
-        if (topic) {
-            launch_help(hwnd, topic);
-        } else {
-            MessageBeep(0);
-        }
-        break;
-      }
       case WM_CLOSE:
-        state = (struct MainDlgState *) GetWindowLongPtr(hwnd, GWLP_USERDATA);
+        state = (struct MainDlgState *) GetWindowLong(hwnd, GWL_USERDATA);
         sfree(state);
-        quit_help(hwnd);
         EndDialog(hwnd, 1);
         return 0;
     }
@@ -2371,7 +2281,6 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg,
 
 void cleanup_exit(int code)
 {
-    shutdown_help();
     exit(code);
 }
 
@@ -2380,8 +2289,9 @@ HINSTANCE hinst;
 static NORETURN void opt_error(const char *fmt, ...)
 {
     va_list ap;
+    char *msg;
     va_start(ap, fmt);
-    char *msg = dupvprintf(fmt, ap);
+    msg = dupvprintf(fmt, ap);
     va_end(ap);
 
     MessageBox(NULL, msg, "PuTTYgen command line error", MB_ICONERROR | MB_OK);
@@ -2393,17 +2303,14 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 {
     int ret;
     struct InitialParams params[1];
+    int argbits;
+    AuxMatchOpt amo;
 
     dll_hijacking_protection();
     enable_dit();
 
     init_common_controls();
     hinst = inst;
-
-    /*
-     * See if we can find our Help file.
-     */
-    init_help();
 
     params->keybutton = IDC_KEYSSH2RSA;
     params->primepolicybutton = IDC_PRIMEGEN_PROB;
@@ -2415,15 +2322,10 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
     save_params = ppk_save_default_parameters;
 
-    int argbits = -1;
-    AuxMatchOpt amo = aux_match_opt_init(opt_error);
+    argbits = -1;
+    amo = aux_match_opt_init(opt_error);
     while (!aux_match_done(&amo)) {
         CmdlineArg *valarg;
-        #define match_opt(...) aux_match_opt( \
-            &amo, NULL, __VA_ARGS__, (const char *)NULL)
-        #define match_optval(...) aux_match_opt( \
-            &amo, &valarg, __VA_ARGS__, (const char *)NULL)
-
         if (aux_match_arg(&amo, &valarg)) {
             if (!cmdline_keyfile) {
                 /*
@@ -2436,13 +2338,13 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                 opt_error("unexpected extra argument '%s'\n",
                           cmdline_arg_to_str(valarg));
             }
-        } else if (match_opt("-pgpfp")) {
+        } else if (aux_match_opt(&amo, NULL, "-pgpfp", NULL)) {
             pgp_fingerprints_msgbox(NULL);
             return 0;
-        } else if (match_opt("-restrict-acl", "-restrict_acl",
-                             "-restrictacl")) {
+        } else if (aux_match_opt(&amo, NULL, "-restrict-acl", "-restrict_acl",
+                                 "-restrictacl", NULL)) {
             restrict_process_acl();
-        } else if (match_optval("-t")) {
+        } else if (aux_match_opt(&amo, &valarg, "-t", NULL)) {
             const char *val = cmdline_arg_to_str(valarg);
             if (!strcmp(val, "rsa") || !strcmp(val, "rsa2")) {
                 params->keybutton = IDC_KEYSSH2RSA;
@@ -2463,9 +2365,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
             } else {
                 opt_error("unknown key type '%s'\n", val);
             }
-        } else if (match_optval("-b")) {
+        } else if (aux_match_opt(&amo, &valarg, "-b", NULL)) {
             argbits = atoi(cmdline_arg_to_str(valarg));
-        } else if (match_optval("-E")) {
+        } else if (aux_match_opt(&amo, &valarg, "-E", NULL)) {
             const char *val = cmdline_arg_to_str(valarg);
             if (!strcmp(val, "md5"))
                 params->fptype = SSH_FPTYPE_MD5;
@@ -2473,7 +2375,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                 params->fptype = SSH_FPTYPE_SHA256;
             else
                 opt_error("unknown fingerprint type '%s'\n", val);
-        } else if (match_optval("-primes")) {
+        } else if (aux_match_opt(&amo, &valarg, "-primes", NULL)) {
             const char *val = cmdline_arg_to_str(valarg);
             if (!strcmp(val, "probable") ||
                 !strcmp(val, "probabilistic")) {
@@ -2492,17 +2394,20 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
             } else {
                 opt_error("unrecognised prime-generation mode '%s'\n", val);
             }
-        } else if (match_opt("-strong-rsa")) {
+        } else if (aux_match_opt(&amo, NULL, "-strong-rsa", NULL)) {
             params->rsa_strong = true;
-        } else if (match_optval("-ppk-param", "-ppk-params")) {
+        } else if (aux_match_opt(&amo, &valarg, "-ppk-param", "-ppk-params", NULL)) {
             char *val = dupstr(cmdline_arg_to_str(valarg));
             char *nextval;
             for (; val; val = nextval) {
+                char *optvalue;
+                char *end;
+                unsigned long n;
                 nextval = strchr(val, ',');
                 if (nextval)
                     *nextval++ = '\0';
 
-                char *optvalue = strchr(val, '=');
+                optvalue = strchr(val, '=');
                 if (!optvalue)
                     opt_error("PPK parameter '%s' expected a value\n", val);
                 *optvalue++ = '\0';
@@ -2524,8 +2429,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                     continue;
                 }
 
-                char *end;
-                unsigned long n = strtoul(optvalue, &end, 0);
+                n = strtoul(optvalue, &end, 0);
                 if (!*optvalue || *end)
                     opt_error("value '%s' for PPK parameter '%s': expected a "
                               "number\n", optvalue, val);
@@ -2549,22 +2453,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                 }
             }
             sfree(val);
-        } else if (match_optval("-demo-screenshot")) {
-            demo_screenshot_filename = cmdline_arg_to_filename(valarg);
-            cmdline_demo_keystr = PTRLEN_LITERAL(
-                "PuTTY-User-Key-File-3: ssh-ed25519\n"
-                "Encryption: none\n"
-                "Comment: ed25519-key-20220402\n"
-                "Public-Lines: 2\n"
-                "AAAAC3NzaC1lZDI1NTE5AAAAILzuIFwZ"
-                "8ZhgOlilcSb+9zPuCf/DmKJiloVlmWGy\n"
-                "xa/F\n"
-                "Private-Lines: 1\n"
-                "AAAAIPca6vLwtB2NJhZUpABQISR0gcQH8jjQLta19VyzA3wc\n"
-                "Private-MAC: 1159e9628259b35933b397379bbe8a14"
-                "a1f1d97fe91e446e45a9581a3408b70e\n");
-            params->keybutton = IDC_KEYSSH2EDDSA;
-            argbits = 255;
         } else {
             opt_error("unrecognised option '%s'\n",
                       cmdline_arg_to_str(amo.arglist->args[amo.index]));
@@ -2581,7 +2469,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
             break;
           case IDC_KEYSSH2ECDSA: {
             bool found = false;
-            for (int j = 0; j < n_ec_nist_curve_lengths; j++)
+            int j;
+            for (j = 0; j < n_ec_nist_curve_lengths; j++)
                 if (argbits == ec_nist_curve_lengths[j]) {
                     params->eccurve_index = j;
                     found = true;
@@ -2593,7 +2482,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
           }
           case IDC_KEYSSH2EDDSA: {
             bool found = false;
-            for (int j = 0; j < n_ec_ed_curve_lengths; j++)
+            int j;
+            for (j = 0; j < n_ec_ed_curve_lengths; j++)
                 if (argbits == ec_ed_curve_lengths[j]) {
                     params->edcurve_index = j;
                     found = true;

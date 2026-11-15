@@ -1,78 +1,62 @@
 /*
- * Implementation of do_select() for network.c to use, suitable for use
- * when there's no GUI window to have network activity reported to.
+ * Network activity for the command-line tools (Plink, PSCP, PSFTP,
+ * PSocks).
  *
- * It uses WSAEventSelect, where available, to convert network
- * activity into activity on an event object, for integration into an
- * event loop that includes WaitForMultipleObjects.
+ * They use the same method as the GUI tools (select-gui.c, which
+ * provides do_select): WSAAsyncSelect turns network activity into
+ * messages to a window. Here that window is never shown. WinSock 1.1,
+ * which is all that Windows NT 3.1 and 3.5 have, has no other way to
+ * report network activity that a program can wait for together with
+ * its other handles. cli_main_loop waits with
+ * MsgWaitForMultipleObjects and dispatches the messages.
  *
- * It also maintains a list of currently active sockets, which can be
- * retrieved by a front end that wants to use WinSock's synchronous
- * select() function.
+ * A program that Windows NT 3.1 starts from a service, such as a
+ * remote shell daemon, can't have a window at all (RegisterClass
+ * fails with ERROR_NOT_ENOUGH_MEMORY). Then cli_main_loop looks at the
+ * sockets itself, with sk_poll, every few milliseconds.
  */
 
 #include "putty.h"
 
-static tree234 *winselcli_sockets;
-
-static int socket_cmp(void *av, void *bv)
+static LRESULT CALLBACK winselcli_wndproc(HWND hwnd, UINT message,
+                                          WPARAM wParam, LPARAM lParam)
 {
-    return memcmp(av, bv, sizeof(SOCKET));
-} 
+    if (message == WM_NETEVENT || message == WM_DONE_WITH_SOCKET) {
+        if (message == WM_NETEVENT)
+            noise_ultralight(NOISE_SOURCE_IOID, wParam);
+        winselgui_response(message, wParam, lParam);
+        return 0;
+    }
+    return DefWindowProc(hwnd, message, wParam, lParam);
+}
 
-HANDLE winselcli_event = INVALID_HANDLE_VALUE;
+static bool no_window = false;
 
 void winselcli_setup(void)
 {
-    if (!winselcli_sockets)
-        winselcli_sockets = newtree234(socket_cmp);
+    static bool done = false;
+    WNDCLASS wc;
+    HWND hwnd = NULL;
 
-    if (p_WSAEventSelect && winselcli_event == INVALID_HANDLE_VALUE)
-        winselcli_event = CreateEvent(NULL, false, false, NULL);
+    if (done)
+        return;
+    done = true;
+
+    memset(&wc, 0, sizeof(wc));
+    wc.lpfnWndProc = winselcli_wndproc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.lpszClassName = "PuTTYNetworkEvents";
+    if (RegisterClass(&wc))
+        hwnd = CreateWindow("PuTTYNetworkEvents", "", 0, 0, 0, 0, 0,
+                            NULL, NULL, GetModuleHandle(NULL), NULL);
+    if (hwnd)
+        winselgui_set_hwnd(hwnd);
+    else
+        no_window = true;
 }
 
-SOCKET winselcli_unique_socket(void)
+/* True if cli_main_loop has to poll the sockets (see above) */
+bool winselcli_polling(void)
 {
-    if (!winselcli_sockets)
-        return INVALID_SOCKET;
-
-    assert(count234(winselcli_sockets) <= 1);
-
-    SOCKET *p = index234(winselcli_sockets, 0);
-    if (!p)
-        return INVALID_SOCKET;
-
-    return *p;
-}
-
-const char *do_select(SOCKET skt, bool enable)
-{
-    /* Check everything's been set up, for convenience of callers. */
-    winselcli_setup();
-
-    if (enable) {
-        SOCKET *ptr = snew(SOCKET);
-        *ptr = skt;
-        if (add234(winselcli_sockets, ptr) != ptr)
-            sfree(ptr);                /* already there */
-    } else {
-        SOCKET *ptr = del234(winselcli_sockets, &skt);
-        if (ptr)
-            sfree(ptr);
-    }
-
-    if (p_WSAEventSelect) {
-        int events;
-        if (enable) {
-            events = (FD_CONNECT | FD_READ | FD_WRITE |
-                      FD_OOB | FD_CLOSE | FD_ACCEPT);
-        } else {
-            events = 0;
-        }
-
-        if (p_WSAEventSelect(skt, winselcli_event, events) == SOCKET_ERROR)
-            return winsock_error_string(p_WSAGetLastError());
-    }
-
-    return NULL;
+    return no_window;
 }

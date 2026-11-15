@@ -19,179 +19,184 @@
  * say that that value should no longer be generated in newly saved
  * data. That is, they indicate that y maps to x, but not that x maps
  * to y.
+ *
+ * (NT port: upstream writes CONF_ENUM(name, VALUE(x,y), ...) with a
+ * variadic macro. The compilers of 1993-1996 have no variadic macros,
+ * so each enumeration is bracketed by CONF_ENUM_BEGIN(name) and
+ * CONF_ENUM_END(name) instead.)
  */
 
-CONF_ENUM(addressfamily,
-    VALUE(ADDRTYPE_UNSPEC, 0),
-    VALUE(ADDRTYPE_IPV4, 1),
-    VALUE(ADDRTYPE_IPV6, 2),
-)
+CONF_ENUM_BEGIN(addressfamily)
+    VALUE(ADDRTYPE_UNSPEC, 0)
+    VALUE(ADDRTYPE_IPV4, 1)
+    VALUE(ADDRTYPE_IPV6, 2)
+CONF_ENUM_END(addressfamily)
 
-CONF_ENUM(on_off_auto,
-    VALUE(FORCE_ON, 0),
-    VALUE(FORCE_OFF, 1),
-    VALUE(AUTO, 2),
-)
+CONF_ENUM_BEGIN(on_off_auto)
+    VALUE(FORCE_ON, 0)
+    VALUE(FORCE_OFF, 1)
+    VALUE(AUTO, 2)
+CONF_ENUM_END(on_off_auto)
 
-CONF_ENUM(off_auto_on,
-    VALUE(FORCE_OFF, 0),
-    VALUE(AUTO, 1),
-    VALUE(FORCE_ON, 2),
-)
+CONF_ENUM_BEGIN(off_auto_on)
+    VALUE(FORCE_OFF, 0)
+    VALUE(AUTO, 1)
+    VALUE(FORCE_ON, 2)
+CONF_ENUM_END(off_auto_on)
 
-CONF_ENUM(auto_off_on,
-    VALUE(AUTO, 0),
-    VALUE(FORCE_OFF, 1),
-    VALUE(FORCE_ON, 2),
-)
+CONF_ENUM_BEGIN(auto_off_on)
+    VALUE(AUTO, 0)
+    VALUE(FORCE_OFF, 1)
+    VALUE(FORCE_ON, 2)
+CONF_ENUM_END(auto_off_on)
 
-CONF_ENUM(off1_on2,
-    VALUE(FORCE_OFF, 1),
-    VALUE(FORCE_ON, 2),
-)
+CONF_ENUM_BEGIN(off1_on2)
+    VALUE(FORCE_OFF, 1)
+    VALUE(FORCE_ON, 2)
+CONF_ENUM_END(off1_on2)
 
-CONF_ENUM(ssh_protocol,
-    VALUE(0, 0),
-    VALUE(3, 3),
+CONF_ENUM_BEGIN(ssh_protocol)
+    VALUE(0, 0)
+    VALUE(3, 3)
     /* Save value 1 used to mean 'prefer SSH-1 but allow 2'; 2 vice versa.
      * We no longer support SSH-1 vs SSH-2 agnosticism, so we translate each
      * to the preferred version only. */
-    VALUE_OBSOLETE(0, 1),
-    VALUE_OBSOLETE(3, 2),
-)
+    VALUE_OBSOLETE(0, 1)
+    VALUE_OBSOLETE(3, 2)
+CONF_ENUM_END(ssh_protocol)
 
-CONF_ENUM(serparity,
-    VALUE(SER_PAR_NONE, 0),
-    VALUE(SER_PAR_ODD, 1),
-    VALUE(SER_PAR_EVEN, 2),
-    VALUE(SER_PAR_MARK, 3),
-    VALUE(SER_PAR_SPACE, 4),
-)
+CONF_ENUM_BEGIN(serparity)
+    VALUE(SER_PAR_NONE, 0)
+    VALUE(SER_PAR_ODD, 1)
+    VALUE(SER_PAR_EVEN, 2)
+    VALUE(SER_PAR_MARK, 3)
+    VALUE(SER_PAR_SPACE, 4)
+CONF_ENUM_END(serparity)
 
-CONF_ENUM(serflow,
-    VALUE(SER_FLOW_NONE, 0),
-    VALUE(SER_FLOW_XONXOFF, 1),
-    VALUE(SER_FLOW_RTSCTS, 2),
-    VALUE(SER_FLOW_DSRDTR, 3),
-)
+CONF_ENUM_BEGIN(serflow)
+    VALUE(SER_FLOW_NONE, 0)
+    VALUE(SER_FLOW_XONXOFF, 1)
+    VALUE(SER_FLOW_RTSCTS, 2)
+    VALUE(SER_FLOW_DSRDTR, 3)
+CONF_ENUM_END(serflow)
 
-CONF_ENUM(supdup_charset,
-    VALUE(SUPDUP_CHARSET_ASCII, 0),
-    VALUE(SUPDUP_CHARSET_ITS, 1),
-    VALUE(SUPDUP_CHARSET_WAITS, 2),
-)
+CONF_ENUM_BEGIN(supdup_charset)
+    VALUE(SUPDUP_CHARSET_ASCII, 0)
+    VALUE(SUPDUP_CHARSET_ITS, 1)
+    VALUE(SUPDUP_CHARSET_WAITS, 2)
+CONF_ENUM_END(supdup_charset)
 
-CONF_ENUM(proxy_type,
-    VALUE(PROXY_NONE, 0),
-    VALUE(PROXY_SOCKS4, 1),
-    VALUE(PROXY_SOCKS5, 2),
-    VALUE(PROXY_HTTP, 3),
-    VALUE(PROXY_TELNET, 4),
-    VALUE(PROXY_CMD, 5),
-    VALUE(PROXY_SSH_TCPIP, 6),
-    VALUE(PROXY_SSH_EXEC, 7),
-    VALUE(PROXY_SSH_SUBSYSTEM, 8),
-)
+CONF_ENUM_BEGIN(proxy_type)
+    VALUE(PROXY_NONE, 0)
+    VALUE(PROXY_SOCKS4, 1)
+    VALUE(PROXY_SOCKS5, 2)
+    VALUE(PROXY_HTTP, 3)
+    VALUE(PROXY_TELNET, 4)
+    VALUE(PROXY_CMD, 5)
+    VALUE(PROXY_SSH_TCPIP, 6)
+    VALUE(PROXY_SSH_EXEC, 7)
+    VALUE(PROXY_SSH_SUBSYSTEM, 8)
+CONF_ENUM_END(proxy_type)
 
-CONF_ENUM(old_proxy_type,
-    VALUE(PROXY_NONE, 0),
-    VALUE(PROXY_HTTP, 1),
-    VALUE(PROXY_SOCKS5, 2), /* really, both SOCKS 4 and 5 */
-    VALUE(PROXY_TELNET, 3),
-    VALUE(PROXY_CMD, 4),
-)
+CONF_ENUM_BEGIN(old_proxy_type)
+    VALUE(PROXY_NONE, 0)
+    VALUE(PROXY_HTTP, 1)
+    VALUE(PROXY_SOCKS5, 2) /* really, both SOCKS 4 and 5 */
+    VALUE(PROXY_TELNET, 3)
+    VALUE(PROXY_CMD, 4)
+CONF_ENUM_END(old_proxy_type)
 
-CONF_ENUM(funky_type,
-    VALUE(FUNKY_TILDE, 0),
-    VALUE(FUNKY_LINUX, 1),
-    VALUE(FUNKY_XTERM, 2),
-    VALUE(FUNKY_VT400, 3),
-    VALUE(FUNKY_VT100P, 4),
-    VALUE(FUNKY_SCO, 5),
-    VALUE(FUNKY_XTERM_216, 6),
-)
+CONF_ENUM_BEGIN(funky_type)
+    VALUE(FUNKY_TILDE, 0)
+    VALUE(FUNKY_LINUX, 1)
+    VALUE(FUNKY_XTERM, 2)
+    VALUE(FUNKY_VT400, 3)
+    VALUE(FUNKY_VT100P, 4)
+    VALUE(FUNKY_SCO, 5)
+    VALUE(FUNKY_XTERM_216, 6)
+CONF_ENUM_END(funky_type)
 
-CONF_ENUM(sharrow_type,
-    VALUE(SHARROW_APPLICATION, 0),
-    VALUE(SHARROW_BITMAP, 1),
-)
+CONF_ENUM_BEGIN(sharrow_type)
+    VALUE(SHARROW_APPLICATION, 0)
+    VALUE(SHARROW_BITMAP, 1)
+CONF_ENUM_END(sharrow_type)
 
-CONF_ENUM(remote_qtitle_action,
-    VALUE(TITLE_NONE, 0),
-    VALUE(TITLE_EMPTY, 1),
-    VALUE(TITLE_REAL, 2),
-)
+CONF_ENUM_BEGIN(remote_qtitle_action)
+    VALUE(TITLE_NONE, 0)
+    VALUE(TITLE_EMPTY, 1)
+    VALUE(TITLE_REAL, 2)
+CONF_ENUM_END(remote_qtitle_action)
 
-CONF_ENUM(cursor_type,
-    VALUE(CURSOR_BLOCK, 0),
-    VALUE(CURSOR_UNDERLINE, 1),
-    VALUE(CURSOR_VERTICAL_LINE, 2),
-)
+CONF_ENUM_BEGIN(cursor_type)
+    VALUE(CURSOR_BLOCK, 0)
+    VALUE(CURSOR_UNDERLINE, 1)
+    VALUE(CURSOR_VERTICAL_LINE, 2)
+CONF_ENUM_END(cursor_type)
 
-CONF_ENUM(beep,
-    VALUE(BELL_DISABLED, 0),
-    VALUE(BELL_DEFAULT, 1),
-    VALUE(BELL_VISUAL, 2),
-    VALUE(BELL_WAVEFILE, 3),
-    VALUE(BELL_PCSPEAKER, 4),
-)
+CONF_ENUM_BEGIN(beep)
+    VALUE(BELL_DISABLED, 0)
+    VALUE(BELL_DEFAULT, 1)
+    VALUE(BELL_VISUAL, 2)
+    VALUE(BELL_WAVEFILE, 3)
+    VALUE(BELL_PCSPEAKER, 4)
+CONF_ENUM_END(beep)
 
-CONF_ENUM(beep_indication,
-    VALUE(B_IND_DISABLED, 0),
-    VALUE(B_IND_FLASH, 1),
-    VALUE(B_IND_STEADY, 2),
-)
+CONF_ENUM_BEGIN(beep_indication)
+    VALUE(B_IND_DISABLED, 0)
+    VALUE(B_IND_FLASH, 1)
+    VALUE(B_IND_STEADY, 2)
+CONF_ENUM_END(beep_indication)
 
-CONF_ENUM(resize_effect,
-    VALUE(RESIZE_TERM, 0),
-    VALUE(RESIZE_DISABLED, 1),
-    VALUE(RESIZE_FONT, 2),
-    VALUE(RESIZE_EITHER, 3),
-)
+CONF_ENUM_BEGIN(resize_effect)
+    VALUE(RESIZE_TERM, 0)
+    VALUE(RESIZE_DISABLED, 1)
+    VALUE(RESIZE_FONT, 2)
+    VALUE(RESIZE_EITHER, 3)
+CONF_ENUM_END(resize_effect)
 
-CONF_ENUM(font_quality,
-    VALUE(FQ_DEFAULT, 0),
-    VALUE(FQ_ANTIALIASED, 1),
-    VALUE(FQ_NONANTIALIASED, 2),
-    VALUE(FQ_CLEARTYPE, 3),
-)
+CONF_ENUM_BEGIN(font_quality)
+    VALUE(FQ_DEFAULT, 0)
+    VALUE(FQ_ANTIALIASED, 1)
+    VALUE(FQ_NONANTIALIASED, 2)
+    VALUE(FQ_CLEARTYPE, 3)
+CONF_ENUM_END(font_quality)
 
-CONF_ENUM(log_type,
-    VALUE(LGTYP_NONE, 0),
-    VALUE(LGTYP_ASCII, 1),
-    VALUE(LGTYP_DEBUG, 2),
-    VALUE(LGTYP_PACKETS, 3),
-    VALUE(LGTYP_SSHRAW, 4),
-)
+CONF_ENUM_BEGIN(log_type)
+    VALUE(LGTYP_NONE, 0)
+    VALUE(LGTYP_ASCII, 1)
+    VALUE(LGTYP_DEBUG, 2)
+    VALUE(LGTYP_PACKETS, 3)
+    VALUE(LGTYP_SSHRAW, 4)
+CONF_ENUM_END(log_type)
 
-CONF_ENUM(log_to_existing_file,
-    VALUE(LGXF_OVR, 1),
-    VALUE(LGXF_APN, 0),
-    VALUE(LGXF_ASK, -1),
-)
+CONF_ENUM_BEGIN(log_to_existing_file)
+    VALUE(LGXF_OVR, 1)
+    VALUE(LGXF_APN, 0)
+    VALUE(LGXF_ASK, -1)
+CONF_ENUM_END(log_to_existing_file)
 
-CONF_ENUM(bold_style,
-    VALUE(BOLD_STYLE_FONT, 0),
-    VALUE(BOLD_STYLE_COLOUR, 1),
-    VALUE(BOLD_STYLE_FONT | BOLD_STYLE_COLOUR, 2),
-)
+CONF_ENUM_BEGIN(bold_style)
+    VALUE(BOLD_STYLE_FONT, 0)
+    VALUE(BOLD_STYLE_COLOUR, 1)
+    VALUE(BOLD_STYLE_FONT | BOLD_STYLE_COLOUR, 2)
+CONF_ENUM_END(bold_style)
 
-CONF_ENUM(mouse_buttons,
-    VALUE(MOUSE_COMPROMISE, 0),
-    VALUE(MOUSE_XTERM, 1),
-    VALUE(MOUSE_WINDOWS, 2),
-)
+CONF_ENUM_BEGIN(mouse_buttons)
+    VALUE(MOUSE_COMPROMISE, 0)
+    VALUE(MOUSE_XTERM, 1)
+    VALUE(MOUSE_WINDOWS, 2)
+CONF_ENUM_END(mouse_buttons)
 
-CONF_ENUM(line_drawing,
-    VALUE(VT_XWINDOWS, 0),
-    VALUE(VT_OEMANSI, 1),
-    VALUE(VT_OEMONLY, 2),
-    VALUE(VT_POORMAN, 3),
-    VALUE(VT_UNICODE, 4),
-)
+CONF_ENUM_BEGIN(line_drawing)
+    VALUE(VT_XWINDOWS, 0)
+    VALUE(VT_OEMANSI, 1)
+    VALUE(VT_OEMONLY, 2)
+    VALUE(VT_POORMAN, 3)
+    VALUE(VT_UNICODE, 4)
+CONF_ENUM_END(line_drawing)
 
-CONF_ENUM(x11_auth,
-    VALUE(X11_NO_AUTH, 0),
-    VALUE(X11_MIT, 1),
-    VALUE(X11_XDM, 2),
-)
+CONF_ENUM_BEGIN(x11_auth)
+    VALUE(X11_NO_AUTH, 0)
+    VALUE(X11_MIT, 1)
+    VALUE(X11_XDM, 2)
+CONF_ENUM_END(x11_auth)

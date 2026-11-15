@@ -36,13 +36,13 @@ struct mlkem_params {
  * Specific parameter sets.
  */
 const mlkem_params mlkem_params_512 = {
-    .k = 2, .eta_1 = 3, .eta_2 = 2, .d_u = 10, .d_v = 4,
+    /* .k = */ 2, /* .eta_1 = */ 3, /* .eta_2 = */ 2, /* .d_u = */ 10, /* .d_v = */ 4,
 };
 const mlkem_params mlkem_params_768 = {
-    .k = 3, .eta_1 = 2, .eta_2 = 2, .d_u = 10, .d_v = 4,
+    /* .k = */ 3, /* .eta_1 = */ 2, /* .eta_2 = */ 2, /* .d_u = */ 10, /* .d_v = */ 4,
 };
 const mlkem_params mlkem_params_1024 = {
-    .k = 4, .eta_1 = 2, .eta_2 = 2, .d_u = 11, .d_v = 5,
+    /* .k = */ 4, /* .eta_1 = */ 2, /* .eta_2 = */ 2, /* .d_u = */ 11, /* .d_v = */ 5,
 };
 #define KMAX 4
 
@@ -117,13 +117,16 @@ static const uint16_t powers_odd_reversed_order[128] = {
  */
 static void mlkem_ntt(uint16_t *v)
 {
-    const uint64_t Qrecip = reciprocal_for_reduction(Q);
+    const uint32_t Qrecip = reciprocal_for_reduction(Q);
     size_t next_power = 1;
+    size_t len;
 
-    for (size_t len = 128; len >= 2; len /= 2) {
-        for (size_t start = 0; start < 256; start += 2*len) {
+    for (len = 128; len >= 2; len /= 2) {
+        size_t start;
+        for (start = 0; start < 256; start += 2*len) {
             uint16_t mult = powers_reversed_order[next_power++];
-            for (size_t j = start; j < start + len; j++) {
+            size_t j;
+            for (j = start; j < start + len; j++) {
                 uint16_t t = reduce(mult * v[j + len], Q, Qrecip);
                 v[j + len] = reduce(v[j] + Q - t, Q, Qrecip);
                 v[j] = reduce(v[j] + t, Q, Qrecip);
@@ -137,13 +140,17 @@ static void mlkem_ntt(uint16_t *v)
  */
 static void mlkem_inverse_ntt(uint16_t *v)
 {
-    const uint64_t Qrecip = reciprocal_for_reduction(Q);
+    const uint32_t Qrecip = reciprocal_for_reduction(Q);
     size_t next_power = 127;
+    size_t len;
+    size_t i;
 
-    for (size_t len = 2; len <= 128; len *= 2) {
-        for (size_t start = 0; start < 256; start += 2*len) {
+    for (len = 2; len <= 128; len *= 2) {
+        size_t start;
+        for (start = 0; start < 256; start += 2*len) {
             uint16_t mult = powers_reversed_order[next_power--];
-            for (size_t j = start; j < start + len; j++) {
+            size_t j;
+            for (j = start; j < start + len; j++) {
                 uint16_t t = v[j];
                 v[j] = reduce(t + v[j + len], Q, Qrecip);
                 v[j + len] = reduce(mult * (v[j + len] + Q - t), Q, Qrecip);
@@ -151,7 +158,7 @@ static void mlkem_inverse_ntt(uint16_t *v)
         }
     }
 
-    for (size_t i = 0; i < 256; i++)
+    for (i = 0; i < 256; i++)
         v[i] = reduce(v[i] * 3303, Q, Qrecip);
 }
 
@@ -164,9 +171,10 @@ static void mlkem_inverse_ntt(uint16_t *v)
 static void mlkem_multiply_ntts(
     uint16_t *out, const uint16_t *a, const uint16_t *b)
 {
-    const uint64_t Qrecip = reciprocal_for_reduction(Q);
+    const uint32_t Qrecip = reciprocal_for_reduction(Q);
+    size_t i;
 
-    for (size_t i = 0; i < 128; i++) {
+    for (i = 0; i < 128; i++) {
         uint16_t a0 = a[2*i], a1 = a[2*i+1];
         uint16_t b0 = b[2*i], b1 = b[2*i+1];
         uint16_t mult = powers_odd_reversed_order[i];
@@ -227,6 +235,7 @@ static void mlkem_matrix_alloc(mlkem_matrix_storage *storage, ...)
 {
     va_list ap;
     mlkem_matrix *m;
+    size_t pos;
 
     storage->n = 0;
     va_start(ap, storage);
@@ -237,7 +246,7 @@ static void mlkem_matrix_alloc(mlkem_matrix_storage *storage, ...)
     va_end(ap);
 
     storage->data = snewn(256 * storage->n, uint16_t);
-    size_t pos = 0;
+    pos = 0;
     va_start(ap, storage);
     while ((m = va_arg(ap, mlkem_matrix *)) != NULL) {
         int nrows = va_arg(ap, int), ncols = va_arg(ap, int);
@@ -260,19 +269,22 @@ static void mlkem_matrix_storage_free(mlkem_matrix_storage *storage)
 static void mlkem_matrix_add(mlkem_matrix *out, const mlkem_matrix *left,
                              const mlkem_matrix *right)
 {
-    const uint64_t Qrecip = reciprocal_for_reduction(Q);
+    const uint32_t Qrecip = reciprocal_for_reduction(Q);
+    size_t i;
 
     assert(out->nrows == left->nrows);
     assert(out->ncols == left->ncols);
     assert(out->nrows == right->nrows);
     assert(out->ncols == right->ncols);
 
-    for (size_t i = 0; i < out->nrows; i++) {
-        for (size_t j = 0; j < out->ncols; j++) {
+    for (i = 0; i < out->nrows; i++) {
+        size_t j;
+        for (j = 0; j < out->ncols; j++) {
             const uint16_t *lv = left->data + 256*(i * left->ncols + j);
             const uint16_t *rv = right->data + 256*(i * right->ncols + j);
             uint16_t *ov = out->data + 256*(i * out->ncols + j);
-            for (size_t p = 0; p < 256; p++)
+            size_t p;
+            for (p = 0; p < 256; p++)
                 ov[p] = reduce(lv[p] + rv[p] , Q, Qrecip);
         }
     }
@@ -282,19 +294,22 @@ static void mlkem_matrix_add(mlkem_matrix *out, const mlkem_matrix *left,
 static void mlkem_matrix_sub(mlkem_matrix *out, const mlkem_matrix *left,
                              const mlkem_matrix *right)
 {
-    const uint64_t Qrecip = reciprocal_for_reduction(Q);
+    const uint32_t Qrecip = reciprocal_for_reduction(Q);
+    size_t i;
 
     assert(out->nrows == left->nrows);
     assert(out->ncols == left->ncols);
     assert(out->nrows == right->nrows);
     assert(out->ncols == right->ncols);
 
-    for (size_t i = 0; i < out->nrows; i++) {
-        for (size_t j = 0; j < out->ncols; j++) {
+    for (i = 0; i < out->nrows; i++) {
+        size_t j;
+        for (j = 0; j < out->ncols; j++) {
             const uint16_t *lv = left->data + 256*(i * left->ncols + j);
             const uint16_t *rv = right->data + 256*(i * right->ncols + j);
             uint16_t *ov = out->data + 256*(i * out->ncols + j);
-            for (size_t p = 0; p < 256; p++)
+            size_t p;
+            for (p = 0; p < 256; p++)
                 ov[p] = reduce(lv[p] + Q - rv[p] , Q, Qrecip);
         }
     }
@@ -303,14 +318,16 @@ static void mlkem_matrix_sub(mlkem_matrix *out, const mlkem_matrix *left,
 /* Convert every element of a matrix into NTT representation. */
 static void mlkem_matrix_ntt(mlkem_matrix *m)
 {
-    for (size_t i = 0; i < m->nrows * m->ncols; i++)
+    size_t i;
+    for (i = 0; i < m->nrows * m->ncols; i++)
         mlkem_ntt(m->data + i * 256);
 }
 
 /* Convert every element of a matrix out of NTT representation. */
 static void mlkem_matrix_inverse_ntt(mlkem_matrix *m)
 {
-    for (size_t i = 0; i < m->nrows * m->ncols; i++)
+    size_t i;
+    for (i = 0; i < m->nrows * m->ncols; i++)
         mlkem_inverse_ntt(m->data + i * 256);
 }
 
@@ -327,27 +344,31 @@ static void mlkem_matrix_inverse_ntt(mlkem_matrix *m)
 static void mlkem_matrix_mul(mlkem_matrix *out, const mlkem_matrix *left,
                              const mlkem_matrix *right, bool left_transposed)
 {
-    const uint64_t Qrecip = reciprocal_for_reduction(Q);
+    const uint32_t Qrecip = reciprocal_for_reduction(Q);
     size_t left_nrows = (left_transposed ? left->ncols : left->nrows);
     size_t left_ncols = (left_transposed ? left->nrows : left->ncols);
+    uint16_t work[256];
+    size_t i;
 
     assert(out->nrows == left_nrows);
     assert(left_ncols == right->nrows);
     assert(right->ncols == out->ncols);
 
-    uint16_t work[256];
 
-    for (size_t i = 0; i < out->nrows; i++) {
-        for (size_t j = 0; j < out->ncols; j++) {
+    for (i = 0; i < out->nrows; i++) {
+        size_t j;
+        for (j = 0; j < out->ncols; j++) {
             uint16_t *thisout = out->data + 256 * (i * out->ncols + j);
+            size_t k;
             memset(thisout, 0, 256 * sizeof(uint16_t));
-            for (size_t k = 0; k < right->nrows; k++) {
+            for (k = 0; k < right->nrows; k++) {
                 size_t left_index = left_transposed ?
                     k * left->ncols + i : i * left->ncols + k;
                 const uint16_t *lv = left->data + 256*left_index;
                 const uint16_t *rv = right->data + 256*(k * right->ncols + j);
+                size_t p;
                 mlkem_multiply_ntts(work, lv, rv);
-                for (size_t p = 0; p < 256; p++)
+                for (p = 0; p < 256; p++)
                     thisout[p] = reduce(thisout[p] + work[p], Q, Qrecip);
             }
         }
@@ -374,8 +395,10 @@ static void mlkem_sample_ntt(uint16_t *output, ptrlen seed); /* forward ref */
  */
 static void mlkem_matrix_from_seed(mlkem_matrix *m, const void *rho)
 {
-    for (unsigned r = 0; r < m->nrows; r++) {
-        for (unsigned c = 0; c < m->ncols; c++) {
+    unsigned r;
+    for (r = 0; r < m->nrows; r++) {
+        unsigned c;
+        for (c = 0; c < m->ncols; c++) {
             unsigned char seedbuf[34];
             memcpy(seedbuf, rho, 32);
             seedbuf[32] = c;
@@ -404,13 +427,17 @@ static void mlkem_sample_ntt(uint16_t *output, ptrlen seed)
 {
     ShakeXOF *sx = shake128_xof_from_input(seed);
     unsigned char bytebuf[4];
+    size_t pos;
     bytebuf[3] = '\0';
 
-    for (size_t pos = 0; pos < 256 ;) {
+    for (pos = 0; pos < 256 ;) {
+        uint32_t random24;
+        uint16_t d1;
+        uint16_t d2;
         /* Read 3 bytes into the low-order end of bytebuf. The fourth
          * byte is always 0, so this gives us a random 24-bit integer. */
         shake_xof_read(sx, &bytebuf, 3);
-        uint32_t random24 = GET_32BIT_LSB_FIRST(bytebuf);
+        random24 = GET_32BIT_LSB_FIRST(bytebuf);
 
         /*
          * Split that integer up into two 12-bit ones, and use each
@@ -422,8 +449,8 @@ static void mlkem_sample_ntt(uint16_t *output, ptrlen seed)
          * control flow here without worrying about giving away
          * secrets.
          */
-        uint16_t d1 = random24 & 0xFFF;
-        uint16_t d2 = random24 >> 12;
+        d1 = random24 & 0xFFF;
+        d2 = random24 >> 12;
         if (d1 < Q)
             output[pos++] = d1;
         if (d2 < Q && pos < 256)
@@ -447,26 +474,31 @@ static void mlkem_sample_ntt(uint16_t *output, ptrlen seed)
 static void mlkem_matrix_poly_cbd(
     mlkem_matrix *v, int eta, const void *sigma, int offset)
 {
-    const uint64_t Qrecip = reciprocal_for_reduction(Q);
+    const uint32_t Qrecip = reciprocal_for_reduction(Q);
 
     unsigned char seedbuf[33];
+    unsigned char *randombuf;
+    unsigned r;
     memcpy(seedbuf, sigma, 32);
 
-    unsigned char *randombuf = snewn(eta * 64, unsigned char);
+    randombuf = snewn(eta * 64, unsigned char);
 
-    for (unsigned r = 0; r < v->nrows * v->ncols; r++) {
+    for (r = 0; r < v->nrows * v->ncols; r++) {
+        ShakeXOF *sx;
+        size_t i;
         seedbuf[32] = r + offset;
-        ShakeXOF *sx = shake256_xof_from_input(make_ptrlen(seedbuf, 33));
+        sx = shake256_xof_from_input(make_ptrlen(seedbuf, 33));
         shake_xof_read(sx, randombuf, eta * 64);
         shake_xof_free(sx);
 
-        for (size_t i = 0; i < 256; i++) {
+        for (i = 0; i < 256; i++) {
             unsigned x = 0, y = 0;
-            for (size_t j = 0; j < eta; j++) {
+            size_t j;
+            for (j = 0; j < eta; j++) {
                 size_t bitpos = 2 * i * eta + j;
                 x += 1 & ((randombuf[bitpos >> 3]) >> (bitpos & 7));
             }
-            for (size_t j = 0; j < eta; j++) {
+            for (j = 0; j < eta; j++) {
                 size_t bitpos = 2 * i * eta + eta + j;
                 y += 1 & ((randombuf[bitpos >> 3]) >> (bitpos & 7));
             }
@@ -499,7 +531,8 @@ static void mlkem_byte_encode_lossless(
 {
     unsigned char *out = (unsigned char *)outv;
     uint32_t buffer = 0, bufbits = 0;
-    for (size_t i = 0; i < 256*n; i++) {
+    size_t i;
+    for (i = 0; i < 256*n; i++) {
         buffer |= (uint32_t) in[i] << bufbits;
         bufbits += 12;
         while (bufbits >= 8) {
@@ -524,7 +557,8 @@ static bool mlkem_byte_decode_lossless(
 {
     const unsigned char *in = (const unsigned char *)inv;
     uint32_t buffer = 0, bufbits = 0;
-    for (size_t i = 0; i < 384*n; i++) {
+    size_t i;
+    for (i = 0; i < 384*n; i++) {
         buffer |= (uint32_t) in[i] << bufbits;
         bufbits += 8;
         while (bufbits >= 12) {
@@ -553,11 +587,12 @@ static bool mlkem_byte_decode_lossless(
 static void mlkem_byte_encode_compressed(
     void *outv, const uint16_t *in, unsigned d, size_t n)
 {
-    const uint64_t Qrecip = reciprocal_for_reduction(2*Q);
+    const uint32_t Qrecip = reciprocal_for_reduction(2*Q);
 
     unsigned char *out = (unsigned char *)outv;
     uint32_t buffer = 0, bufbits = 0;
-    for (size_t i = 0; i < 256*n; i++) {
+    size_t i;
+    for (i = 0; i < 256*n; i++) {
         uint32_t dividend = ((uint32_t)in[i] << (d+1)) + Q;
         uint32_t quotient;
         reduce_with_quot(dividend, &quotient, 2*Q, Qrecip);
@@ -591,7 +626,8 @@ static void mlkem_byte_decode_compressed(
 {
     const unsigned char *in = (const unsigned char *)inv;
     uint32_t buffer = 0, bufbits = 0;
-    for (size_t i = 0; i < 32*d*n; i++) {
+    size_t i;
+    for (i = 0; i < 32*d*n; i++) {
         buffer |= (uint32_t) in[i] << bufbits;
         bufbits += 8;
         while (bufbits >= d) {
@@ -618,6 +654,12 @@ void mlkem_keygen_rho_sigma(
 {
     mlkem_matrix_storage storage[1];
     mlkem_matrix a[1], s[1], e[1], t[1];
+    unsigned char ek[1568];
+    size_t eklen;
+    unsigned char dk[1536];
+    size_t dklen;
+    ssh_hash *h;
+    unsigned char ekhash[32];
     mlkem_matrix_alloc(storage,
                        a, params->k, params->k,
                        s, params->k, 1,
@@ -650,19 +692,17 @@ void mlkem_keygen_rho_sigma(
      * The encryption key is the vector t, plus the random seed rho
      * from which anyone can reconstruct the matrix A.
      */
-    unsigned char ek[1568];
     mlkem_byte_encode_lossless(ek, t->data, params->k);
     memcpy(ek + 384 * params->k, rho, 32);
-    size_t eklen = 384 * params->k + 32;
+    eklen = 384 * params->k + 32;
     put_data(ek_out, ek, eklen);
 
     /*
      * The decryption key (for the internal "K-PKE" public-key system)
      * is the vector s.
      */
-    unsigned char dk[1536];
     mlkem_byte_encode_lossless(dk, s->data, params->k);
-    size_t dklen = 384 * params->k;
+    dklen = 384 * params->k;
 
     /*
      * The decapsulation key, for the full ML-KEM, consists of
@@ -677,9 +717,8 @@ void mlkem_keygen_rho_sigma(
      */
     put_data(dk_out, dk, dklen);
     put_data(dk_out, ek, eklen);
-    ssh_hash *h = ssh_hash_new(&ssh_sha3_256);
+    h = ssh_hash_new(&ssh_sha3_256);
     put_data(h, ek, eklen);
-    unsigned char ekhash[32];
     ssh_hash_final(h, ekhash);
     put_data(dk_out, ekhash, 32);
     put_data(dk_out, z, 32);
@@ -732,6 +771,12 @@ bool mlkem_encaps_internal(
 {
     mlkem_matrix_storage storage[1];
     mlkem_matrix t[1], a[1], y[1], e1[1], e2[1], mu[1], u[1], v[1];
+    unsigned char kr[64];
+    unsigned char ekhash[32];
+    ssh_hash *h;
+    const unsigned char *k;
+    const unsigned char *r;
+    char c[1568];
     mlkem_matrix_alloc(storage,
                        t, params->k, 1,
                        a, params->k, params->k,
@@ -768,9 +813,6 @@ bool mlkem_encaps_internal(
      * the output shared secret, plus some randomness for making up
      * the vectors below.
      */
-    unsigned char kr[64];
-    unsigned char ekhash[32];
-    ssh_hash *h;
     /* Hash the encryption key */
     h = ssh_hash_new(&ssh_sha3_256);
     put_datapl(h, ek);
@@ -780,7 +822,8 @@ bool mlkem_encaps_internal(
     put_data(h, m, 32);
     put_data(h, ekhash, 32);
     ssh_hash_final(h, kr);
-    const unsigned char *k = kr, *r = kr + 32;
+    k = kr;
+    r = kr + 32;
 
     /*
      * Invent random k-element vectors y and e1, and a random scalar
@@ -841,7 +884,6 @@ bool mlkem_encaps_internal(
      * The ciphertext consists of u and v, both encoded lossily, with
      * different numbers of bits retained per element.
      */
-    char c[1568];
     mlkem_byte_encode_compressed(c, u->data, params->d_u, params->k);
     mlkem_byte_encode_compressed(c + 32 * params->k * params->d_u,
                                  v->data, params->d_v, 1);
@@ -866,8 +908,9 @@ bool mlkem_encaps(BinarySink *ciphertext, BinarySink *kout,
                   const mlkem_params *params, ptrlen ek)
 {
     unsigned char m[32];
+    bool success;
     random_read(m, 32);
-    bool success = mlkem_encaps_internal(ciphertext, kout, params, ek, m);
+    success = mlkem_encaps_internal(ciphertext, kout, params, ek, m);
     smemclr(m, sizeof(m));
     return success;
 }
@@ -878,6 +921,26 @@ bool mlkem_encaps(BinarySink *ciphertext, BinarySink *kout,
 bool mlkem_decaps(BinarySink *k_out, const mlkem_params *params,
                   ptrlen dk, ptrlen c)
 {
+    const unsigned char *dkp;
+    const unsigned char *cp;
+    ptrlen ek;
+    ssh_hash *h;
+    unsigned char ekhash[32];
+    mlkem_matrix_storage storage[1];
+    mlkem_matrix u[1];
+    mlkem_matrix v[1];
+    mlkem_matrix s[1];
+    mlkem_matrix w[1];
+    unsigned char m[32];
+    unsigned char c_regen[1568];
+    unsigned char k[32];
+    buffer_sink c_sink[1];
+    buffer_sink k_sink[1];
+    bool success;
+    unsigned char k_reject[32];
+    unsigned match;
+    unsigned mask;
+    size_t i;
     /*
      * Validation: check the input strings are the right lengths.
      */
@@ -890,19 +953,15 @@ bool mlkem_decaps(BinarySink *k_out, const mlkem_params *params,
      * Further validation: extract the encryption key from the middle
      * of dk, hash it, and check the hash matches.
      */
-    const unsigned char *dkp = (const unsigned char *)dk.ptr;
-    const unsigned char *cp = (const unsigned char *)c.ptr;
-    ptrlen ek = make_ptrlen(dkp + 384*params->k, 384*params->k + 32);
-    ssh_hash *h;
-    unsigned char ekhash[32];
+    dkp = (const unsigned char *)dk.ptr;
+    cp = (const unsigned char *)c.ptr;
+    ek = make_ptrlen(dkp + 384*params->k, 384*params->k + 32);
     h = ssh_hash_new(&ssh_sha3_256);
     put_datapl(h, ek);
     ssh_hash_final(h, ekhash);
     if (!smemeq(ekhash, dkp + 768*params->k + 32, 32))
         return false;
 
-    mlkem_matrix_storage storage[1];
-    mlkem_matrix u[1], v[1], s[1], w[1];
     mlkem_matrix_alloc(storage,
                        u, params->k, 1,
                        v, 1, 1,
@@ -954,7 +1013,6 @@ bool mlkem_decaps(BinarySink *k_out, const mlkem_params *params,
      * that makes you not worry about spontaneous hash collisions),
      * but it's not actually impossible.
      */
-    unsigned char m[32];
     mlkem_byte_encode_compressed(m, w->data, 1, 1);
 
     /*
@@ -967,11 +1025,9 @@ bool mlkem_decaps(BinarySink *k_out, const mlkem_params *params,
      * This is also where we get the output secret k from: the
      * encapsulation function creates it as half of the hash of m.
      */
-    unsigned char c_regen[1568], k[32];
-    buffer_sink c_sink[1], k_sink[1];
     buffer_sink_init(c_sink, c_regen, sizeof(c_regen));
     buffer_sink_init(k_sink, k, sizeof(k));
-    bool success = mlkem_encaps_internal(
+    success = mlkem_encaps_internal(
         BinarySink_UPCAST(c_sink), BinarySink_UPCAST(k_sink), params, ek, m);
     /* If any application of ML-KEM uses a dk given to it by someone
      * else, then perhaps they have to worry about being given an
@@ -990,7 +1046,6 @@ bool mlkem_decaps(BinarySink *k_out, const mlkem_params *params,
      * k_reject is that secret; for constant-time reasons we generate
      * it unconditionally.
      */
-    unsigned char k_reject[32];
     h = ssh_hash_new(&ssh_shake256_32bytes);
     put_data(h, dkp + 768 * params->k + 64, 32);
     put_datapl(h, c);
@@ -1000,9 +1055,9 @@ bool mlkem_decaps(BinarySink *k_out, const mlkem_params *params,
      * Now replace k with k_reject if the ciphertexts didn't match.
      */
     assert((void *)c_sink->out == (void *)(c_regen + c.len));
-    unsigned match = smemeq(c.ptr, c_regen, c.len);
-    unsigned mask = match - 1;
-    for (size_t i = 0; i < 32; i++)
+    match = smemeq(c.ptr, c_regen, c.len);
+    mask = match - 1;
+    for (i = 0; i < 32; i++)
         k[i] ^= mask & (k[i] ^ k_reject[i]);
 
     /*
@@ -1057,34 +1112,34 @@ static void mlkem_vt_free_dk(pq_kem_dk *dk)
 }
 
 const pq_kemalg ssh_mlkem512 = {
-    .keygen = mlkem_vt_keygen,
-    .encaps = mlkem_vt_encaps,
-    .decaps = mlkem_vt_decaps,
-    .free_dk = mlkem_vt_free_dk,
-    .extra = &mlkem_params_512,
-    .description = "ML-KEM-512",
-    .ek_len = 384 * 2 + 32,
-    .c_len = 32 * (10 * 2 + 4),
+    /* .keygen = */ mlkem_vt_keygen,
+    /* .encaps = */ mlkem_vt_encaps,
+    /* .decaps = */ mlkem_vt_decaps,
+    /* .free_dk = */ mlkem_vt_free_dk,
+    /* .extra = */ &mlkem_params_512,
+    /* .description = */ "ML-KEM-512",
+    /* .ek_len = */ 384 * 2 + 32,
+    /* .c_len = */ 32 * (10 * 2 + 4),
 };
 
 const pq_kemalg ssh_mlkem768 = {
-    .keygen = mlkem_vt_keygen,
-    .encaps = mlkem_vt_encaps,
-    .decaps = mlkem_vt_decaps,
-    .free_dk = mlkem_vt_free_dk,
-    .extra = &mlkem_params_768,
-    .description = "ML-KEM-768",
-    .ek_len = 384 * 3 + 32,
-    .c_len = 32 * (10 * 3 + 4),
+    /* .keygen = */ mlkem_vt_keygen,
+    /* .encaps = */ mlkem_vt_encaps,
+    /* .decaps = */ mlkem_vt_decaps,
+    /* .free_dk = */ mlkem_vt_free_dk,
+    /* .extra = */ &mlkem_params_768,
+    /* .description = */ "ML-KEM-768",
+    /* .ek_len = */ 384 * 3 + 32,
+    /* .c_len = */ 32 * (10 * 3 + 4),
 };
 
 const pq_kemalg ssh_mlkem1024 = {
-    .keygen = mlkem_vt_keygen,
-    .encaps = mlkem_vt_encaps,
-    .decaps = mlkem_vt_decaps,
-    .free_dk = mlkem_vt_free_dk,
-    .extra = &mlkem_params_1024,
-    .description = "ML-KEM-1024",
-    .ek_len = 384 * 4 + 32,
-    .c_len = 32 * (11 * 4 + 5),
+    /* .keygen = */ mlkem_vt_keygen,
+    /* .encaps = */ mlkem_vt_encaps,
+    /* .decaps = */ mlkem_vt_decaps,
+    /* .free_dk = */ mlkem_vt_free_dk,
+    /* .extra = */ &mlkem_params_1024,
+    /* .description = */ "ML-KEM-1024",
+    /* .ek_len = */ 384 * 4 + 32,
+    /* .c_len = */ 32 * (11 * 4 + 5),
 };

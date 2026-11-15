@@ -32,13 +32,13 @@ static bool ssh_decomp_none_block(ssh_decompressor *handle,
     return false;
 }
 const ssh_compression_alg ssh_comp_none = {
-    .name = "none",
-    .delayed_name = NULL,
-    .compress_new = ssh_comp_none_init,
-    .compress_free = ssh_comp_none_cleanup,
-    .compress = ssh_comp_none_block,
-    .decompress_new = ssh_decomp_none_init,
-    .decompress_free = ssh_decomp_none_cleanup,
-    .decompress = ssh_decomp_none_block,
-    .text_name = NULL,
+    /* .name = */ "none",
+    /* .delayed_name = */ NULL,
+    /* .compress_new = */ ssh_comp_none_init,
+    /* .compress_free = */ ssh_comp_none_cleanup,
+    /* .compress = */ ssh_comp_none_block,
+    /* .decompress_new = */ ssh_decomp_none_init,
+    /* .decompress_free = */ ssh_decomp_none_cleanup,
+    /* .decompress = */ ssh_decomp_none_block,
+    /* .text_name = */ NULL,
 };

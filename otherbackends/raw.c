@@ -117,10 +117,10 @@ static void raw_sent(Plug *plug, size_t bufsize)
 }
 
 static const PlugVtable Raw_plugvt = {
-    .log = raw_log,
-    .closing = raw_closing,
-    .receive = raw_receive,
-    .sent = raw_sent,
+    /* .log = */ raw_log,
+    /* .closing = */ raw_closing,
+    /* .receive = */ raw_receive,
+    /* .sent = */ raw_sent,
 };
 
 static char *raw_description(Interactor *itr)
@@ -148,10 +148,10 @@ static void raw_set_seat(Interactor *itr, Seat *seat)
 }
 
 static const InteractorVtable Raw_interactorvt = {
-    .description = raw_description,
-    .logpolicy = raw_logpolicy,
-    .get_seat = raw_get_seat,
-    .set_seat = raw_set_seat,
+    /* .description = */ raw_description,
+    /* .logpolicy = */ raw_logpolicy,
+    /* .get_seat = */ raw_get_seat,
+    /* .set_seat = */ raw_set_seat,
 };
 
 /*
@@ -357,24 +357,26 @@ static int raw_cfg_info(Backend *be)
 }
 
 const BackendVtable raw_backend = {
-    .init = raw_init,
-    .free = raw_free,
-    .reconfig = raw_reconfig,
-    .send = raw_send,
-    .sendbuffer = raw_sendbuffer,
-    .size = raw_size,
-    .special = raw_special,
-    .get_specials = raw_get_specials,
-    .connected = raw_connected,
-    .exitcode = raw_exitcode,
-    .sendok = raw_sendok,
-    .ldisc_option_state = raw_ldisc,
-    .provide_ldisc = raw_provide_ldisc,
-    .unthrottle = raw_unthrottle,
-    .cfg_info = raw_cfg_info,
-    .id = "raw",
-    .displayname_tc = "Raw",
-    .displayname_lc = "raw",
-    .protocol = PROT_RAW,
-    .default_port = 0,
+    /* .init = */ raw_init,
+    /* .free = */ raw_free,
+    /* .reconfig = */ raw_reconfig,
+    /* .send = */ raw_send,
+    /* .sendbuffer = */ raw_sendbuffer,
+    /* .size = */ raw_size,
+    /* .special = */ raw_special,
+    /* .get_specials = */ raw_get_specials,
+    /* .connected = */ raw_connected,
+    /* .exitcode = */ raw_exitcode,
+    /* .sendok = */ raw_sendok,
+    /* .ldisc_option_state = */ raw_ldisc,
+    /* .provide_ldisc = */ raw_provide_ldisc,
+    /* .unthrottle = */ raw_unthrottle,
+    /* .cfg_info = */ raw_cfg_info,
+    /* .test_for_upstream = */ NULL,
+    /* .close_warn_text = */ NULL,
+    /* .id = */ "raw",
+    /* .displayname_tc = */ "Raw",
+    /* .displayname_lc = */ "raw",
+    /* .protocol = */ PROT_RAW,
+    /* .default_port = */ 0,
 };

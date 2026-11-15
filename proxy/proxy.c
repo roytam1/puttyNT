@@ -226,8 +226,9 @@ static void proxy_negotiate(ProxySocket *ps)
     }
 
     if (ps->pn->reconnect) {
+        SockAddr *proxy_addr;
         sk_close(ps->sub_socket);
-        SockAddr *proxy_addr = sk_addr_dup(ps->proxy_addr);
+        proxy_addr = sk_addr_dup(ps->proxy_addr);
         ps->sub_socket = sk_new(proxy_addr, ps->proxy_port,
                                 ps->proxy_privport, ps->proxy_oobinline,
                                 ps->proxy_nodelay, ps->proxy_keepalive,
@@ -430,22 +431,22 @@ static SocketEndpointInfo *sk_proxy_endpoint_info(Socket *s, bool peer)
 }
 
 static const SocketVtable ProxySocket_sockvt = {
-    .plug = sk_proxy_plug,
-    .close = sk_proxy_close,
-    .write = sk_proxy_write,
-    .write_oob = sk_proxy_write_oob,
-    .write_eof = sk_proxy_write_eof,
-    .set_frozen = sk_proxy_set_frozen,
-    .socket_error = sk_proxy_socket_error,
-    .endpoint_info = sk_proxy_endpoint_info,
+    /* .plug = */ sk_proxy_plug,
+    /* .close = */ sk_proxy_close,
+    /* .write = */ sk_proxy_write,
+    /* .write_oob = */ sk_proxy_write_oob,
+    /* .write_eof = */ sk_proxy_write_eof,
+    /* .set_frozen = */ sk_proxy_set_frozen,
+    /* .socket_error = */ sk_proxy_socket_error,
+    /* .endpoint_info = */ sk_proxy_endpoint_info,
 };
 
 static const PlugVtable ProxySocket_plugvt = {
-    .log = plug_proxy_log,
-    .closing = plug_proxy_closing,
-    .receive = plug_proxy_receive,
-    .sent = plug_proxy_sent,
-    .accepting = plug_proxy_accepting
+    /* .log = */ plug_proxy_log,
+    /* .closing = */ plug_proxy_closing,
+    /* .receive = */ plug_proxy_receive,
+    /* .sent = */ plug_proxy_sent,
+    /* .accepting = */ plug_proxy_accepting
 };
 
 static char *proxy_description(Interactor *itr)
@@ -476,10 +477,10 @@ static void proxy_set_seat(Interactor *itr, Seat *seat)
 }
 
 static const InteractorVtable ProxySocket_interactorvt = {
-    .description = proxy_description,
-    .logpolicy = proxy_logpolicy,
-    .get_seat = proxy_get_seat,
-    .set_seat = proxy_set_seat,
+    /* .description = */ proxy_description,
+    /* .logpolicy = */ proxy_logpolicy,
+    /* .get_seat = */ proxy_get_seat,
+    /* .set_seat = */ proxy_set_seat,
 };
 
 static void proxy_prompts_callback(void *ctx)
@@ -518,6 +519,7 @@ Socket *new_connection(SockAddr *addr, const char *hostname,
         SockAddr *proxy_addr;
         char *proxy_canonical_name;
         Socket *sret;
+        const ProxyNegotiatorVT *vt;
 
         if ((type == PROXY_SSH_TCPIP ||
              type == PROXY_SSH_EXEC ||
@@ -563,7 +565,6 @@ Socket *new_connection(SockAddr *addr, const char *hostname,
             ps->clientseat = interactor_borrow_seat(ps->clientitr);
         }
 
-        const ProxyNegotiatorVT *vt;
         switch (type) {
           case PROXY_HTTP:
             vt = &http_proxy_negotiator_vt;

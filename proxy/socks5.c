@@ -143,7 +143,8 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
 
         {
             bool found = false;
-            for (size_t i = 0; i < s->auth_methods_offered->len; i++)
+            size_t i;
+            for (i = 0; i < s->auth_methods_offered->len; i++)
                 if (s->auth_methods_offered->u[i] == data[1]) {
                     found = true;
                     break;
@@ -227,6 +228,7 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
      * some cases.
      */
     if (s->auth_method == SOCKS5_AUTH_PASSWORD) {
+        unsigned char data[2];
         /*
          * SOCKS 5 password auth packet:
          *
@@ -252,7 +254,6 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
          *   byte      version
          *   byte      0 for success, >0 for failure
          */
-        unsigned char data[2];
         crMaybeWaitUntilV(bufchain_try_fetch_consume(pn->input, data, 2));
 
         if (data[0] != SOCKS5_AUTH_PASSWORD_VERSION) {
@@ -393,26 +394,26 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
 
     switch (sk_addrtype(pn->ps->remote_addr)) {
       case ADDRTYPE_IPV4: {
+        char buf[4];
         /* IPv4: address is 4 raw bytes */
         put_byte(pn->output, SOCKS5_ADDR_IPV4);
-        char buf[4];
         sk_addrcopy(pn->ps->remote_addr, buf);
         put_data(pn->output, buf, sizeof(buf));
         break;
       }
       case ADDRTYPE_IPV6: {
+        char buf[16];
         /* IPv6: address is 16 raw bytes */
         put_byte(pn->output, SOCKS5_ADDR_IPV6);
-        char buf[16];
         sk_addrcopy(pn->ps->remote_addr, buf);
         put_data(pn->output, buf, sizeof(buf));
         break;
       }
       case ADDRTYPE_NAME: {
+        char hostname[512];
         /* Hostname: address is a pstring (Pascal-style string,
          * unterminated but with a one-byte prefix length) */
         put_byte(pn->output, SOCKS5_ADDR_HOSTNAME);
-        char hostname[512];
         sk_getaddr(pn->ps->remote_addr, hostname, lenof(hostname));
         if (!put_pstring(pn->output, hostname)) {
             pn->error = dupstr(
@@ -491,8 +492,8 @@ static void proxy_socks5_process_queue(ProxyNegotiator *pn)
 }
 
 const struct ProxyNegotiatorVT socks5_proxy_negotiator_vt = {
-    .new = proxy_socks5_new,
-    .free = proxy_socks5_free,
-    .process_queue = proxy_socks5_process_queue,
-    .type = "SOCKS 5",
+    /* .new = */ proxy_socks5_new,
+    /* .process_queue = */ proxy_socks5_process_queue,
+    /* .free = */ proxy_socks5_free,
+    /* .type = */ "SOCKS 5",
 };

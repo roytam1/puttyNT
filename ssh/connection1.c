@@ -34,14 +34,14 @@ static void ssh1_connection_special_cmd(PacketProtocolLayer *ppl,
 static void ssh1_connection_reconfigure(PacketProtocolLayer *ppl, Conf *conf);
 
 static const PacketProtocolLayerVtable ssh1_connection_vtable = {
-    .free = ssh1_connection_free,
-    .process_queue = ssh1_connection_process_queue,
-    .get_specials = ssh1_common_get_specials,
-    .special_cmd = ssh1_connection_special_cmd,
-    .reconfigure = ssh1_connection_reconfigure,
-    .queued_data_size = ssh_ppl_default_queued_data_size,
-    .final_output = ssh_ppl_default_final_output,
-    .name = NULL, /* no layer names in SSH-1 */
+    /* .free = */ ssh1_connection_free,
+    /* .process_queue = */ ssh1_connection_process_queue,
+    /* .get_specials = */ ssh1_common_get_specials,
+    /* .special_cmd = */ ssh1_connection_special_cmd,
+    /* .reconfigure = */ ssh1_connection_reconfigure,
+    /* .queued_data_size = */ ssh_ppl_default_queued_data_size,
+    /* .final_output = */ ssh_ppl_default_final_output,
+    /* .name = */ NULL, /* no layer names in SSH-1 */
 };
 
 static void ssh1_rportfwd_remove(
@@ -64,24 +64,31 @@ static bool ssh1_get_wants_user_input(ConnectionLayer *cl);
 static void ssh1_got_user_input(ConnectionLayer *cl);
 
 static const ConnectionLayerVtable ssh1_connlayer_vtable = {
-    .rportfwd_alloc = ssh1_rportfwd_alloc,
-    .rportfwd_remove = ssh1_rportfwd_remove,
-    .lportfwd_open = ssh1_lportfwd_open,
-    .session_open = ssh1_session_open,
-    .serverside_x11_open = ssh1_serverside_x11_open,
-    .serverside_agent_open = ssh1_serverside_agent_open,
-    .add_x11_display = ssh1_add_x11_display,
-    .agent_forwarding_permitted = ssh1_agent_forwarding_permitted,
-    .terminal_size = ssh1_terminal_size,
-    .stdout_unthrottle = ssh1_stdout_unthrottle,
-    .stdin_backlog = ssh1_stdin_backlog,
-    .throttle_all_channels = ssh1_throttle_all_channels,
-    .ldisc_option = ssh1_ldisc_option,
-    .set_ldisc_option = ssh1_set_ldisc_option,
-    .enable_x_fwd = ssh1_enable_x_fwd,
-    .set_wants_user_input = ssh1_set_wants_user_input,
-    .get_wants_user_input = ssh1_get_wants_user_input,
-    .got_user_input = ssh1_got_user_input,
+    /* .rportfwd_alloc = */ ssh1_rportfwd_alloc,
+    /* .rportfwd_remove = */ ssh1_rportfwd_remove,
+    /* .lportfwd_open = */ ssh1_lportfwd_open,
+    /* .session_open = */ ssh1_session_open,
+    /* .serverside_x11_open = */ ssh1_serverside_x11_open,
+    /* .serverside_agent_open = */ ssh1_serverside_agent_open,
+    /* .add_x11_display = */ ssh1_add_x11_display,
+    /* .add_sharing_x11_display = */ NULL,
+    /* .remove_sharing_x11_display = */ NULL,
+    /* .send_packet_from_downstream = */ NULL,
+    /* .alloc_sharing_channel = */ NULL,
+    /* .delete_sharing_channel = */ NULL,
+    /* .sharing_queue_global_request = */ NULL,
+    /* .sharing_no_more_downstreams = */ NULL,
+    /* .agent_forwarding_permitted = */ ssh1_agent_forwarding_permitted,
+    /* .terminal_size = */ ssh1_terminal_size,
+    /* .stdout_unthrottle = */ ssh1_stdout_unthrottle,
+    /* .stdin_backlog = */ ssh1_stdin_backlog,
+    /* .throttle_all_channels = */ ssh1_throttle_all_channels,
+    /* .ldisc_option = */ ssh1_ldisc_option,
+    /* .set_ldisc_option = */ ssh1_set_ldisc_option,
+    /* .enable_x_fwd = */ ssh1_enable_x_fwd,
+    /* .set_wants_user_input = */ ssh1_set_wants_user_input,
+    /* .get_wants_user_input = */ ssh1_get_wants_user_input,
+    /* .got_user_input = */ ssh1_got_user_input,
     /* other methods are NULL */
 };
 
@@ -94,12 +101,12 @@ static Conf *ssh1channel_get_conf(SshChannel *c);
 static void ssh1channel_window_override_removed(SshChannel *c) { /* ignore */ }
 
 static const SshChannelVtable ssh1channel_vtable = {
-    .write = ssh1channel_write,
-    .write_eof = ssh1channel_write_eof,
-    .initiate_close = ssh1channel_initiate_close,
-    .unthrottle = ssh1channel_unthrottle,
-    .get_conf = ssh1channel_get_conf,
-    .window_override_removed = ssh1channel_window_override_removed,
+    /* .write = */ ssh1channel_write,
+    /* .write_eof = */ ssh1channel_write_eof,
+    /* .initiate_close = */ ssh1channel_initiate_close,
+    /* .unthrottle = */ ssh1channel_unthrottle,
+    /* .get_conf = */ ssh1channel_get_conf,
+    /* .window_override_removed = */ ssh1channel_window_override_removed,
     /* everything else is NULL */
 };
 
@@ -204,9 +211,9 @@ static void ssh1_connection_free(PacketProtocolLayer *ppl)
 void ssh1_connection_set_protoflags(PacketProtocolLayer *ppl,
                                     int local, int remote)
 {
+    struct ssh1_connection_state *s;
     assert(ppl->vt == &ssh1_connection_vtable);
-    struct ssh1_connection_state *s =
-        container_of(ppl, struct ssh1_connection_state, ppl);
+    s = container_of(ppl, struct ssh1_connection_state, ppl);
     s->local_protoflags = local;
     s->remote_protoflags = remote;
 }
@@ -435,7 +442,7 @@ static void ssh1_channel_check_close(struct ssh1_channel *c)
 
     if ((!((CLOSES_SENT_CLOSE | CLOSES_RCVD_CLOSE) & ~c->closes) ||
          chan_want_close(c->chan, (c->closes & CLOSES_SENT_CLOSE),
-                         (c->closes & CLOSES_RCVD_CLOSE))) &&
+                         (c->closes & CLOSES_RCVD_CLOSE) != 0)) &&
         !(c->closes & CLOSES_SENT_CLOSECONF)) {
         /*
          * We have both sent and received CLOSE (or the channel type
@@ -497,7 +504,7 @@ static void ssh1_channel_close_local(struct ssh1_channel *c,
     char *msg = chan_log_close_msg(c->chan);
 
     if (msg != NULL) {
-        ppl_logevent("%s%s%s", msg, reason ? " " : "", reason ? reason : "");
+        ppl_logevent(("%s%s%s", msg, reason ? " " : "", reason ? reason : ""));
         sfree(msg);
     }
 
@@ -611,10 +618,11 @@ static size_t ssh1channel_write(
 {
     struct ssh1_channel *c = container_of(sc, struct ssh1_channel, sc);
     struct ssh1_connection_state *s = c->connlayer;
+    PktOut *pktout;
 
     assert(!(c->closes & CLOSES_SENT_CLOSE));
 
-    PktOut *pktout = ssh_bpp_new_pktout(s->ppl.bpp, SSH1_MSG_CHANNEL_DATA);
+    pktout = ssh_bpp_new_pktout(s->ppl.bpp, SSH1_MSG_CHANNEL_DATA);
     put_uint32(pktout, c->remoteid);
     put_string(pktout, buf, len);
     pq_push(s->ppl.out_pq, pktout);
@@ -654,8 +662,8 @@ static SshChannel *ssh1_lportfwd_open(
     c->halfopen = true;
     c->chan = chan;
 
-    ppl_logevent("Opening connection to %s:%d for %s",
-                 hostname, port, description);
+    ppl_logevent(("Opening connection to %s:%d for %s",
+                  hostname, port, description));
 
     pktout = ssh_bpp_new_pktout(s->ppl.bpp, SSH1_MSG_PORT_OPEN);
     put_uint32(pktout, c->localid);

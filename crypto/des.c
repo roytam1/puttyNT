@@ -66,7 +66,7 @@
  * Otherwise this ifdef will condition away all the debug() calls. */
 #ifndef DES_DIAGNOSTICS
 #undef debug
-#define debug(...) ((void)0)
+#define debug(args) ((void)0)
 #endif
 
 /*
@@ -150,40 +150,40 @@ static inline uint32_t ror(uint32_t x, unsigned c)
  * digits together: (e^b),(0^3),(5^7),... = 5,3,2,... And indeed, if
  * you check SGTDES.sboxes[3] you find it ends ... 52 03 e5.
  */
-#define SBOX_ITERATION(X)                       \
-    /*  66  22  44  00      77  33  55  11 */   \
-    X(0xf600970083008500, 0x0e00eb007b002e00)   \
-    X(0xda00e4009000e000, 0xad00e800a700b400)   \
-    X(0x1a009d003f003600, 0xf60054004300cd00)   \
-    X(0xaf00c500e900a900, 0x63003d00f2005900)   \
-    X(0xf300750079001400, 0x80005000a2008900)   \
-    X(0xa100d400d6007b00, 0xd3009000d300e100)   \
-    X(0x450087002600ac00, 0xae003c0031009c00)   \
-    X(0xd000b100b6003600, 0x3e006f0092005900)   \
-    X(0x4d008a0026001000, 0x89007a00b8004a00)   \
-    X(0xca00f5003f00ac00, 0x6f00f0003c009400)   \
-    X(0x92008d0090001000, 0x8c00c600ce004a00)   \
-    X(0xe2005900e9006d00, 0x790078007800fa00)   \
-    X(0x1300b10090008d00, 0xa300170027001800)   \
-    X(0xc70058005f006a00, 0x9c00c100e0006300)   \
-    X(0x9b002000f000f000, 0xf70057001600f900)   \
-    X(0xeb00b0009000af00, 0xa9006300b0005800)   \
-    X(0xa2001d00cf000000, 0x3800b00066000000)   \
-    X(0xf100da007900d000, 0xbc00790094007900)   \
-    X(0x570015001900ad00, 0x6f00ef005100cb00)   \
-    X(0xc3006100e9006d00, 0xc000b700f800f200)   \
-    X(0x1d005800b600d000, 0x67004d00cd002c00)   \
-    X(0xf400b800d600e000, 0x5e00a900b000e700)   \
-    X(0x5400d1003f009c00, 0xc90069002c005300)   \
-    X(0xe200e50060005900, 0x6a00b800c500f200)   \
-    X(0xdf0047007900d500, 0x7000ec004c00ea00)   \
-    X(0x7100d10060009c00, 0x3f00b10095005e00)   \
-    X(0x82008200f0002000, 0x87001d00cd008000)   \
-    X(0xd0007000af00c000, 0xe200be006100f200)   \
-    X(0x8000930060001000, 0x36006e0081001200)   \
-    X(0x6500a300d600ac00, 0xcf003d007d00c000)   \
-    X(0x9000700060009800, 0x62008100ad009200)   \
-    X(0xe000e4003f00f400, 0x5a00ed009000f200)   \
+#define SBOX_ITERATION(X)                                \
+    /*  66  22      44  00      77  33      55  11 */    \
+    X(0xf6009700, 0x83008500, 0x0e00eb00, 0x7b002e00)    \
+    X(0xda00e400, 0x9000e000, 0xad00e800, 0xa700b400)    \
+    X(0x1a009d00, 0x3f003600, 0xf6005400, 0x4300cd00)    \
+    X(0xaf00c500, 0xe900a900, 0x63003d00, 0xf2005900)    \
+    X(0xf3007500, 0x79001400, 0x80005000, 0xa2008900)    \
+    X(0xa100d400, 0xd6007b00, 0xd3009000, 0xd300e100)    \
+    X(0x45008700, 0x2600ac00, 0xae003c00, 0x31009c00)    \
+    X(0xd000b100, 0xb6003600, 0x3e006f00, 0x92005900)    \
+    X(0x4d008a00, 0x26001000, 0x89007a00, 0xb8004a00)    \
+    X(0xca00f500, 0x3f00ac00, 0x6f00f000, 0x3c009400)    \
+    X(0x92008d00, 0x90001000, 0x8c00c600, 0xce004a00)    \
+    X(0xe2005900, 0xe9006d00, 0x79007800, 0x7800fa00)    \
+    X(0x1300b100, 0x90008d00, 0xa3001700, 0x27001800)    \
+    X(0xc7005800, 0x5f006a00, 0x9c00c100, 0xe0006300)    \
+    X(0x9b002000, 0xf000f000, 0xf7005700, 0x1600f900)    \
+    X(0xeb00b000, 0x9000af00, 0xa9006300, 0xb0005800)    \
+    X(0xa2001d00, 0xcf000000, 0x3800b000, 0x66000000)    \
+    X(0xf100da00, 0x7900d000, 0xbc007900, 0x94007900)    \
+    X(0x57001500, 0x1900ad00, 0x6f00ef00, 0x5100cb00)    \
+    X(0xc3006100, 0xe9006d00, 0xc000b700, 0xf800f200)    \
+    X(0x1d005800, 0xb600d000, 0x67004d00, 0xcd002c00)    \
+    X(0xf400b800, 0xd600e000, 0x5e00a900, 0xb000e700)    \
+    X(0x5400d100, 0x3f009c00, 0xc9006900, 0x2c005300)    \
+    X(0xe200e500, 0x60005900, 0x6a00b800, 0xc500f200)    \
+    X(0xdf004700, 0x7900d500, 0x7000ec00, 0x4c00ea00)    \
+    X(0x7100d100, 0x60009c00, 0x3f00b100, 0x95005e00)    \
+    X(0x82008200, 0xf0002000, 0x87001d00, 0xcd008000)    \
+    X(0xd0007000, 0xaf00c000, 0xe200be00, 0x6100f200)    \
+    X(0x80009300, 0x60001000, 0x36006e00, 0x81001200)    \
+    X(0x6500a300, 0xd600ac00, 0xcf003d00, 0x7d00c000)    \
+    X(0x90007000, 0x60009800, 0x62008100, 0xad009200)    \
+    X(0xe000e400, 0x3f00f400, 0x5a00ed00, 0x9000f200)    \
     /* end of list */
 
 /*
@@ -194,109 +194,63 @@ static inline uint32_t ror(uint32_t x, unsigned c)
  */
 static inline uint32_t des_S(uint32_t si6420, uint32_t si7531)
 {
-    debug("sindices: %02x %02x %02x %02x %02x %02x %02x %02x\n",
-          0x3F & (si6420 >>  2), 0x3F & (si7531 >>  2),
-          0x3F & (si6420 >> 10), 0x3F & (si7531 >> 10),
-          0x3F & (si6420 >> 18), 0x3F & (si7531 >> 18),
-          0x3F & (si6420 >> 26), 0x3F & (si7531 >> 26));
-
-#ifdef SIXTY_FOUR_BIT
-    /*
-     * On 64-bit machines, we store the table in exactly the form
-     * shown above, and make two 64-bit words containing four
-     * selection gadgets each.
-     */
-
-    /* Set up the gadgets. The 'cNNNN' variables will be gradually
-     * incremented, and the bits in positions FF00FF00FF00FF00 will
-     * act as selectors for the words in the table.
-     *
-     * A side effect of moving the input indices further apart is that
-     * they change order, because it's easier to keep a pair that were
-     * originally 16 bits apart still 16 bits apart, which now makes
-     * them adjacent instead of separated by one. So the fact that
-     * si6420 turns into c6240 (with the 2,4 reversed) is not a typo!
-     * This will all be undone when we rebuild the output word later.
-     */
-    uint64_t c6240 = ((si6420 | ((uint64_t)si6420 << 24))
-                      & 0x00FC00FC00FC00FC) | 0xFF00FF00FF00FF00;
-    uint64_t c7351 = ((si7531 | ((uint64_t)si7531 << 24))
-                      & 0x00FC00FC00FC00FC) | 0xFF00FF00FF00FF00;
-    debug("S in:  c6240=%016"PRIx64" c7351=%016"PRIx64"\n", c6240, c7351);
-
-    /* Iterate over the table. The 'sNNNN' variables accumulate the
-     * XOR of all the table entries not masked out. */
-    static const struct tbl { uint64_t t6240, t7351; } tbl[32] = {
-#define TABLE64(a, b) { a, b },
-        SBOX_ITERATION(TABLE64)
-#undef TABLE64
-    };
-    uint64_t s6240 = 0, s7351 = 0;
-    for (const struct tbl *t = tbl, *limit = tbl + 32; t < limit; t++) {
-        s6240 ^= c6240 & t->t6240; c6240 += 0x0008000800080008;
-        s7351 ^= c7351 & t->t7351; c7351 += 0x0008000800080008;
-    }
-    debug("S out: s6240=%016"PRIx64" s7351=%016"PRIx64"\n", s6240, s7351);
-
-    /* Final selection between each even/odd pair: mask off the low
-     * bits of all the input indices (which haven't changed throughout
-     * the iteration), and multiply by a bit mask that will turn each
-     * set bit into a mask covering the upper nibble of the selected
-     * pair. Then use those masks to control which set of lower
-     * nibbles is XORed into the upper nibbles. */
-    s6240 ^= (s6240 << 4) & ((0xf000/0x004) * (c6240 & 0x0004000400040004));
-    s7351 ^= (s7351 << 4) & ((0xf000/0x004) * (c7351 & 0x0004000400040004));
-
-    /* Now the eight final S-box outputs are in the upper nibble of
-     * each selection position. Mask away the rest of the clutter. */
-    s6240 &= 0xf000f000f000f000;
-    s7351 &= 0xf000f000f000f000;
-    debug("s0=%x s1=%x s2=%x s3=%x s4=%x s5=%x s6=%x s7=%x\n",
-          (unsigned)(0xF & (s6240 >> 12)),
-          (unsigned)(0xF & (s7351 >> 12)),
-          (unsigned)(0xF & (s6240 >> 44)),
-          (unsigned)(0xF & (s7351 >> 44)),
-          (unsigned)(0xF & (s6240 >> 28)),
-          (unsigned)(0xF & (s7351 >> 28)),
-          (unsigned)(0xF & (s6240 >> 60)),
-          (unsigned)(0xF & (s7351 >> 60)));
-
-    /* Combine them all into a single 32-bit output word, which will
-     * come out in the order 76543210. */
-    uint64_t combined = (s6240 >> 12) | (s7351 >> 8);
-    return combined | (combined >> 24);
-
-#else /* SIXTY_FOUR_BIT */
-    /*
-     * For 32-bit platforms, we do the same thing but in four 32-bit
-     * words instead of two 64-bit ones, so the CPU doesn't have to
-     * waste time propagating carries or shifted bits between the two
-     * halves of a uint64 that weren't needed anyway.
-     */
-
-    /* Set up the gadgets */
-    uint32_t c40 = ((si6420     ) & 0x00FC00FC) | 0xFF00FF00;
-    uint32_t c62 = ((si6420 >> 8) & 0x00FC00FC) | 0xFF00FF00;
-    uint32_t c51 = ((si7531     ) & 0x00FC00FC) | 0xFF00FF00;
-    uint32_t c73 = ((si7531 >> 8) & 0x00FC00FC) | 0xFF00FF00;
-    debug("S in:  c40=%08"PRIx32" c62=%08"PRIx32
-          " c51=%08"PRIx32" c73=%08"PRIx32"\n", c40, c62, c51, c73);
-
-    /* Iterate over the table */
+    /* The table, split into 32-bit words */
     static const struct tbl { uint32_t t40, t62, t51, t73; } tbl[32] = {
-#define TABLE32(a, b) { ((uint32_t)a), (a>>32), ((uint32_t)b), (b>>32) },
+#define TABLE32(ahi, alo, bhi, blo) { alo, ahi, blo, bhi },
         SBOX_ITERATION(TABLE32)
 #undef TABLE32
     };
-    uint32_t s40 = 0, s62 = 0, s51 = 0, s73 = 0;
-    for (const struct tbl *t = tbl, *limit = tbl + 32; t < limit; t++) {
+    uint32_t c40;
+    uint32_t c62;
+    uint32_t c51;
+    uint32_t c73;
+    uint32_t s40;
+    uint32_t s62;
+    uint32_t s51;
+    uint32_t s73;
+    const struct tbl *t;
+    const struct tbl *limit;
+
+    debug(("sindices: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+           0x3F & (si6420 >>  2), 0x3F & (si7531 >>  2),
+           0x3F & (si6420 >> 10), 0x3F & (si7531 >> 10),
+           0x3F & (si6420 >> 18), 0x3F & (si7531 >> 18),
+           0x3F & (si6420 >> 26), 0x3F & (si7531 >> 26)));
+
+    /*
+     * The work is done in four 32-bit words, each holding two
+     * selection gadgets. (Upstream PuTTY also had a 64-bit version
+     * using two words of four gadgets; the NT port is 32-bit only.)
+     *
+     * The 'cNN' variables are gradually incremented, and the bits in
+     * positions FF00FF00 act as selectors for the words in the table.
+     * The 'sNN' variables accumulate the XOR of all the table entries
+     * not masked out. Then the low bits of the input indices (which
+     * haven't changed) select between each even/odd pair, leaving the
+     * eight S-box outputs in the upper nibble of each position.
+     */
+
+    /* Set up the gadgets */
+    c40 = ((si6420     ) & 0x00FC00FC) | 0xFF00FF00;
+    c62 = ((si6420 >> 8) & 0x00FC00FC) | 0xFF00FF00;
+    c51 = ((si7531     ) & 0x00FC00FC) | 0xFF00FF00;
+    c73 = ((si7531 >> 8) & 0x00FC00FC) | 0xFF00FF00;
+    debug(("S in:  c40=%08"PRIx32" c62=%08"PRIx32
+           " c51=%08"PRIx32" c73=%08"PRIx32"\n", c40, c62, c51, c73));
+
+    /* Iterate over the table */
+    s40 = 0;
+    s62 = 0;
+    s51 = 0;
+    s73 = 0;
+    for (t = tbl, limit = tbl + 32; t < limit; t++) {
         s40 ^= c40 & t->t40; c40 += 0x00080008;
         s62 ^= c62 & t->t62; c62 += 0x00080008;
         s51 ^= c51 & t->t51; c51 += 0x00080008;
         s73 ^= c73 & t->t73; c73 += 0x00080008;
     }
-    debug("S out: s40=%08"PRIx32" s62=%08"PRIx32
-          " s51=%08"PRIx32" s73=%08"PRIx32"\n", s40, s62, s51, s73);
+    debug(("S out: s40=%08"PRIx32" s62=%08"PRIx32
+           " s51=%08"PRIx32" s73=%08"PRIx32"\n", s40, s62, s51, s73));
 
     /* Final selection within each pair */
     s40 ^= (s40 << 4) & ((0xf000/0x004) * (c40 & 0x00040004));
@@ -309,20 +263,18 @@ static inline uint32_t des_S(uint32_t si6420, uint32_t si7531)
     s62 &= 0xf000f000;
     s51 &= 0xf000f000;
     s73 &= 0xf000f000;
-    debug("s0=%x s1=%x s2=%x s3=%x s4=%x s5=%x s6=%x s7=%x\n",
-          (unsigned)(0xF & (s40 >> 12)),
-          (unsigned)(0xF & (s51 >> 12)),
-          (unsigned)(0xF & (s62 >> 12)),
-          (unsigned)(0xF & (s73 >> 12)),
-          (unsigned)(0xF & (s40 >> 28)),
-          (unsigned)(0xF & (s51 >> 28)),
-          (unsigned)(0xF & (s62 >> 28)),
-          (unsigned)(0xF & (s73 >> 28)));
+    debug(("s0=%x s1=%x s2=%x s3=%x s4=%x s5=%x s6=%x s7=%x\n",
+           (unsigned)(0xF & (s40 >> 12)),
+           (unsigned)(0xF & (s51 >> 12)),
+           (unsigned)(0xF & (s62 >> 12)),
+           (unsigned)(0xF & (s73 >> 12)),
+           (unsigned)(0xF & (s40 >> 28)),
+           (unsigned)(0xF & (s51 >> 28)),
+           (unsigned)(0xF & (s62 >> 28)),
+           (unsigned)(0xF & (s73 >> 28))));
 
     /* Recombine and return */
     return (s40 >> 12) | (s62 >> 4) | (s51 >> 8) | (s73);
-
-#endif /* SIXTY_FOUR_BIT */
 
 }
 
@@ -382,7 +334,7 @@ static inline uint32_t des_P(uint32_t v_orig)
 /*  v = des_benes_step(v,  2, 0x00000000);  no-op, so we can skip it */
     v = des_benes_step(v,  1, 0x04045015);
 
-    debug("P(%08"PRIx32") = %08"PRIx32"\n", v_orig, v);
+    debug(("P(%08"PRIx32") = %08"PRIx32"\n", v_orig, v));
 
     return v;
 }
@@ -417,20 +369,20 @@ struct des_keysched {
  * This function is only used during key setup, so it doesn't need to
  * be highly optimised.
  */
-static inline uint64_t bitsel(
-    uint64_t input, const int8_t *bitnums, size_t size)
+static inline uint64 bitsel(
+    uint64 input, const int8_t *bitnums, size_t size)
 {
-    uint64_t ret = 0;
+    uint64 ret = uint64_make(0, 0);
     while (size-- > 0) {
         int bitpos = *bitnums++;
-        ret <<= 1;
+        ret = uint64_shl(ret, 1);
         if (bitpos >= 0)
-            ret |= 1 & (input >> bitpos);
+            ret.lo |= 1 & uint64_shr(input, bitpos).lo;
     }
     return ret;
 }
 
-static void des_key_setup(uint64_t key, des_keysched *sched)
+static void des_key_setup(uint64 key, des_keysched *sched)
 {
     static const int8_t PC1[] = {
          7, 15, 23, 31, 39, 47, 55, 63,  6, 14, 22, 30, 38, 46,
@@ -456,18 +408,22 @@ static void des_key_setup(uint64_t key, des_keysched *sched)
     /* Select 56 bits from the 64-bit input key integer (the low bit
      * of each input byte is unused), into a word consisting of two
      * 28-bit integers starting at bits 0 and 32. */
-    uint64_t CD = bitsel(key, PC1, lenof(PC1));
+    uint64 CD = bitsel(key, PC1, lenof(PC1));
+    size_t i;
 
-    for (size_t i = 0; i < 16; i++) {
+    for (i = 0; i < 16; i++) {
         /* Rotate each 28-bit half of CD left by 1 or 2 bits (varying
          * between rounds) */
-        CD <<= leftshifts[i];
-        CD = (CD & 0x0FFFFFFF0FFFFFFF) | ((CD & 0xF0000000F0000000) >> 28);
+        CD = uint64_shl(CD, leftshifts[i]);
+        CD = uint64_or(
+            uint64_and(CD, uint64_make(0x0FFFFFFF, 0x0FFFFFFF)),
+            uint64_shr(uint64_and(CD, uint64_make(0xF0000000, 0xF0000000)),
+                       28));
 
         /* Select key bits from the rotated word to use during the
          * actual cipher */
-        sched->k7531[i] = bitsel(CD, PC2_7531, lenof(PC2_7531));
-        sched->k6420[i] = bitsel(CD, PC2_6420, lenof(PC2_6420));
+        sched->k7531[i] = bitsel(CD, PC2_7531, lenof(PC2_7531)).lo;
+        sched->k6420[i] = bitsel(CD, PC2_6420, lenof(PC2_6420)).lo;
     }
 }
 
@@ -683,36 +639,40 @@ static void des_cbc_decrypt(ssh_cipher *ciph, void *vdata, int len)
 }
 
 const ssh_cipheralg ssh_des = {
-    .new = des_cbc_new,
-    .free = des_cbc_free,
-    .setiv = des_cbc_setiv,
-    .setkey = des_cbc_setkey,
-    .encrypt = des_cbc_encrypt,
-    .decrypt = des_cbc_decrypt,
-    .next_message = nullcipher_next_message,
-    .ssh2_id = "des-cbc",
-    .blksize = 8,
-    .real_keybits = 56,
-    .padded_keybytes = 8,
-    .flags = SSH_CIPHER_IS_CBC,
-    .text_name = "single-DES CBC",
+    /* .new = */ des_cbc_new,
+    /* .free = */ des_cbc_free,
+    /* .setiv = */ des_cbc_setiv,
+    /* .setkey = */ des_cbc_setkey,
+    /* .encrypt = */ des_cbc_encrypt,
+    /* .decrypt = */ des_cbc_decrypt,
+    /* .encrypt_length = */ NULL,
+    /* .decrypt_length = */ NULL,
+    /* .next_message = */ nullcipher_next_message,
+    /* .ssh2_id = */ "des-cbc",
+    /* .blksize = */ 8,
+    /* .real_keybits = */ 56,
+    /* .padded_keybytes = */ 8,
+    /* .flags = */ SSH_CIPHER_IS_CBC,
+    /* .text_name = */ "single-DES CBC",
 };
 
 const ssh_cipheralg ssh_des_sshcom_ssh2 = {
     /* Same as ssh_des_cbc, but with a different SSH-2 ID */
-    .new = des_cbc_new,
-    .free = des_cbc_free,
-    .setiv = des_cbc_setiv,
-    .setkey = des_cbc_setkey,
-    .encrypt = des_cbc_encrypt,
-    .decrypt = des_cbc_decrypt,
-    .next_message = nullcipher_next_message,
-    .ssh2_id = "des-cbc@ssh.com",
-    .blksize = 8,
-    .real_keybits = 56,
-    .padded_keybytes = 8,
-    .flags = SSH_CIPHER_IS_CBC,
-    .text_name = "single-DES CBC",
+    /* .new = */ des_cbc_new,
+    /* .free = */ des_cbc_free,
+    /* .setiv = */ des_cbc_setiv,
+    /* .setkey = */ des_cbc_setkey,
+    /* .encrypt = */ des_cbc_encrypt,
+    /* .decrypt = */ des_cbc_decrypt,
+    /* .encrypt_length = */ NULL,
+    /* .decrypt_length = */ NULL,
+    /* .next_message = */ nullcipher_next_message,
+    /* .ssh2_id = */ "des-cbc@ssh.com",
+    /* .blksize = */ 8,
+    /* .real_keybits = */ 56,
+    /* .padded_keybytes = */ 8,
+    /* .flags = */ SSH_CIPHER_IS_CBC,
+    /* .text_name = */ "single-DES CBC",
 };
 
 static const ssh_cipheralg *const des_list[] = {
@@ -752,7 +712,8 @@ static void des3_cbc1_setkey(ssh_cipher *ciph, const void *vkey)
 {
     struct des3_cbc1_ctx *ctx = container_of(ciph, struct des3_cbc1_ctx, ciph);
     const uint8_t *key = (const uint8_t *)vkey;
-    for (size_t i = 0; i < 3; i++)
+    size_t i;
+    for (i = 0; i < 3; i++)
         des_key_setup(GET_64BIT_MSB_FIRST(key + 8*i), &ctx->sched[i]);
 }
 
@@ -773,10 +734,11 @@ static void des3_cbc1_cbc_encrypt(ssh_cipher *ciph, void *vdata, int len)
         /* Run three copies of the cipher, without undoing and redoing
          * IP/FP in between. */
         LR lr = des_IP(cipher_in);
+        LR ciphertext;
         lr = des_inner_cipher(lr, &ctx->sched[0], ENCIPHER);
         lr = des_inner_cipher(lr, &ctx->sched[1], DECIPHER);
         lr = des_inner_cipher(lr, &ctx->sched[2], ENCIPHER);
-        LR ciphertext = des_FP(lr);
+        ciphertext = des_FP(lr);
 
         des_store_lr(data, ciphertext);
         ctx->iv = ciphertext;
@@ -792,31 +754,35 @@ static void des3_cbc1_cbc_decrypt(ssh_cipher *ciph, void *vdata, int len)
 
         /* Similarly to encryption, but with the order reversed. */
         LR lr = des_IP(ciphertext);
+        LR cipher_out;
+        LR plaintext;
         lr = des_inner_cipher(lr, &ctx->sched[2], DECIPHER);
         lr = des_inner_cipher(lr, &ctx->sched[1], ENCIPHER);
         lr = des_inner_cipher(lr, &ctx->sched[0], DECIPHER);
-        LR cipher_out = des_FP(lr);
+        cipher_out = des_FP(lr);
 
-        LR plaintext = des_xor_lr(cipher_out, ctx->iv);
+        plaintext = des_xor_lr(cipher_out, ctx->iv);
         des_store_lr(data, plaintext);
         ctx->iv = ciphertext;
     }
 }
 
 const ssh_cipheralg ssh_3des_ssh2 = {
-    .new = des3_cbc1_new,
-    .free = des3_cbc1_free,
-    .setiv = des3_cbc1_setiv,
-    .setkey = des3_cbc1_setkey,
-    .encrypt = des3_cbc1_cbc_encrypt,
-    .decrypt = des3_cbc1_cbc_decrypt,
-    .next_message = nullcipher_next_message,
-    .ssh2_id = "3des-cbc",
-    .blksize = 8,
-    .real_keybits = 168,
-    .padded_keybytes = 24,
-    .flags = SSH_CIPHER_IS_CBC,
-    .text_name = "triple-DES CBC",
+    /* .new = */ des3_cbc1_new,
+    /* .free = */ des3_cbc1_free,
+    /* .setiv = */ des3_cbc1_setiv,
+    /* .setkey = */ des3_cbc1_setkey,
+    /* .encrypt = */ des3_cbc1_cbc_encrypt,
+    /* .decrypt = */ des3_cbc1_cbc_decrypt,
+    /* .encrypt_length = */ NULL,
+    /* .decrypt_length = */ NULL,
+    /* .next_message = */ nullcipher_next_message,
+    /* .ssh2_id = */ "3des-cbc",
+    /* .blksize = */ 8,
+    /* .real_keybits = */ 168,
+    /* .padded_keybytes = */ 24,
+    /* .flags = */ SSH_CIPHER_IS_CBC,
+    /* .text_name = */ "triple-DES CBC",
 };
 
 /* ----------------------------------------------------------------------
@@ -853,7 +819,8 @@ static void des3_sdctr_setkey(ssh_cipher *ciph, const void *vkey)
     struct des3_sdctr_ctx *ctx = container_of(
         ciph, struct des3_sdctr_ctx, ciph);
     const uint8_t *key = (const uint8_t *)vkey;
-    for (size_t i = 0; i < 3; i++)
+    size_t i;
+    for (i = 0; i < 3; i++)
         des_key_setup(GET_64BIT_MSB_FIRST(key + 8*i), &ctx->sched[i]);
 }
 
@@ -862,9 +829,10 @@ static void des3_sdctr_setiv(ssh_cipher *ciph, const void *viv)
     struct des3_sdctr_ctx *ctx = container_of(
         ciph, struct des3_sdctr_ctx, ciph);
     const uint8_t *iv = (const uint8_t *)viv;
+    unsigned i;
 
     /* Import the initial counter value into the internal representation */
-    for (unsigned i = 0; i < SDCTR_WORDS; i++)
+    for (i = 0; i < SDCTR_WORDS; i++)
         ctx->counter[i] = GET_BIGNUMINT_MSB_FIRST(
             iv + 8 - BIGNUM_INT_BYTES - i*BIGNUM_INT_BYTES);
 }
@@ -876,45 +844,53 @@ static void des3_sdctr_encrypt_decrypt(ssh_cipher *ciph, void *vdata, int len)
     uint8_t *data = (uint8_t *)vdata;
     uint8_t iv_buf[8];
     for (; len > 0; len -= 8, data += 8) {
+        BignumCarry carry;
+        LR lr;
+        LR keystream;
+        LR input;
+        LR output;
+        unsigned i;
         /* Format the counter value into the buffer. */
-        for (unsigned i = 0; i < SDCTR_WORDS; i++)
+        for (i = 0; i < SDCTR_WORDS; i++)
             PUT_BIGNUMINT_MSB_FIRST(
                 iv_buf + 8 - BIGNUM_INT_BYTES - i*BIGNUM_INT_BYTES,
                 ctx->counter[i]);
 
         /* Increment the counter. */
-        BignumCarry carry = 1;
-        for (unsigned i = 0; i < SDCTR_WORDS; i++)
+        carry = 1;
+        for (i = 0; i < SDCTR_WORDS; i++)
             BignumADC(ctx->counter[i], carry, ctx->counter[i], 0, carry);
 
         /* Triple-encrypt the counter value from the IV. */
-        LR lr = des_IP(des_load_lr(iv_buf));
+        lr = des_IP(des_load_lr(iv_buf));
         lr = des_inner_cipher(lr, &ctx->sched[0], ENCIPHER);
         lr = des_inner_cipher(lr, &ctx->sched[1], DECIPHER);
         lr = des_inner_cipher(lr, &ctx->sched[2], ENCIPHER);
-        LR keystream = des_FP(lr);
+        keystream = des_FP(lr);
 
-        LR input = des_load_lr(data);
-        LR output = des_xor_lr(input, keystream);
+        input = des_load_lr(data);
+        output = des_xor_lr(input, keystream);
         des_store_lr(data, output);
     }
     smemclr(iv_buf, sizeof(iv_buf));
 }
 
 const ssh_cipheralg ssh_3des_ssh2_ctr = {
-    .new = des3_sdctr_new,
-    .free = des3_sdctr_free,
-    .setiv = des3_sdctr_setiv,
-    .setkey = des3_sdctr_setkey,
-    .encrypt = des3_sdctr_encrypt_decrypt,
-    .decrypt = des3_sdctr_encrypt_decrypt,
-    .next_message = nullcipher_next_message,
-    .ssh2_id = "3des-ctr",
-    .blksize = 8,
-    .real_keybits = 168,
-    .padded_keybytes = 24,
-    .flags = 0,
-    .text_name = "triple-DES SDCTR",
+    /* .new = */ des3_sdctr_new,
+    /* .free = */ des3_sdctr_free,
+    /* .setiv = */ des3_sdctr_setiv,
+    /* .setkey = */ des3_sdctr_setkey,
+    /* .encrypt = */ des3_sdctr_encrypt_decrypt,
+    /* .decrypt = */ des3_sdctr_encrypt_decrypt,
+    /* .encrypt_length = */ NULL,
+    /* .decrypt_length = */ NULL,
+    /* .next_message = */ nullcipher_next_message,
+    /* .ssh2_id = */ "3des-ctr",
+    /* .blksize = */ 8,
+    /* .real_keybits = */ 168,
+    /* .padded_keybytes = */ 24,
+    /* .flags = */ 0,
+    /* .text_name = */ "triple-DES SDCTR",
 };
 
 static const ssh_cipheralg *const des3_list[] = {
@@ -954,7 +930,8 @@ static void des3_cbc3_setkey(ssh_cipher *ciph, const void *vkey)
 {
     struct des3_cbc3_ctx *ctx = container_of(ciph, struct des3_cbc3_ctx, ciph);
     const uint8_t *key = (const uint8_t *)vkey;
-    for (size_t i = 0; i < 3; i++)
+    size_t i;
+    for (i = 0; i < 3; i++)
         des_key_setup(GET_64BIT_MSB_FIRST(key + 8*i), &ctx->sched[i]);
 }
 
@@ -973,11 +950,12 @@ static void des3_cbc3_setiv(ssh_cipher *ciph, const void *viv)
      */
 
     LR iv = des_load_lr(viv);
+    size_t i;
 
     /* But we store the IVs in permuted form, so that we can handle
      * all three CBC layers without having to do IP/FP in between. */
     iv = des_IP(iv);
-    for (size_t i = 0; i < 3; i++)
+    for (i = 0; i < 3; i++)
         ctx->iv[i] = iv;
 }
 
@@ -989,6 +967,7 @@ static void des3_cbc3_cbc_encrypt(ssh_cipher *ciph, void *vdata, int len)
         /* Load and IP the input. */
         LR plaintext = des_IP(des_load_lr(data));
         LR lr = plaintext;
+        LR ciphertext;
 
         /* Do three passes of CBC, with the middle one inverted. */
 
@@ -996,7 +975,7 @@ static void des3_cbc3_cbc_encrypt(ssh_cipher *ciph, void *vdata, int len)
         lr = des_inner_cipher(lr, &ctx->sched[0], ENCIPHER);
         ctx->iv[0] = lr;
 
-        LR ciphertext = lr;
+        ciphertext = lr;
         lr = des_inner_cipher(ciphertext, &ctx->sched[1], DECIPHER);
         lr = des_xor_lr(lr, ctx->iv[1]);
         ctx->iv[1] = ciphertext;
@@ -1038,16 +1017,19 @@ static void des3_cbc3_cbc_decrypt(ssh_cipher *ciph, void *vdata, int len)
 }
 
 const ssh_cipheralg ssh_3des_ssh1 = {
-    .new = des3_cbc3_new,
-    .free = des3_cbc3_free,
-    .setiv = des3_cbc3_setiv,
-    .setkey = des3_cbc3_setkey,
-    .encrypt = des3_cbc3_cbc_encrypt,
-    .decrypt = des3_cbc3_cbc_decrypt,
-    .next_message = nullcipher_next_message,
-    .blksize = 8,
-    .real_keybits = 168,
-    .padded_keybytes = 24,
-    .flags = SSH_CIPHER_IS_CBC,
-    .text_name = "triple-DES inner-CBC",
+    /* .new = */ des3_cbc3_new,
+    /* .free = */ des3_cbc3_free,
+    /* .setiv = */ des3_cbc3_setiv,
+    /* .setkey = */ des3_cbc3_setkey,
+    /* .encrypt = */ des3_cbc3_cbc_encrypt,
+    /* .decrypt = */ des3_cbc3_cbc_decrypt,
+    /* .encrypt_length = */ NULL,
+    /* .decrypt_length = */ NULL,
+    /* .next_message = */ nullcipher_next_message,
+    /* .ssh2_id = */ NULL,
+    /* .blksize = */ 8,
+    /* .real_keybits = */ 168,
+    /* .padded_keybytes = */ 24,
+    /* .flags = */ SSH_CIPHER_IS_CBC,
+    /* .text_name = */ "triple-DES inner-CBC",
 };

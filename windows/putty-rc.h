@@ -29,7 +29,6 @@
 #define IDC_TABSTATIC1  1002
 #define IDC_TABSTATIC2  1003
 #define IDC_TABLIST     1004
-#define IDC_HELPBTN     1005
 #define IDC_ABOUT       1006
 
 #define IDC_HK_ICON       98
@@ -44,8 +43,5 @@
 #define IDC_HKI_SHA256  1000
 #define IDC_HKI_MD5     1001
 #define IDC_HKI_PUBKEY  1002
-
-#define ID_CUSTOM_CHMFILE 2000
-#define TYPE_CUSTOM_CHMFILE 2000
 
 #endif

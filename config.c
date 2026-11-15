@@ -67,7 +67,7 @@ void conf_radiobutton_bool_handler(dlgcontrol *ctrl, dlgparam *dlg,
         button = dlg_radiobutton_get(ctrl, dlg);
         assert(button >= 0 && button < ctrl->radio.nbuttons);
         conf_set_bool(conf, ctrl->context.i,
-                      ctrl->radio.buttondata[button].i);
+                      ctrl->radio.buttondata[button].i != 0);
     }
 }
 
@@ -104,8 +104,8 @@ void conf_checkbox_handler(dlgcontrol *ctrl, dlgparam *dlg,
     }
 }
 
-const struct conf_editbox_handler_type conf_editbox_str = {.type = EDIT_STR};
-const struct conf_editbox_handler_type conf_editbox_int = {.type = EDIT_INT};
+const struct conf_editbox_handler_type conf_editbox_str = {/* .type = */ EDIT_STR};
+const struct conf_editbox_handler_type conf_editbox_int = {/* .type = */ EDIT_INT};
 
 void conf_editbox_handler(dlgcontrol *ctrl, dlgparam *dlg,
                           void *data, int event)
@@ -298,9 +298,10 @@ static void config_protocols_handler(dlgcontrol *ctrl, dlgparam *dlg,
         hp->mid_refresh = true;
 
         if (ctrl == hp->protradio) {
+            int button;
             /* Available buttons were set up when control was created.
              * Just select one of them, possibly. */
-            for (int button = 0; button < ctrl->radio.nbuttons; button++)
+            for (button = 0; button < ctrl->radio.nbuttons; button++)
                 /* The final button is "Other:". If we reach that one, the
                  * current protocol must be in the drop list, so we should
                  * select the "Other:" button. */
@@ -311,10 +312,11 @@ static void config_protocols_handler(dlgcontrol *ctrl, dlgparam *dlg,
                 }
         } else if (ctrl == hp->protlist) {
             int curentry = -1;
+            size_t i;
             dlg_update_start(ctrl, dlg);
             dlg_listbox_clear(ctrl, dlg);
             assert(n_ui_backends > 0 && n_ui_backends < PROTOCOL_LIMIT);
-            for (size_t i = n_ui_backends;
+            for (i = n_ui_backends;
                  i < PROTOCOL_LIMIT && backends[i]; i++) {
                 dlg_listbox_addwithid(ctrl, dlg,
                                       backends[i]->displayname_tc,
@@ -396,10 +398,13 @@ static void config_protocols_handler(dlgcontrol *ctrl, dlgparam *dlg,
         }
 
         if (newproto != curproto) {
+            const struct BackendVtable *cvt;
+            const struct BackendVtable *nvt;
+            int port;
             conf_set_int(conf, CONF_protocol, newproto);
 
-            const struct BackendVtable *cvt = backend_vt_from_proto(curproto);
-            const struct BackendVtable *nvt = backend_vt_from_proto(newproto);
+            cvt = backend_vt_from_proto(curproto);
+            nvt = backend_vt_from_proto(newproto);
             assert(cvt);
             assert(nvt);
             /*
@@ -416,7 +421,7 @@ static void config_protocols_handler(dlgcontrol *ctrl, dlgparam *dlg,
              * getting to the protocol; we want that non-default port
              * to be preserved.
              */
-            int port = conf_get_int(conf, CONF_port);
+            port = conf_get_int(conf, CONF_port);
             if (port == cvt->default_port)
                 conf_set_int(conf, CONF_port, nvt->default_port);
 
@@ -531,34 +536,6 @@ static void cipherlist_handler(dlgcontrol *ctrl, dlgparam *dlg,
                              dlg_listbox_getid(ctrl, dlg, i));
     }
 }
-
-#ifndef NO_GSSAPI
-static void gsslist_handler(dlgcontrol *ctrl, dlgparam *dlg,
-                            void *data, int event)
-{
-    Conf *conf = (Conf *)data;
-    if (event == EVENT_REFRESH) {
-        int i;
-
-        dlg_update_start(ctrl, dlg);
-        dlg_listbox_clear(ctrl, dlg);
-        for (i = 0; i < ngsslibs; i++) {
-            int id = conf_get_int_int(conf, CONF_ssh_gsslist, i);
-            assert(id >= 0 && id < ngsslibs);
-            dlg_listbox_addwithid(ctrl, dlg, gsslibnames[id], id);
-        }
-        dlg_update_done(ctrl, dlg);
-
-    } else if (event == EVENT_VALCHANGE) {
-        int i;
-
-        /* Update array to match the list box. */
-        for (i=0; i < ngsslibs; i++)
-            conf_set_int_int(conf, CONF_ssh_gsslist, i,
-                             dlg_listbox_getid(ctrl, dlg, i));
-    }
-}
-#endif
 
 static void kexlist_handler(dlgcontrol *ctrl, dlgparam *dlg,
                             void *data, int event)
@@ -1245,7 +1222,7 @@ static void environ_handler(dlgcontrol *ctrl, dlgparam *dlg,
                 return;
             }
             conf_set_str_str(conf, CONF_environmt, key, val);
-            str = dupcat(key, "\t", val);
+            str = dupcat(key, "\t", val, NULL);
             dlg_editbox_set(ed->varbox, dlg, "");
             dlg_editbox_set(ed->valbox, dlg, "");
             sfree(str);
@@ -1278,9 +1255,6 @@ static void environ_handler(dlgcontrol *ctrl, dlgparam *dlg,
 struct portfwd_data {
     dlgcontrol *addbutton, *rembutton, *listbox;
     dlgcontrol *sourcebox, *destbox, *direction;
-#ifndef NO_IPV6
-    dlgcontrol *addressfamily;
-#endif
 };
 
 static void portfwd_handler(dlgcontrol *ctrl, dlgparam *dlg,
@@ -1326,10 +1300,6 @@ static void portfwd_handler(dlgcontrol *ctrl, dlgparam *dlg,
              * Default is Local.
              */
             dlg_radiobutton_set(ctrl, dlg, 0);
-#ifndef NO_IPV6
-        } else if (ctrl == pfd->addressfamily) {
-            dlg_radiobutton_set(ctrl, dlg, 0);
-#endif
         }
     } else if (event == EVENT_ACTION) {
         if (ctrl == pfd->addbutton) {
@@ -1337,14 +1307,6 @@ static void portfwd_handler(dlgcontrol *ctrl, dlgparam *dlg,
             char *src, *key, *val;
             int whichbutton;
 
-#ifndef NO_IPV6
-            whichbutton = dlg_radiobutton_get(pfd->addressfamily, dlg);
-            if (whichbutton == 1)
-                family = "4";
-            else if (whichbutton == 2)
-                family = "6";
-            else
-#endif
                 family = "";
 
             whichbutton = dlg_radiobutton_get(pfd->direction, dlg);
@@ -1376,7 +1338,7 @@ static void portfwd_handler(dlgcontrol *ctrl, dlgparam *dlg,
                 val = dupstr("D");     /* special case */
             }
 
-            key = dupcat(family, type, src);
+            key = dupcat(family, type, src, NULL);
             sfree(src);
 
             if (conf_get_str_str_opt(conf, CONF_portfwd, key)) {
@@ -1402,23 +1364,14 @@ static void portfwd_handler(dlgcontrol *ctrl, dlgparam *dlg,
                     static const char *const dirs = "LRD";
                     const char *afp;
                     int dir;
-#ifndef NO_IPV6
-                    int idx;
-#endif
 
                     /* Populate controls with the entry we're about to delete
                      * for ease of editing */
                     p = key;
 
                     afp = strchr(afs, *p);
-#ifndef NO_IPV6
-                    idx = afp ? afp-afs : 0;
-#endif
                     if (afp)
                         p++;
-#ifndef NO_IPV6
-                    dlg_radiobutton_set(pfd->addressfamily, dlg, idx);
-#endif
 
                     dir = *p;
 
@@ -1543,7 +1496,7 @@ static void clipboard_selector_handler(dlgcontrol *ctrl, dlgparam *dlg,
                 if (!strcmp(sval, options[i].name))
                     break;             /* needs escaping */
             if (i < lenof(options) || sval[0] == '=') {
-                char *escaped = dupcat("=", sval);
+                char *escaped = dupcat("=", sval, NULL);
                 dlg_editbox_set(ctrl, dlg, escaped);
                 sfree(escaped);
             } else {
@@ -1731,11 +1684,14 @@ void proxy_type_handler(dlgcontrol *ctrl, dlgparam *dlg,
          * the value we wanted to keep.
          */
         int proxy_type = conf_get_int(conf, CONF_proxy_type);
+        int index_to_select;
+        int current_index;
 
         dlg_update_start(ctrl, dlg);
         dlg_listbox_clear(ctrl, dlg);
 
-        int index_to_select = 0, current_index = 0;
+        index_to_select = 0;
+        current_index = 0;
 
 #define ADD(id, title) do {                                     \
             dlg_listbox_addwithid(ctrl, dlg, title, id);        \
@@ -1795,6 +1751,8 @@ void setup_config_box(struct controlbox *b, bool midsession,
     dlgcontrol *c;
     bool resize_forbidden = false;
     char *str;
+    static const struct conf_editbox_handler_type conf_editbox_tickspersec = {
+        /* .type = */ EDIT_FIXEDPOINT, /* .denominator = */ TICKSPERSEC};
 
     ssd = (struct sessionsaver_data *)
         ctrl_alloc_with_free(b, sizeof(struct sessionsaver_data),
@@ -1833,6 +1791,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
     if (!midsession) {
         struct hostport *hp = (struct hostport *)
             ctrl_alloc(b, sizeof(struct hostport));
+        size_t i;
         memset(hp, 0, sizeof(*hp));
 
         s = ctrl_getset(b, "Session", "hostport",
@@ -1854,7 +1813,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
         ctrl_columns(s, 2, 62, 38);
         c = ctrl_radiobuttons(s, NULL, NO_SHORTCUT, 3,
                               HELPCTX(session_hostname),
-                              config_protocols_handler, P(hp));
+                              config_protocols_handler, P(hp), NULL);
         c->column = 0;
         hp->protradio = c;
         c->radio.buttons = sresize(c->radio.buttons, PROTOCOL_LIMIT, char *);
@@ -1864,7 +1823,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
         assert(c->radio.nbuttons == 0);
         /* UI design assumes there exists at least one 'real' radio button */
         assert(n_ui_backends > 0 && n_ui_backends < PROTOCOL_LIMIT);
-        for (size_t i = 0; i < n_ui_backends; i++) {
+        for (i = 0; i < n_ui_backends; i++) {
             assert(backends[i]);
             c->radio.buttons[c->radio.nbuttons] =
                 dupstr(backends[i]->displayname_tc);
@@ -1954,7 +1913,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                       I(CONF_close_on_exit),
                       "Always", I(FORCE_ON),
                       "Never", I(FORCE_OFF),
-                      "Only on clean exit", I(AUTO));
+                      "Only on clean exit", I(AUTO), NULL);
 
     /*
      * The Session/Logging panel.
@@ -1984,7 +1943,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                           "Printable output", 'p', I(LGTYP_ASCII),
                           "All session output", 'l', I(LGTYP_DEBUG),
                           sshlogname, 's', I(LGTYP_PACKETS),
-                          sshrawlogname, 'r', I(LGTYP_SSHRAW));
+                          sshrawlogname, 'r', I(LGTYP_SSHRAW), NULL);
     }
     ctrl_filesel(s, "Log file name:", 'f',
                  FILTER_ALL_FILES, true, "Select session log file name",
@@ -1998,7 +1957,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                       conf_radiobutton_handler, I(CONF_logxfovr),
                       "Always overwrite it", I(LGXF_OVR),
                       "Always append to the end of it", I(LGXF_APN),
-                      "Ask the user every time", I(LGXF_ASK));
+                      "Ask the user every time", I(LGXF_ASK), NULL);
     ctrl_checkbox(s, "Flush log file frequently", 'u',
                   HELPCTX(logging_flush),
                   conf_checkbox_handler, I(CONF_logflush));
@@ -2052,13 +2011,13 @@ void setup_config_box(struct controlbox *b, bool midsession,
                       conf_radiobutton_handler,I(CONF_localecho),
                       "Auto", I(AUTO),
                       "Force on", I(FORCE_ON),
-                      "Force off", I(FORCE_OFF));
+                      "Force off", I(FORCE_OFF), NULL);
     ctrl_radiobuttons(s, "Local line editing:", 't', 3,
                       HELPCTX(terminal_localedit),
                       conf_radiobutton_handler,I(CONF_localedit),
                       "Auto", I(AUTO),
                       "Force on", I(FORCE_ON),
-                      "Force off", I(FORCE_OFF));
+                      "Force off", I(FORCE_OFF), NULL);
 
     s = ctrl_getset(b, "Terminal", "printing", "Remote-controlled printing");
     ctrl_combobox(s, "Printer to send ANSI printer output to:", 'p', 100,
@@ -2077,12 +2036,12 @@ void setup_config_box(struct controlbox *b, bool midsession,
                       HELPCTX(keyboard_backspace),
                       conf_radiobutton_bool_handler,
                       I(CONF_bksp_is_delete),
-                      "Control-H", I(0), "Control-? (127)", I(1));
+                      "Control-H", I(0), "Control-? (127)", I(1), NULL);
     ctrl_radiobuttons(s, "The Home and End keys", 'e', 2,
                       HELPCTX(keyboard_homeend),
                       conf_radiobutton_bool_handler,
                       I(CONF_rxvt_homeend),
-                      "Standard", I(false), "rxvt", I(true));
+                      "Standard", I(false), "rxvt", I(true), NULL);
     ctrl_radiobuttons(s, "The Function keys and keypad", 'f', 4,
                       HELPCTX(keyboard_funkeys),
                       conf_radiobutton_handler,
@@ -2093,13 +2052,13 @@ void setup_config_box(struct controlbox *b, bool midsession,
                       "VT400", I(FUNKY_VT400),
                       "VT100+", I(FUNKY_VT100P),
                       "SCO", I(FUNKY_SCO),
-                      "Xterm 216+", I(FUNKY_XTERM_216));
+                      "Xterm 216+", I(FUNKY_XTERM_216), NULL);
     ctrl_radiobuttons(s, "Shift/Ctrl/Alt with the arrow keys", 'w', 2,
                       HELPCTX(keyboard_sharrow),
                       conf_radiobutton_handler,
                       I(CONF_sharrow_type),
                       "Ctrl toggles app mode", I(SHARROW_APPLICATION),
-                      "xterm-style bitmap", I(SHARROW_BITMAP));
+                      "xterm-style bitmap", I(SHARROW_BITMAP), NULL);
 
     s = ctrl_getset(b, "Terminal/Keyboard", "appkeypad",
                     "Application keypad settings:");
@@ -2107,11 +2066,11 @@ void setup_config_box(struct controlbox *b, bool midsession,
                       HELPCTX(keyboard_appcursor),
                       conf_radiobutton_bool_handler,
                       I(CONF_app_cursor),
-                      "Normal", I(0), "Application", I(1));
+                      "Normal", I(0), "Application", I(1), NULL);
     ctrl_radiobuttons(s, "Initial state of numeric keypad:", 'n', 3,
                       HELPCTX(keyboard_appkeypad),
                       numeric_keypad_handler, P(NULL),
-                      "Normal", I(0), "Application", I(1), "NetHack", I(2));
+                      "Normal", I(0), "Application", I(1), "NetHack", I(2), NULL);
 
     /*
      * The Terminal/Bell panel.
@@ -2125,7 +2084,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                       conf_radiobutton_handler, I(CONF_beep),
                       "None (bell disabled)", I(BELL_DISABLED),
                       "Make default system alert sound", I(BELL_DEFAULT),
-                      "Visual bell (flash window)", I(BELL_VISUAL));
+                      "Visual bell (flash window)", I(BELL_VISUAL), NULL);
 
     s = ctrl_getset(b, "Terminal/Bell", "overload",
                     "Control the bell overload behaviour");
@@ -2136,8 +2095,6 @@ void setup_config_box(struct controlbox *b, bool midsession,
                  HELPCTX(bell_overload),
                  conf_editbox_handler, I(CONF_bellovl_n), ED_INT);
 
-    static const struct conf_editbox_handler_type conf_editbox_tickspersec = {
-        .type = EDIT_FIXEDPOINT, .denominator = TICKSPERSEC};
 
     ctrl_editbox(s, "... in this many seconds", 't', 20,
                  HELPCTX(bell_overload),
@@ -2183,7 +2140,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                       I(CONF_remote_qtitle_action),
                       "None", I(TITLE_NONE),
                       "Empty string", I(TITLE_EMPTY),
-                      "Window title", I(TITLE_REAL));
+                      "Window title", I(TITLE_REAL), NULL);
     ctrl_checkbox(s, "Disable remote-controlled clearing of scrollback", 'e',
                   HELPCTX(features_clearscroll),
                   conf_checkbox_handler,
@@ -2263,7 +2220,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                       I(CONF_cursor_type),
                       "Block", 'l', I(CURSOR_BLOCK),
                       "Underline", 'u', I(CURSOR_UNDERLINE),
-                      "Vertical line", 'v', I(CURSOR_VERTICAL_LINE));
+                      "Vertical line", 'v', I(CURSOR_VERTICAL_LINE), NULL);
     ctrl_checkbox(s, "Cursor blinks", 'b',
                   HELPCTX(appearance_cursor),
                   conf_checkbox_handler, I(CONF_blink_cur));
@@ -2334,7 +2291,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
         HELPCTX(translation_linedraw),
         conf_radiobutton_handler, I(CONF_vtmode),
         "Use Unicode line drawing code points",'u',I(VT_UNICODE),
-        "Poor man's line drawing (+, - and |)",'p',I(VT_POORMAN));
+        "Poor man's line drawing (+, - and |)",'p',I(VT_POORMAN), NULL);
     ctrl_checkbox(s, "Copy and paste line drawing characters as lqqqk",'d',
                   HELPCTX(selection_linedraw),
                   conf_checkbox_handler, I(CONF_rawcnp));
@@ -2359,7 +2316,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                       conf_radiobutton_bool_handler,
                       I(CONF_rect_select),
                       "Normal", 'n', I(false),
-                      "Rectangular block", 'r', I(true));
+                      "Rectangular block", 'r', I(true), NULL);
 
     s = ctrl_getset(b, "Window/Selection", "clipboards",
                     "Assign copy/paste actions to clipboards");
@@ -2435,7 +2392,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                       conf_radiobutton_handler, I(CONF_bold_style),
                       "The font", I(BOLD_STYLE_FONT),
                       "The colour", I(BOLD_STYLE_COLOUR),
-                      "Both", I(BOLD_STYLE_FONT | BOLD_STYLE_COLOUR));
+                      "Both", I(BOLD_STYLE_FONT | BOLD_STYLE_COLOUR), NULL);
 
     str = dupprintf("Adjust the precise colours %s displays", appname);
     s = ctrl_getset(b, "Window/Colours", "adjust", str);
@@ -2490,17 +2447,6 @@ void setup_config_box(struct controlbox *b, bool midsession,
                           'p', HELPCTX(connection_tcpkeepalive),
                           conf_checkbox_handler,
                           I(CONF_tcp_keepalives));
-#ifndef NO_IPV6
-            s = ctrl_getset(b, "Connection", "ipversion",
-                            "Internet protocol version");
-            ctrl_radiobuttons(s, NULL, NO_SHORTCUT, 3,
-                              HELPCTX(connection_ipversion),
-                              conf_radiobutton_handler,
-                              I(CONF_addressfamily),
-                              "Auto", 'u', I(ADDRTYPE_UNSPEC),
-                              "IPv4", '4', I(ADDRTYPE_IPV4),
-                              "IPv6", '6', I(ADDRTYPE_IPV6));
-#endif
 
             {
                 const char *label = backend_vt_from_proto(PROT_SSH) ?
@@ -2544,7 +2490,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                                   conf_radiobutton_bool_handler,
                                   I(CONF_username_from_env),
                                   "Prompt", I(false),
-                                  userlabel, I(true));
+                                  userlabel, I(true), NULL);
                 sfree(userlabel);
             }
 
@@ -2628,7 +2574,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                           I(CONF_proxy_dns),
                           "No", I(FORCE_OFF),
                           "Auto", I(AUTO),
-                          "Yes", I(FORCE_ON));
+                          "Yes", I(FORCE_ON), NULL);
         ctrl_editbox(s, "Username", 'u', 60,
                      HELPCTX(proxy_auth),
                      conf_editbox_handler,
@@ -2650,7 +2596,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                           I(CONF_proxy_log_to_term),
                           "No", I(FORCE_OFF),
                           "Yes", I(FORCE_ON),
-                          "Only until session starts", I(AUTO));
+                          "Only until session starts", I(AUTO), NULL);
     }
 
     /*
@@ -2737,7 +2683,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                               conf_radiobutton_handler,
                               I(CONF_sshprot),
                               "2", '2', I(3),
-                              "1 (INSECURE)", '1', I(0));
+                              "1 (INSECURE)", '1', I(0), NULL);
         }
 
         /*
@@ -2756,12 +2702,6 @@ void setup_config_box(struct controlbox *b, bool midsession,
                               HELPCTX(ssh_kexlist),
                               kexlist_handler, P(NULL));
             c->listbox.height = 10;
-#ifndef NO_GSSAPI
-            ctrl_checkbox(s, "Attempt GSSAPI key exchange",
-                          'k', HELPCTX(ssh_gssapi),
-                          conf_checkbox_handler,
-                          I(CONF_try_gssapi_kex));
-#endif
 
             s = ctrl_getset(b, "Connection/SSH/Kex", "repeat",
                             "Options controlling key re-exchange");
@@ -2771,13 +2711,6 @@ void setup_config_box(struct controlbox *b, bool midsession,
                          conf_editbox_handler,
                          I(CONF_ssh_rekey_time),
                          ED_INT);
-#ifndef NO_GSSAPI
-            ctrl_editbox(s, "Minutes between GSS checks (0 for never)", NO_SHORTCUT, 20,
-                         HELPCTX(ssh_kex_repeat),
-                         conf_editbox_handler,
-                         I(CONF_gssapirekey),
-                         ED_INT);
-#endif
             ctrl_editbox(s, "Max data before rekey (0 for no limit)", 'x', 20,
                          HELPCTX(ssh_kex_repeat),
                          conf_editbox_handler,
@@ -2947,65 +2880,6 @@ void setup_config_box(struct controlbox *b, bool midsession,
             ctrl_editbox(s, "Plugin command to run", NO_SHORTCUT, 100,
                          HELPCTX(ssh_auth_plugin),
                          conf_editbox_handler, I(CONF_auth_plugin), ED_STR);
-#ifndef NO_GSSAPI
-            /*
-             * Connection/SSH/Auth/GSSAPI, which sadly won't fit on
-             * the main Auth panel.
-             */
-            ctrl_settitle(b, "Connection/SSH/Auth/GSSAPI",
-                          "Options controlling GSSAPI authentication");
-            s = ctrl_getset(b, "Connection/SSH/Auth/GSSAPI", "gssapi", NULL);
-
-            ctrl_checkbox(s, "Attempt GSSAPI authentication (SSH-2 only)",
-                          't', HELPCTX(ssh_gssapi),
-                          conf_checkbox_handler,
-                          I(CONF_try_gssapi_auth));
-
-            ctrl_checkbox(s, "Attempt GSSAPI key exchange (SSH-2 only)",
-                          'k', HELPCTX(ssh_gssapi),
-                          conf_checkbox_handler,
-                          I(CONF_try_gssapi_kex));
-
-            ctrl_checkbox(s, "Allow GSSAPI credential delegation", 'l',
-                          HELPCTX(ssh_gssapi_delegation),
-                          conf_checkbox_handler,
-                          I(CONF_gssapifwd));
-
-            /*
-             * GSSAPI library selection.
-             */
-            if (ngsslibs > 1) {
-                c = ctrl_draglist(s, "Preference order for GSSAPI libraries:",
-                                  'p', HELPCTX(ssh_gssapi_libraries),
-                                  gsslist_handler, P(NULL));
-                c->listbox.height = ngsslibs;
-
-                /*
-                 * I currently assume that if more than one GSS
-                 * library option is available, then one of them is
-                 * 'user-supplied' and so we should present the
-                 * following file selector. This is at least half-
-                 * reasonable, because if we're using statically
-                 * linked GSSAPI then there will only be one option
-                 * and no way to load from a user-supplied library,
-                 * whereas if we're using dynamic libraries then
-                 * there will almost certainly be some default
-                 * option in addition to a user-supplied path. If
-                 * anyone ever ports PuTTY to a system on which
-                 * dynamic-library GSSAPI is available but there is
-                 * absolutely no consensus on where to keep the
-                 * libraries, there'll need to be a flag alongside
-                 * ngsslibs to control whether the file selector is
-                 * displayed.
-                 */
-
-                ctrl_filesel(s, "User-supplied GSSAPI library path:", 's',
-                             FILTER_DYNLIB_FILES, false, "Select library file",
-                             HELPCTX(ssh_gssapi_libraries),
-                             conf_filesel_handler,
-                             I(CONF_ssh_gss_custom));
-            }
-#endif
         }
 
         if (!midsession) {
@@ -3050,7 +2924,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                                              ttymodes_handler, P(td),
                                              "Auto", NO_SHORTCUT, P(NULL),
                                              "Nothing", NO_SHORTCUT, P(NULL),
-                                             "This:", NO_SHORTCUT, P(NULL));
+                                             "This:", NO_SHORTCUT, P(NULL), NULL);
             td->valradio->column = 0;
             td->valbox = ctrl_editbox(s, NULL, NO_SHORTCUT, 100,
                                       HELPCTX(ssh_ttymodes),
@@ -3079,7 +2953,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                               conf_radiobutton_handler,
                               I(CONF_x11_auth),
                               "MIT-Magic-Cookie-1", I(X11_MIT),
-                              "XDM-Authorization-1", I(X11_XDM));
+                              "XDM-Authorization-1", I(X11_XDM), NULL);
         }
 
         /*
@@ -3139,16 +3013,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                                            portfwd_handler, P(pfd),
                                            "Local", 'l', P(NULL),
                                            "Remote", 'm', P(NULL),
-                                           "Dynamic", 'y', P(NULL));
-#ifndef NO_IPV6
-        pfd->addressfamily =
-            ctrl_radiobuttons(s, NULL, NO_SHORTCUT, 3,
-                              HELPCTX(ssh_tunnels_portfwd_ipversion),
-                              portfwd_handler, P(pfd),
-                              "Auto", 'u', I(ADDRTYPE_UNSPEC),
-                              "IPv4", '4', I(ADDRTYPE_IPV4),
-                              "IPv6", '6', I(ADDRTYPE_IPV6));
-#endif
+                                           "Dynamic", 'y', P(NULL), NULL);
         ctrl_tabdelay(s, pfd->addbutton);
         ctrl_columns(s, 1, 100);
 
@@ -3226,6 +3091,8 @@ void setup_config_box(struct controlbox *b, bool midsession,
 
     if (DISPLAY_RECONFIGURABLE_PROTOCOL(PROT_SERIAL)) {
         const BackendVtable *ser_vt = backend_vt_from_proto(PROT_SERIAL);
+        static const struct conf_editbox_handler_type conf_editbox_stopbits = {
+            /* .type = */ EDIT_FIXEDPOINT, /* .denominator = */ 2};
 
         /*
          * The Connection/Serial panel.
@@ -3256,8 +3123,6 @@ void setup_config_box(struct controlbox *b, bool midsession,
         /*
          * Stop bits come in units of one half.
          */
-        static const struct conf_editbox_handler_type conf_editbox_stopbits = {
-            .type = EDIT_FIXEDPOINT, .denominator = 2};
 
         ctrl_editbox(s, "Stop bits", 't', 40,
                      HELPCTX(serial_stopbits),
@@ -3288,12 +3153,12 @@ void setup_config_box(struct controlbox *b, bool midsession,
                               conf_radiobutton_bool_handler,
                               I(CONF_rfc_environ),
                               "BSD (commonplace)", 'b', I(false),
-                              "RFC 1408 (unusual)", 'f', I(true));
+                              "RFC 1408 (unusual)", 'f', I(true), NULL);
             ctrl_radiobuttons(s, "Telnet negotiation mode:", 't', 2,
                               HELPCTX(telnet_passive),
                               conf_radiobutton_bool_handler,
                               I(CONF_passive_telnet),
-                              "Passive", I(true), "Active", I(false));
+                              "Passive", I(true), "Active", I(false), NULL);
         }
         ctrl_checkbox(s, "Keyboard sends Telnet special commands", 'k',
                       HELPCTX(telnet_specialkeys),
@@ -3340,7 +3205,7 @@ void setup_config_box(struct controlbox *b, bool midsession,
                           I(CONF_supdup_ascii_set),
                           "None", I(SUPDUP_CHARSET_ASCII),
                           "ITS", I(SUPDUP_CHARSET_ITS),
-                          "WAITS", I(SUPDUP_CHARSET_WAITS));
+                          "WAITS", I(SUPDUP_CHARSET_WAITS), NULL);
 
         ctrl_checkbox(s, "**MORE** processing", 'm',
                       HELPCTX(supdup_more),

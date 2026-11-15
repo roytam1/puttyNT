@@ -101,7 +101,7 @@
 #define CONTEXT CAT(aesgcm_, AESGCM_FLAVOUR)
 #define PREFIX(name) CAT(CAT(aesgcm_, AESGCM_FLAVOUR), CAT(_, name))
 
-#include "aes.h" // for aes_encrypt_ecb_block
+#include "aes.h" /* for aes_encrypt_ecb_block */
 
 static const char *PREFIX(mac_text_name)(ssh2_mac *mac)
 {
@@ -275,6 +275,7 @@ static void PREFIX(mac_BinarySink_write)(
 static void PREFIX(mac_genresult)(ssh2_mac *mac, unsigned char *output)
 {
     CONTEXT *ctx = container_of(mac, CONTEXT, mac);
+    unsigned char blk[16];
 
     /*
      * Consume any partial block of ciphertext remaining.
@@ -287,10 +288,10 @@ static void PREFIX(mac_genresult)(ssh2_mac *mac, unsigned char *output)
     /*
      * Consume the final block giving the lengths of the AAD and ciphertext.
      */
-    unsigned char blk[16];
     memset(blk, 0, 16);
-    PUT_64BIT_MSB_FIRST(blk, ctx->aadlen * 8);
-    PUT_64BIT_MSB_FIRST(blk + 8, ctx->ciphertextlen * 8);
+    PUT_64BIT_MSB_FIRST(blk, uint64_shl(uint64_make(0, ctx->aadlen), 3));
+    PUT_64BIT_MSB_FIRST(blk + 8,
+                        uint64_shl(uint64_make(0, ctx->ciphertextlen), 3));
     PREFIX(coeff)(ctx, blk);
 
     /*
@@ -305,13 +306,14 @@ static void PREFIX(mac_genresult)(ssh2_mac *mac, unsigned char *output)
 static ssh2_mac *PREFIX(mac_new)(const ssh2_macalg *alg, ssh_cipher *cipher)
 {
     const struct aesgcm_extra *extra = alg->extra;
+    CONTEXT *ctx;
     if (!check_aesgcm_availability(extra))
         return NULL;
 
 #ifdef SPECIAL_ALLOC
     CONTEXT *ctx = PREFIX(alloc)();
 #else
-    CONTEXT *ctx = snew(CONTEXT);
+    ctx = snew(CONTEXT);
     memset(ctx, 0, sizeof(CONTEXT));
 #endif
 
@@ -347,22 +349,22 @@ static void PREFIX(mac_free)(ssh2_mac *mac)
 static struct aesgcm_extra_mutable PREFIX(extra_mut);
 
 static const struct aesgcm_extra PREFIX(extra) = {
-    .check_available = PREFIX(available),
-    .mut = &PREFIX(extra_mut),
-    .set_prefix_lengths = PREFIX(set_prefix_lengths),
+    /* .check_available = */ PREFIX(available),
+    /* .mut = */ &PREFIX(extra_mut),
+    /* .set_prefix_lengths = */ PREFIX(set_prefix_lengths),
 };
 
 const ssh2_macalg CAT(ssh2_aesgcm_mac_, AESGCM_FLAVOUR) = {
-    .new = PREFIX(mac_new),
-    .free = PREFIX(mac_free),
-    .setkey = PREFIX(mac_setkey),
-    .start = PREFIX(mac_start),
-    .genresult = PREFIX(mac_genresult),
-    .next_message = PREFIX(mac_next_message),
-    .text_name = PREFIX(mac_text_name),
-    .name = "",
-    .etm_name = "", /* Not selectable independently */
-    .len = 16,
-    .keylen = 0,
-    .extra = &PREFIX(extra),
+    /* .new = */ PREFIX(mac_new),
+    /* .free = */ PREFIX(mac_free),
+    /* .setkey = */ PREFIX(mac_setkey),
+    /* .start = */ PREFIX(mac_start),
+    /* .genresult = */ PREFIX(mac_genresult),
+    /* .next_message = */ PREFIX(mac_next_message),
+    /* .text_name = */ PREFIX(mac_text_name),
+    /* .name = */ "",
+    /* .etm_name = */ "", /* Not selectable independently */
+    /* .len = */ 16,
+    /* .keylen = */ 0,
+    /* .extra = */ &PREFIX(extra),
 };

@@ -10,17 +10,11 @@
 #include "sha512.h"
 
 static const ssh_hashalg *const real_sha512_algs[] = {
-#if HAVE_NEON_SHA512
-    &ssh_sha512_neon,
-#endif
     &ssh_sha512_sw,
     NULL,
 };
 
 static const ssh_hashalg *const real_sha384_algs[] = {
-#if HAVE_NEON_SHA512
-    &ssh_sha384_neon,
-#endif
     &ssh_sha384_sw,
     NULL,
 };
@@ -29,8 +23,9 @@ static ssh_hash *sha512_select(const ssh_hashalg *alg)
 {
     const ssh_hashalg *const *real_algs =
         (const ssh_hashalg *const *)alg->extra;
+    size_t i;
 
-    for (size_t i = 0; real_algs[i]; i++) {
+    for (i = 0; real_algs[i]; i++) {
         const ssh_hashalg *alg = real_algs[i];
         const struct sha512_extra *alg_extra =
             (const struct sha512_extra *)alg->extra;
@@ -45,17 +40,25 @@ static ssh_hash *sha512_select(const ssh_hashalg *alg)
 }
 
 const ssh_hashalg ssh_sha512 = {
-    .new = sha512_select,
-    .hlen = 64,
-    .blocklen = 128,
-    HASHALG_NAMES_ANNOTATED("SHA-512", "dummy selector vtable"),
-    .extra = real_sha512_algs,
+    /* .new = */ sha512_select,
+    /* .reset = */ NULL,
+    /* .copyfrom = */ NULL,
+    /* .digest = */ NULL,
+    /* .free = */ NULL,
+    /* .hlen = */ 64,
+    /* .blocklen = */ 128,
+    /* .text_basename = */ "SHA-512", /* .annotation = */ "dummy selector vtable", /* .text_name = */ "SHA-512" " (" "dummy selector vtable" ")",
+    /* .extra = */ real_sha512_algs,
 };
 
 const ssh_hashalg ssh_sha384 = {
-    .new = sha512_select,
-    .hlen = 48,
-    .blocklen = 128,
-    HASHALG_NAMES_ANNOTATED("SHA-384", "dummy selector vtable"),
-    .extra = real_sha384_algs,
+    /* .new = */ sha512_select,
+    /* .reset = */ NULL,
+    /* .copyfrom = */ NULL,
+    /* .digest = */ NULL,
+    /* .free = */ NULL,
+    /* .hlen = */ 48,
+    /* .blocklen = */ 128,
+    /* .text_basename = */ "SHA-384", /* .annotation = */ "dummy selector vtable", /* .text_name = */ "SHA-384" " (" "dummy selector vtable" ")",
+    /* .extra = */ real_sha384_algs,
 };

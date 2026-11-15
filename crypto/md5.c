@@ -51,13 +51,13 @@ typedef struct md5_block md5_block;
 struct md5_block {
     uint8_t block[64];
     size_t used;
-    uint64_t len;
+    uint64 len;
 };
 
 static inline void md5_block_setup(md5_block *blk)
 {
     blk->used = 0;
-    blk->len = 0;
+    blk->len = uint64_make(0, 0);
 }
 
 static inline bool md5_block_write(
@@ -71,7 +71,7 @@ static inline bool md5_block_write(
     *vdata = p + chunk;
     *len -= chunk;
     blk->used += chunk;
-    blk->len += chunk;
+    blk->len = uint64_add32(blk->len, chunk);
 
     if (blk->used == sizeof(blk->block)) {
         blk->used = 0;
@@ -83,13 +83,13 @@ static inline bool md5_block_write(
 
 static inline void md5_block_pad(md5_block *blk, BinarySink *bs)
 {
-    uint64_t final_len = blk->len << 3;
+    uint64 final_len = uint64_shl(blk->len, 3);
     size_t pad = 63 & (55 - blk->used);
+    unsigned char buf[8];
 
     put_byte(bs, 0x80);
     put_padding(bs, pad, 0);
 
-    unsigned char buf[8];
     PUT_64BIT_LSB_FIRST(buf, final_len);
     put_data(bs, buf, 8);
     smemclr(buf, 8);
@@ -131,31 +131,41 @@ static inline void md5_round(
 static void md5_do_block(uint32_t *core, const uint8_t *block)
 {
     uint32_t message_words[16];
-    for (size_t i = 0; i < 16; i++)
+    uint32_t a;
+    uint32_t b;
+    uint32_t c;
+    uint32_t d;
+    size_t t;
+    size_t i;
+    size_t u;
+    for (i = 0; i < 16; i++)
         message_words[i] = GET_32BIT_LSB_FIRST(block + 4*i);
 
-    uint32_t a = core[0], b = core[1], c = core[2], d = core[3];
+    a = core[0];
+    b = core[1];
+    c = core[2];
+    d = core[3];
 
-    size_t t = 0;
-    for (size_t u = 0; u < 4; u++) {
+    t = 0;
+    for (u = 0; u < 4; u++) {
         md5_round(t++, message_words, &a, &b, &c, &d, F);
         md5_round(t++, message_words, &d, &a, &b, &c, F);
         md5_round(t++, message_words, &c, &d, &a, &b, F);
         md5_round(t++, message_words, &b, &c, &d, &a, F);
     }
-    for (size_t u = 0; u < 4; u++) {
+    for (u = 0; u < 4; u++) {
         md5_round(t++, message_words, &a, &b, &c, &d, G);
         md5_round(t++, message_words, &d, &a, &b, &c, G);
         md5_round(t++, message_words, &c, &d, &a, &b, G);
         md5_round(t++, message_words, &b, &c, &d, &a, G);
     }
-    for (size_t u = 0; u < 4; u++) {
+    for (u = 0; u < 4; u++) {
         md5_round(t++, message_words, &a, &b, &c, &d, H);
         md5_round(t++, message_words, &d, &a, &b, &c, H);
         md5_round(t++, message_words, &c, &d, &a, &b, H);
         md5_round(t++, message_words, &b, &c, &d, &a, H);
     }
-    for (size_t u = 0; u < 4; u++) {
+    for (u = 0; u < 4; u++) {
         md5_round(t++, message_words, &a, &b, &c, &d, I);
         md5_round(t++, message_words, &d, &a, &b, &c, I);
         md5_round(t++, message_words, &c, &d, &a, &b, I);
@@ -227,19 +237,20 @@ static void md5_write(BinarySink *bs, const void *vp, size_t len)
 static void md5_digest(ssh_hash *hash, uint8_t *digest)
 {
     md5 *s = container_of(hash, md5, hash);
+    size_t i;
 
     md5_block_pad(&s->blk, BinarySink_UPCAST(s));
-    for (size_t i = 0; i < 4; i++)
+    for (i = 0; i < 4; i++)
         PUT_32BIT_LSB_FIRST(digest + 4*i, s->core[i]);
 }
 
 const ssh_hashalg ssh_md5 = {
-    .new = md5_new,
-    .reset = md5_reset,
-    .copyfrom = md5_copyfrom,
-    .digest = md5_digest,
-    .free = md5_free,
-    .hlen = 16,
-    .blocklen = 64,
-    HASHALG_NAMES_BARE("MD5"),
+    /* .new = */ md5_new,
+    /* .reset = */ md5_reset,
+    /* .copyfrom = */ md5_copyfrom,
+    /* .digest = */ md5_digest,
+    /* .free = */ md5_free,
+    /* .hlen = */ 16,
+    /* .blocklen = */ 64,
+    /* .text_basename = */ "MD5", /* .annotation = */ NULL, /* .text_name = */ "MD5",
 };

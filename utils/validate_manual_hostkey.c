@@ -93,6 +93,7 @@ bool validate_manual_hostkey(char *key)
             unsigned alglen;
             int minlen;
             int len = 0;
+            size_t base64_len;
 
             len += base64_decode_atom(q, decoded+len);
             if (len < 3)
@@ -109,7 +110,7 @@ bool validate_manual_hostkey(char *key)
             if (strlen(q) < minlen)
                 goto not_ssh2_blob;    /* sorry */
 
-            size_t base64_len = strspn(q, BASE64_CHARS_ALL);
+            base64_len = strspn(q, BASE64_CHARS_ALL);
             memmove(key, q, base64_len);
             key[base64_len] = '\0';
             return true;

@@ -72,18 +72,23 @@ static mp_int *probprime_generate(
     pcs_ready(pcs);
 
     while (true) {
+        mp_int *p;
+        MillerRabin *mr;
+        bool known_bad;
+        unsigned nchecks;
+        unsigned check;
         progress_report_attempt(prog);
 
-        mp_int *p = pcs_generate(pcs);
+        p = pcs_generate(pcs);
         if (!p) {
             pcs_free(pcs);
             return NULL;
         }
 
-        MillerRabin *mr = miller_rabin_new(p);
-        bool known_bad = false;
-        unsigned nchecks = miller_rabin_checks_needed(mp_get_nbits(p));
-        for (unsigned check = 0; check < nchecks; check++) {
+        mr = miller_rabin_new(p);
+        known_bad = false;
+        nchecks = miller_rabin_checks_needed(mp_get_nbits(p));
+        for (check = 0; check < nchecks; check++) {
             if (!miller_rabin_test_random(mr)) {
                 known_bad = true;
                 break;
@@ -275,49 +280,27 @@ static mp_int *primegen_small(Pockle *pockle, PrimeCandidateSource *pcs)
     }
 }
 
-#ifdef DEBUG_PRIMEGEN
-static void timestamp(FILE *fp)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    fprintf(fp, "%lu.%09lu: ", (unsigned long)ts.tv_sec,
-            (unsigned long)ts.tv_nsec);
-}
-static PRINTF_LIKE(1, 2) void debug_f(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    timestamp(stderr);
-    vfprintf(stderr, fmt, ap);
-    fputc('\n', stderr);
-    va_end(ap);
-}
-static void debug_f_mp(const char *fmt, mp_int *x, ...)
-{
-    va_list ap;
-    va_start(ap, x);
-    timestamp(stderr);
-    vfprintf(stderr, fmt, ap);
-    mp_dump(stderr, "", x, "\n");
-    va_end(ap);
-}
-#else
-#define debug_f(...) ((void)0)
-#define debug_f_mp(...) ((void)0)
-#endif
+/* (upstream's DEBUG_PRIMEGEN output needs the Unix clock_gettime) */
+#define debug_f(args) ((void)0)
+#define debug_f_mp(args) ((void)0)
 
 static double uniform_random_double(void)
 {
+    /* A 64-bit random number times 2^-64, built from two 32-bit
+     * halves: the sum is exact before its one rounding, as the
+     * conversion of a 64-bit integer would be */
     unsigned char randbuf[8];
     random_read(randbuf, 8);
-    return GET_64BIT_MSB_FIRST(randbuf) * 0x1.0p-64;
+    return ldexp(GET_32BIT_MSB_FIRST(randbuf) * 4294967296.0 +
+                 GET_32BIT_MSB_FIRST(randbuf + 4), -64);
 }
 
 static mp_int *mp_ceil_div(mp_int *n, mp_int *d)
 {
     mp_int *nplus = mp_add(n, d);
+    mp_int *toret;
     mp_sub_integer_into(nplus, nplus, 1);
-    mp_int *toret = mp_div(nplus, d);
+    toret = mp_div(nplus, d);
     mp_free(nplus);
     return toret;
 }
@@ -327,14 +310,16 @@ static mp_int *provableprime_generate_inner(
     ProgressReceiver *prog, double progress_origin, double progress_scale)
 {
     unsigned bits = pcs_get_bits(pcs);
+    unsigned min_bits_needed;
+    unsigned max_bits_needed;
+    double progress;
     assert(bits > 1);
 
     if (bits <= 32) {
-        debug_f("ppgi(%u) -> small", bits);
+        debug_f(("ppgi(%u) -> small", bits));
         return primegen_small(ppc->pockle, pcs);
     }
 
-    unsigned min_bits_needed, max_bits_needed;
     {
         /*
          * Find the product of all the prime factors we already know
@@ -343,7 +328,10 @@ static mp_int *provableprime_generate_inner(
         mp_int *size_got = mp_from_integer(1);
         size_t nfactors;
         mp_int **factors = pcs_get_known_prime_factors(pcs, &nfactors);
-        for (size_t i = 0; i < nfactors; i++) {
+        mp_int *upperbound;
+        mp_int *size_needed;
+        size_t i;
+        for (i = 0; i < nfactors; i++) {
             mp_int *to_free = size_got;
             size_got = mp_unsafe_shrink(mp_mul(size_got, factors[i]));
             mp_free(to_free);
@@ -353,15 +341,15 @@ static mp_int *provableprime_generate_inner(
          * Find the largest cofactor we might be able to use, and the
          * smallest one we can get away with.
          */
-        mp_int *upperbound = pcs_get_upper_bound(pcs);
-        mp_int *size_needed = mp_nthroot(upperbound, 3, NULL);
-        debug_f_mp("upperbound = ", upperbound);
+        upperbound = pcs_get_upper_bound(pcs);
+        size_needed = mp_nthroot(upperbound, 3, NULL);
+        debug_f_mp(("upperbound = ", upperbound));
         {
             mp_int *to_free = upperbound;
             upperbound = mp_unsafe_shrink(mp_div(upperbound, size_got));
             mp_free(to_free);
         }
-        debug_f_mp("size_needed = ", size_needed);
+        debug_f_mp(("size_needed = ", size_needed));
         {
             mp_int *to_free = size_needed;
             size_needed = mp_unsafe_shrink(mp_ceil_div(size_needed, size_got));
@@ -396,24 +384,31 @@ static mp_int *provableprime_generate_inner(
         mp_free(size_got);
     }
 
-    double progress = 0.0;
+    progress = 0.0;
 
     if (min_bits_needed) {
-        debug_f("ppgi(%u) recursing, need [%u,%u] more bits",
-                bits, min_bits_needed, max_bits_needed);
+        unsigned *sizes;
+        size_t nsizes;
+        size_t sizesize;
+        unsigned real_min;
+        unsigned real_max;
+        size_t i;
+        debug_f(("ppgi(%u) recursing, need [%u,%u] more bits",
+                 bits, min_bits_needed, max_bits_needed));
 
-        unsigned *sizes = NULL;
-        size_t nsizes = 0, sizesize = 0;
+        sizes = NULL;
+        nsizes = 0;
+        sizesize = 0;
 
-        unsigned real_min = max_bits_needed / 2;
-        unsigned real_max = (max_bits_needed >= 20 ?
-                             max_bits_needed - 20 : 0);
+        real_min = max_bits_needed / 2;
+        real_max = (max_bits_needed >= 20 ?
+                    max_bits_needed - 20 : 0);
         if (real_min < min_bits_needed)
             real_min = min_bits_needed;
         if (real_max < real_min)
             real_max = real_min;
-        debug_f("ppgi(%u) revised bits interval = [%u,%u]",
-                bits, real_min, real_max);
+        debug_f(("ppgi(%u) revised bits interval = [%u,%u]",
+                 bits, real_min, real_max));
 
         switch (ppc->extra->spp) {
           case SPP_FAST:
@@ -445,12 +440,13 @@ static mp_int *provableprime_generate_inner(
              * definite prime is needed for non-crypto purposes, it
              * may still be the fastest way to put your hands on one.
              */
-            debug_f("ppgi(%u) fast mode, just ask for %u bits",
-                    bits, min_bits_needed);
+            debug_f(("ppgi(%u) fast mode, just ask for %u bits",
+                     bits, min_bits_needed));
             sgrowarray(sizes, sizesize, nsizes);
             sizes[nsizes++] = min_bits_needed;
             break;
           case SPP_MAURER_SIMPLE: {
+          unsigned sub_bits;
             /*
              * Select the size of the subsidiary prime at random from
              * sqrt(outputprime) up to outputprime/2^20, in such a way
@@ -477,22 +473,24 @@ static mp_int *provableprime_generate_inner(
              * can pick!)
              */
           maurer_simple:
-            debug_f("ppgi(%u) Maurer simple mode", bits);
+            debug_f(("ppgi(%u) Maurer simple mode", bits));
 
-            unsigned sub_bits;
             do {
                 double uniform = uniform_random_double();
                 sub_bits = real_max * pow(2.0, uniform - 1) + 0.5;
-                debug_f(" ... %.6f -> %u?", uniform, sub_bits);
+                debug_f((" ... %.6f -> %u?", uniform, sub_bits));
             } while (!(real_min <= sub_bits && sub_bits <= real_max));
 
-            debug_f("ppgi(%u) asking for %u bits", bits, sub_bits);
+            debug_f(("ppgi(%u) asking for %u bits", bits, sub_bits));
             sgrowarray(sizes, sizesize, nsizes);
             sizes[nsizes++] = sub_bits;
 
             break;
           }
           case SPP_MAURER_COMPLEX: {
+            double *s;
+            size_t ns;
+            size_t ssize;
             /*
              * In this mode, we may generate multiple factors of p-1
              * which between them add up to at least n/2 bits, in such
@@ -521,39 +519,44 @@ static mp_int *provableprime_generate_inner(
                  * can't possibly generate a value in the range we
                  * need. In that situation, fall back to Maurer
                  * simple. */
-                debug_f("ppgi(%u) skipping GenerateSizeList, "
-                        "real_max too small", bits);
+                debug_f(("ppgi(%u) skipping GenerateSizeList, "
+                         "real_max too small", bits));
                 goto maurer_simple;    /* sorry! */
             }
 
-            double *s = NULL;
-            size_t ns, ssize = 0;
+            s = NULL;
+            ssize = 0;
 
             while (true) {
-                debug_f("ppgi(%u) starting GenerateSizeList", bits);
+                double range;
+                unsigned min_total;
+                unsigned max_total;
+                size_t i;
+                debug_f(("ppgi(%u) starting GenerateSizeList", bits));
                 ns = 0;
-                double range = 1.0;
+                range = 1.0;
                 while (true) {
                     /* Generate the next number */
                     double u = uniform_random_double() * range;
+                    size_t i;
+                    double sum;
                     range -= u;
-                    debug_f("  u_%"SIZEu" = %g", ns, u);
+                    debug_f(("  u_%"SIZEu" = %g", ns, u));
 
                     /* Insert it in the list */
                     sgrowarray(s, ssize, ns);
-                    size_t i;
                     for (i = ns; i > 0 && s[i-1] < u; i--)
                         s[i] = s[i-1];
                     s[i] = u;
                     ns++;
-                    debug_f("    inserting as s[%"SIZEu"]", i);
+                    debug_f(("    inserting as s[%"SIZEu"]", i));
 
                     /* Look for a suitable initial subsequence */
-                    double sum = 0;
+                    sum = 0;
                     for (i = 0; i < ns; i++) {
                         sum += s[i];
                         if (sum + s[i] > 1.0) {
-                            debug_f("  s[0..%"SIZEu"] works!", i);
+                            debug_f(("  s[0..%"SIZEu"] works!", i));
 
                             /* Truncate the sequence here, and stop
                              * generating random real numbers. */
@@ -576,14 +579,15 @@ static mp_int *provableprime_generate_inner(
                  */
                 nsizes = 0;
 
-                unsigned min_total = 0, max_total = 0;
+                min_total = 0;
+                max_total = 0;
 
-                for (size_t i = 0; i < ns; i++) {
+                for (i = 0; i < ns; i++) {
                     /* These sizes are measured in actual entropy, so
                      * add 1 bit each time to account for the
                      * zero-information leading 1 */
                     unsigned this_size = max_bits_needed * s[i] + 1;
-                    debug_f("  bits[%"SIZEu"] = %u", i, this_size);
+                    debug_f(("  bits[%"SIZEu"] = %u", i, this_size));
                     sgrowarray(sizes, sizesize, nsizes);
                     sizes[nsizes++] = this_size;
 
@@ -591,12 +595,12 @@ static mp_int *provableprime_generate_inner(
                     max_total += this_size;
                 }
 
-                debug_f("  total bits = [%u,%u)", min_total, max_total);
+                debug_f(("  total bits = [%u,%u)", min_total, max_total));
                 if (min_total < real_min || max_total > real_max+1) {
-                    debug_f("  total out of range, try again");
+                    debug_f(("  total out of range, try again"));
                 } else {
-                    debug_f("  success! %"SIZEu" sub-primes totalling [%u,%u) "
-                            "bits", nsizes, min_total, max_total);
+                    debug_f(("  success! %"SIZEu" sub-primes totalling "
+                             "[%u,%u) bits", nsizes, min_total, max_total));
                     break;
                 }
             }
@@ -609,7 +613,7 @@ static mp_int *provableprime_generate_inner(
             unreachable("bad subprime policy");
         }
 
-        for (size_t i = 0; i < nsizes; i++) {
+        for (i = 0; i < nsizes; i++) {
             unsigned sub_bits = sizes[i];
             double progress_in_this_prime = (double)sub_bits / bits;
             mp_int *q = provableprime_generate_inner(
@@ -618,7 +622,7 @@ static mp_int *provableprime_generate_inner(
                 progress_scale * progress_in_this_prime);
             progress += progress_in_this_prime;
             assert(q);
-            debug_f_mp("ppgi(%u) got factor ", q, bits);
+            debug_f_mp(("ppgi(%u) got factor ", q, bits));
             pcs_require_residue_1_mod_prime(pcs, q);
             mp_free(q);
         }
@@ -626,40 +630,44 @@ static mp_int *provableprime_generate_inner(
         smemclr(sizes, sizesize * sizeof(*sizes));
         sfree(sizes);
     } else {
-        debug_f("ppgi(%u) no need to recurse", bits);
+        debug_f(("ppgi(%u) no need to recurse", bits));
     }
 
-    debug_f("ppgi(%u) ready, %u bits remaining",
-            bits, pcs_get_bits_remaining(pcs));
+    debug_f(("ppgi(%u) ready, %u bits remaining",
+             bits, pcs_get_bits_remaining(pcs)));
     pcs_ready(pcs);
 
     while (true) {
         mp_int *p = pcs_generate(pcs);
+        MillerRabin *mr;
+        mp_int *witness;
+        size_t nfactors;
+        mp_int **factors;
+        PockleStatus st;
         if (!p) {
             pcs_free(pcs);
             return NULL;
         }
 
-        debug_f_mp("provable_step p=", p);
+        debug_f_mp(("provable_step p=", p));
 
-        MillerRabin *mr = miller_rabin_new(p);
-        debug_f("provable_step mr setup done");
-        mp_int *witness = miller_rabin_find_potential_primitive_root(mr);
+        mr = miller_rabin_new(p);
+        debug_f(("provable_step mr setup done"));
+        witness = miller_rabin_find_potential_primitive_root(mr);
         miller_rabin_free(mr);
 
         if (!witness) {
-            debug_f("provable_step mr failed");
+            debug_f(("provable_step mr failed"));
             mp_free(p);
             continue;
         }
 
-        size_t nfactors;
-        mp_int **factors = pcs_get_known_prime_factors(pcs, &nfactors);
-        PockleStatus st = pockle_add_prime(
+        factors = pcs_get_known_prime_factors(pcs, &nfactors);
+        st = pockle_add_prime(
             ppc->pockle, p, factors, nfactors, witness);
 
         if (st != POCKLE_OK) {
-            debug_f("provable_step proof failed %d", (int)st);
+            debug_f(("provable_step proof failed %d", (int)st));
 
             /*
              * Check by assertion that the error status is not one of
@@ -681,7 +689,7 @@ static mp_int *provableprime_generate_inner(
 
         mp_free(witness);
         pcs_free(pcs);
-        debug_f_mp("ppgi(%u) done, got ", p, bits);
+        debug_f_mp(("ppgi(%u) done, got ", p, bits));
         progress_report(prog, progress_origin + progress_scale);
         return p;
     }
@@ -725,7 +733,7 @@ DECLARE_POLICY(primegen_provable_maurer_complex, SPP_MAURER_COMPLEX);
  */
 
 static inline ProgressPhase null_progress_add(void) {
-    ProgressPhase ph = { .n = 0 };
+    ProgressPhase ph = { /* .n = */ 0 };
     return ph;
 }
 ProgressPhase null_progress_add_linear(
@@ -738,13 +746,13 @@ void null_progress_report(ProgressReceiver *prog, double progress) {}
 void null_progress_report_attempt(ProgressReceiver *prog) {}
 void null_progress_report_phase_complete(ProgressReceiver *prog) {}
 const ProgressReceiverVtable null_progress_vt = {
-    .add_linear = null_progress_add_linear,
-    .add_probabilistic = null_progress_add_probabilistic,
-    .ready = null_progress_ready,
-    .start_phase = null_progress_start_phase,
-    .report = null_progress_report,
-    .report_attempt = null_progress_report_attempt,
-    .report_phase_complete = null_progress_report_phase_complete,
+    /* .add_linear = */ null_progress_add_linear,
+    /* .add_probabilistic = */ null_progress_add_probabilistic,
+    /* .ready = */ null_progress_ready,
+    /* .start_phase = */ null_progress_start_phase,
+    /* .report = */ null_progress_report,
+    /* .report_attempt = */ null_progress_report_attempt,
+    /* .report_phase_complete = */ null_progress_report_phase_complete,
 };
 
 /* ----------------------------------------------------------------------

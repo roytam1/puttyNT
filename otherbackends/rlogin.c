@@ -53,9 +53,10 @@ static void rlogin_log(Plug *plug, Socket *s, PlugLogType type, SockAddr *addr,
                        error_msg, error_code,
                        rlogin->conf, rlogin->socket_connected);
     if (type == PLUGLOG_CONNECT_SUCCESS) {
+        char *ruser;
         rlogin->socket_connected = true;
 
-        char *ruser = get_remote_username(rlogin->conf);
+        ruser = get_remote_username(rlogin->conf);
         if (ruser) {
             /*
              * If we already know the remote username, call
@@ -172,11 +173,12 @@ static void rlogin_startup(Rlogin *rlogin, SeatPromptResult spr,
         rlogin->s = NULL;
         seat_notify_remote_exit(rlogin->seat);
     } else if (spr.kind == SPRK_SW_ABORT) {
+        char *err;
         /* Something else went wrong at the username prompt, so we
          * have to show some kind of error. */
         sk_close(rlogin->s);
         rlogin->s = NULL;
-        char *err = spr_get_error_message(spr);
+        err = spr_get_error_message(spr);
         seat_connection_fatal(rlogin->seat, "%s", err);
         sfree(err);
     } else {
@@ -200,10 +202,10 @@ static void rlogin_startup(Rlogin *rlogin, SeatPromptResult spr,
 }
 
 static const PlugVtable Rlogin_plugvt = {
-    .log = rlogin_log,
-    .closing = rlogin_closing,
-    .receive = rlogin_receive,
-    .sent = rlogin_sent,
+    /* .log = */ rlogin_log,
+    /* .closing = */ rlogin_closing,
+    /* .receive = */ rlogin_receive,
+    /* .sent = */ rlogin_sent,
 };
 
 static char *rlogin_description(Interactor *itr)
@@ -231,10 +233,10 @@ static void rlogin_set_seat(Interactor *itr, Seat *seat)
 }
 
 static const InteractorVtable Rlogin_interactorvt = {
-    .description = rlogin_description,
-    .logpolicy = rlogin_logpolicy,
-    .get_seat = rlogin_get_seat,
-    .set_seat = rlogin_set_seat,
+    /* .description = */ rlogin_description,
+    /* .logpolicy = */ rlogin_logpolicy,
+    /* .get_seat = */ rlogin_get_seat,
+    /* .set_seat = */ rlogin_set_seat,
 };
 
 /*
@@ -473,24 +475,26 @@ static int rlogin_cfg_info(Backend *be)
 }
 
 const BackendVtable rlogin_backend = {
-    .init = rlogin_init,
-    .free = rlogin_free,
-    .reconfig = rlogin_reconfig,
-    .send = rlogin_send,
-    .sendbuffer = rlogin_sendbuffer,
-    .size = rlogin_size,
-    .special = rlogin_special,
-    .get_specials = rlogin_get_specials,
-    .connected = rlogin_connected,
-    .exitcode = rlogin_exitcode,
-    .sendok = rlogin_sendok,
-    .ldisc_option_state = rlogin_ldisc,
-    .provide_ldisc = rlogin_provide_ldisc,
-    .unthrottle = rlogin_unthrottle,
-    .cfg_info = rlogin_cfg_info,
-    .id = "rlogin",
-    .displayname_tc = "Rlogin",
-    .displayname_lc = "Rlogin", /* proper name, so capitalise it anyway */
-    .protocol = PROT_RLOGIN,
-    .default_port = 513,
+    /* .init = */ rlogin_init,
+    /* .free = */ rlogin_free,
+    /* .reconfig = */ rlogin_reconfig,
+    /* .send = */ rlogin_send,
+    /* .sendbuffer = */ rlogin_sendbuffer,
+    /* .size = */ rlogin_size,
+    /* .special = */ rlogin_special,
+    /* .get_specials = */ rlogin_get_specials,
+    /* .connected = */ rlogin_connected,
+    /* .exitcode = */ rlogin_exitcode,
+    /* .sendok = */ rlogin_sendok,
+    /* .ldisc_option_state = */ rlogin_ldisc,
+    /* .provide_ldisc = */ rlogin_provide_ldisc,
+    /* .unthrottle = */ rlogin_unthrottle,
+    /* .cfg_info = */ rlogin_cfg_info,
+    /* .test_for_upstream = */ NULL,
+    /* .close_warn_text = */ NULL,
+    /* .id = */ "rlogin",
+    /* .displayname_tc = */ "Rlogin",
+    /* .displayname_lc = */ "Rlogin", /* proper name, so capitalise it anyway */
+    /* .protocol = */ PROT_RLOGIN,
+    /* .default_port = */ 513,
 };

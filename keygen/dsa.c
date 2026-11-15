@@ -30,21 +30,29 @@ int dsa_generate(struct dsa_key *key, int bits, PrimeGenerationContext *pgc,
     ProgressPhase phase_q = primegen_add_progress_phase(pgc, prog, 160);
     ProgressPhase phase_p = primegen_add_progress_phase(pgc, prog, bits);
     double g_failure_probability = 1.0
-        / (double)(1ULL << 53)
-        / (double)(1ULL << 53)
-        / (double)(1ULL << 53);
+        / 9007199254740992.0           /* 2^53 */
+        / 9007199254740992.0
+        / 9007199254740992.0;
     ProgressPhase phase_g = progress_add_probabilistic(
         prog, estimate_modexp_cost(bits), 1.0 - g_failure_probability);
+    PrimeCandidateSource *pcs;
+    mp_int *q;
+    mp_int *p;
+    mp_int *power;
+    mp_int *h;
+    mp_int *g;
+    mp_int *two;
+    mp_int *qm1;
+    mp_int *x;
     progress_ready(prog);
 
-    PrimeCandidateSource *pcs;
 
     /*
      * Generate q: a prime of length 160.
      */
     progress_start_phase(prog, phase_q);
     pcs = pcs_new(160);
-    mp_int *q = primegen_generate(pgc, pcs, prog);
+    q = primegen_generate(pgc, pcs, prog);
     progress_report_phase_complete(prog);
 
     /*
@@ -54,7 +62,7 @@ int dsa_generate(struct dsa_key *key, int bits, PrimeGenerationContext *pgc,
     progress_start_phase(prog, phase_p);
     pcs = pcs_new(bits);
     pcs_require_residue_1_mod_prime(pcs, q);
-    mp_int *p = primegen_generate(pgc, pcs, prog);
+    p = primegen_generate(pgc, pcs, prog);
     progress_report_phase_complete(prog);
 
     /*
@@ -64,9 +72,8 @@ int dsa_generate(struct dsa_key *key, int bits, PrimeGenerationContext *pgc,
      * for g.
      */
     progress_start_phase(prog, phase_g);
-    mp_int *power = mp_div(p, q); /* this is floor(p/q) == (p-1)/q */
-    mp_int *h = mp_from_integer(2);
-    mp_int *g;
+    power = mp_div(p, q);         /* this is floor(p/q) == (p-1)/q */
+    h = mp_from_integer(2);
     while (1) {
         progress_report_attempt(prog);
         g = mp_modpow(h, power, p);
@@ -84,10 +91,10 @@ int dsa_generate(struct dsa_key *key, int bits, PrimeGenerationContext *pgc,
      * which should be a number between 1 and q-1 exclusive, and
      * our public key y = g^x mod p.
      */
-    mp_int *two = mp_from_integer(2);
-    mp_int *qm1 = mp_copy(q);
+    two = mp_from_integer(2);
+    qm1 = mp_copy(q);
     mp_sub_integer_into(qm1, qm1, 1);
-    mp_int *x = mp_random_in_range(two, qm1);
+    x = mp_random_in_range(two, qm1);
     mp_free(two);
     mp_free(qm1);
 

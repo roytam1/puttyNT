@@ -35,23 +35,26 @@ bool aux_match_opt(AuxMatchOpt *amo, CmdlineArg **val,
 {
     /* Find the end of the option name */
     CmdlineArg *optarg = amo->arglist->args[amo->index];
-    assert(optarg);
-    const char *opt = cmdline_arg_to_utf8(optarg);
-
+    const char *opt;
     ptrlen argopt;
+    ptrlen argopt2;
+    va_list ap;
+    bool matched;
+    assert(optarg);
+    opt = cmdline_arg_to_utf8(optarg);
+
     argopt.ptr = opt;
     argopt.len = strcspn(opt, "=");
 
     /* Normalise GNU-style --foo long options to the -foo that this
      * tool has historically used */
-    ptrlen argopt2 = make_ptrlen(NULL, 0);
+    argopt2 = make_ptrlen(NULL, 0);
     if (ptrlen_startswith(argopt, PTRLEN_LITERAL("--"), NULL))
         ptrlen_startswith(argopt, PTRLEN_LITERAL("-"), &argopt2);
 
     /* See if this option matches any of our synonyms */
-    va_list ap;
     va_start(ap, optname);
-    bool matched = false;
+    matched = false;
     while (optname) {
         if (ptrlen_eq_string(argopt, optname)) {
             matched = true;
@@ -92,8 +95,9 @@ bool aux_match_opt(AuxMatchOpt *amo, CmdlineArg **val,
 bool aux_match_arg(AuxMatchOpt *amo, CmdlineArg **val)
 {
     CmdlineArg *optarg = amo->arglist->args[amo->index];
+    const char *opt;
     assert(optarg);
-    const char *opt = cmdline_arg_to_utf8(optarg);
+    opt = cmdline_arg_to_utf8(optarg);
 
     if (!amo->doing_opts || opt[0] != '-' || !strcmp(opt, "-")) {
         *val = optarg;

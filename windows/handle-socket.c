@@ -199,6 +199,7 @@ static void sk_handle_write_eof(Socket *s)
 static void handle_socket_unfreeze(void *hsv)
 {
     HandleSocket *hs = (HandleSocket *)hsv;
+    ptrlen data;
 
     /*
      * If we've been put into a state other than THAWING since the
@@ -210,7 +211,7 @@ static void handle_socket_unfreeze(void *hsv)
     /*
      * Get some of the data we've buffered.
      */
-    ptrlen data = bufchain_prefix(&hs->inputdata);
+    data = bufchain_prefix(&hs->inputdata);
     assert(data.len > 0);
 
     /*
@@ -315,16 +316,11 @@ static SocketEndpointInfo *sk_handle_endpoint_info(Socket *s, bool peer)
 
     if (!kernel32_module) {
         kernel32_module = load_system32_dll("kernel32.dll");
-#if !HAVE_GETNAMEDPIPECLIENTPROCESSID
         /* For older Visual Studio, and MinGW too (at least as of
          * Ubuntu 16.04), this function isn't available in the header
          * files to type-check. */
         GET_WINDOWS_FUNCTION_NO_TYPECHECK(
             kernel32_module, GetNamedPipeClientProcessId);
-#else
-        GET_WINDOWS_FUNCTION(
-            kernel32_module, GetNamedPipeClientProcessId);
-#endif
     }
 
     /*
@@ -346,14 +342,14 @@ static SocketEndpointInfo *sk_handle_endpoint_info(Socket *s, bool peer)
 }
 
 static const SocketVtable HandleSocket_sockvt = {
-    .plug = sk_handle_plug,
-    .close = sk_handle_close,
-    .write = sk_handle_write,
-    .write_oob = sk_handle_write_oob,
-    .write_eof = sk_handle_write_eof,
-    .set_frozen = sk_handle_set_frozen,
-    .socket_error = sk_handle_socket_error,
-    .endpoint_info = sk_handle_endpoint_info,
+    /* .plug = */ sk_handle_plug,
+    /* .close = */ sk_handle_close,
+    /* .write = */ sk_handle_write,
+    /* .write_oob = */ sk_handle_write_oob,
+    /* .write_eof = */ sk_handle_write_eof,
+    /* .set_frozen = */ sk_handle_set_frozen,
+    /* .socket_error = */ sk_handle_socket_error,
+    /* .endpoint_info = */ sk_handle_endpoint_info,
 };
 
 static void sk_handle_connect_success_callback(void *ctx)
@@ -447,14 +443,14 @@ static SocketEndpointInfo *sk_handle_deferred_endpoint_info(
 }
 
 static const SocketVtable HandleSocket_deferred_sockvt = {
-    .plug = sk_handle_plug,
-    .close = sk_handle_deferred_close,
-    .write = sk_handle_deferred_write,
-    .write_oob = sk_handle_deferred_write,
-    .write_eof = sk_handle_deferred_write_eof,
-    .set_frozen = sk_handle_deferred_set_frozen,
-    .socket_error = sk_handle_socket_error,
-    .endpoint_info = sk_handle_deferred_endpoint_info,
+    /* .plug = */ sk_handle_plug,
+    /* .close = */ sk_handle_deferred_close,
+    /* .write = */ sk_handle_deferred_write,
+    /* .write_oob = */ sk_handle_deferred_write,
+    /* .write_eof = */ sk_handle_deferred_write_eof,
+    /* .set_frozen = */ sk_handle_deferred_set_frozen,
+    /* .socket_error = */ sk_handle_socket_error,
+    /* .endpoint_info = */ sk_handle_deferred_endpoint_info,
 };
 
 Socket *make_deferred_handle_socket(DeferredSocketOpener *opener,
@@ -479,15 +475,20 @@ void setup_handle_socket(Socket *s, HANDLE send_H, HANDLE recv_H,
                          HANDLE stderr_H, bool overlapped)
 {
     HandleSocket *hs = container_of(s, HandleSocket, sock);
+    int flags;
+    struct handle *recv_h;
+    struct handle *send_h;
+    struct handle *stderr_h;
+    bool start_frozen;
     assert(hs->sock.vt == &HandleSocket_deferred_sockvt);
 
-    int flags = (overlapped ? HANDLE_FLAG_OVERLAPPED : 0);
+    flags = (overlapped ? HANDLE_FLAG_OVERLAPPED : 0);
 
-    struct handle *recv_h = handle_input_new(
+    recv_h = handle_input_new(
         recv_H, handle_gotdata, hs, flags);
-    struct handle *send_h = handle_output_new(
+    send_h = handle_output_new(
         send_H, handle_sentdata, hs, flags);
-    struct handle *stderr_h = !stderr_H ? NULL : handle_input_new(
+    stderr_h = !stderr_H ? NULL : handle_input_new(
         stderr_H, handle_stderr, hs, flags);
 
     while (bufchain_size(&hs->outputdata)) {
@@ -499,7 +500,7 @@ void setup_handle_socket(Socket *s, HANDLE send_H, HANDLE recv_H,
     if (hs->output_eof_pending)
         handle_write_eof(send_h);
 
-    bool start_frozen = hs->start_frozen;
+    start_frozen = hs->start_frozen;
 
     deferred_socket_opener_free(hs->opener);
     bufchain_clear(&hs->outputdata);

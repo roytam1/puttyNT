@@ -68,67 +68,69 @@ typedef enum { SHAPING_CHAR_TYPE_LIST(ENUM_DECL) N_SHAPING_TYPES } ShapingType;
 
 static inline bool typeIsStrong(BidiType t)
 {
-    return ((1<<L) | (1<<R) | (1<<AL)) & (1 << t);
+    return (((1<<L) | (1<<R) | (1<<AL)) & (1 << t)) != 0;
 }
 static inline bool typeIsWeak(BidiType t)
 {
-    return ((1<<EN) | (1<<ES) | (1<<ET) | (1<<AN) |
-            (1<<CS) | (1<<NSM) | (1<<BN)) & (1 << t);
+    return (((1<<EN) | (1<<ES) | (1<<ET) | (1<<AN) |
+            (1<<CS) | (1<<NSM) | (1<<BN)) & (1 << t)) != 0;
 }
 static inline bool typeIsNeutral(BidiType t)
 {
-    return ((1<<B) | (1<<S) | (1<<WS) | (1<<ON)) & (1 << t);
+    return (((1<<B) | (1<<S) | (1<<WS) | (1<<ON)) & (1 << t)) != 0;
 }
 static inline bool typeIsBidiActive(BidiType t)
 {
-    return ((1<<R) | (1<<AL) | (1<<AN) | (1<<RLE) | (1<<LRE) | (1<<RLO) |
-            (1<<LRO) | (1<<PDF) | (1<<RLI)) & (1 << t);
+    return (((1<<R) | (1<<AL) | (1<<AN) | (1<<RLE) | (1<<LRE) | (1<<RLO) |
+            (1<<LRO) | (1<<PDF) | (1<<RLI)) & (1 << t)) != 0;
 }
 static inline bool typeIsIsolateInitiator(BidiType t)
 {
-    return ((1<<LRI) | (1<<RLI) | (1<<FSI)) & (1 << t);
+    return (((1<<LRI) | (1<<RLI) | (1<<FSI)) & (1 << t)) != 0;
 }
 static inline bool typeIsIsolateInitiatorOrPDI(BidiType t)
 {
-    return ((1<<LRI) | (1<<RLI) | (1<<FSI) | (1<<PDI)) & (1 << t);
+    return (((1<<LRI) | (1<<RLI) | (1<<FSI) | (1<<PDI)) & (1 << t)) != 0;
 }
 static inline bool typeIsEmbeddingInitiator(BidiType t)
 {
-    return ((1<<LRE) | (1<<RLE) | (1<<LRO) | (1<<RLO)) & (1 << t);
+    return (((1<<LRE) | (1<<RLE) | (1<<LRO) | (1<<RLO)) & (1 << t)) != 0;
 }
 static inline bool typeIsEmbeddingInitiatorOrPDF(BidiType t)
 {
-    return ((1<<LRE) | (1<<RLE) | (1<<LRO) | (1<<RLO) | (1<<PDF)) & (1 << t);
+    return (((1<<LRE) | (1<<RLE) | (1<<LRO) | (1<<RLO) | (1<<PDF)) &
+            (1 << t)) != 0;
 }
 static inline bool typeIsWeakSeparatorOrTerminator(BidiType t)
 {
-    return ((1<<ES) | (1<<ET) | (1<<CS)) & (1 << t);
+    return (((1<<ES) | (1<<ET) | (1<<CS)) & (1 << t)) != 0;
 }
 static inline bool typeIsNeutralOrIsolate(BidiType t)
 {
-    return ((1<<S) | (1<<WS) | (1<<ON) | (1<<FSI) | (1<<LRI) | (1<<RLI) |
-            (1<<PDI)) & (1 << t);
+    return (((1<<S) | (1<<WS) | (1<<ON) | (1<<FSI) | (1<<LRI) | (1<<RLI) |
+            (1<<PDI)) & (1 << t)) != 0;
 }
 static inline bool typeIsSegmentOrParaSeparator(BidiType t)
 {
-    return ((1<<S) | (1<<B)) & (1 << t);
+    return (((1<<S) | (1<<B)) & (1 << t)) != 0;
 }
 static inline bool typeIsWhitespaceOrIsolate(BidiType t)
 {
-    return ((1<<WS) | (1<<FSI) | (1<<LRI) | (1<<RLI) | (1<<PDI)) & (1 << t);
+    return (((1<<WS) | (1<<FSI) | (1<<LRI) | (1<<RLI) | (1<<PDI)) &
+            (1 << t)) != 0;
 }
 static inline bool typeIsRemovedDuringProcessing(BidiType t)
 {
-    return ((1<<RLE) | (1<<LRE) | (1<<RLO) | (1<<LRO) | (1<<PDF) |
-            (1<<BN)) & (1 << t);
+    return (((1<<RLE) | (1<<LRE) | (1<<RLO) | (1<<LRO) | (1<<PDF) |
+            (1<<BN)) & (1 << t)) != 0;
 }
 static inline bool typeIsStrongOrNumber(BidiType t)
 {
-    return ((1<<L) | (1<<R) | (1<<AL) | (1<<EN) | (1<<AN)) & (1 << t);
+    return (((1<<L) | (1<<R) | (1<<AL) | (1<<EN) | (1<<AN)) & (1 << t)) != 0;
 }
 static inline bool typeIsETOrBN(BidiType t)
 {
-    return ((1<<ET) | (1<<BN)) & (1 << t);
+    return (((1<<ET) | (1<<BN)) & (1 << t)) != 0;
 }
 
 /*

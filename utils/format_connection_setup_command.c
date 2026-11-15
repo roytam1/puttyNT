@@ -133,7 +133,7 @@ char *format_connection_setup_command(
                 eo += 4;
             }
             else if (strnicmp(fmt + eo, "port", 4) == 0) {
-                put_fmt(buf, "%d", port);
+                BinarySink_put_fmt(BinarySink_UPCAST(buf), "%d", port);
                 eo += 4;
             }
             else if (strnicmp(fmt + eo, "user", 4) == 0) {
@@ -157,7 +157,7 @@ char *format_connection_setup_command(
             }
             else if (strnicmp(fmt + eo, "proxyport", 9) == 0) {
                 int port = conf_get_int(conf, CONF_proxy_port);
-                put_fmt(buf, "%d", port);
+                BinarySink_put_fmt(BinarySink_UPCAST(buf), "%d", port);
                 eo += 9;
             }
             else {

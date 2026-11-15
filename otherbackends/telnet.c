@@ -386,15 +386,18 @@ static void process_subneg(Telnet *telnet)
         if (telnet->sb_buf->len == 1 && telnet->sb_buf->u[0] == TELQUAL_SEND) {
             char *termtype = conf_get_str(telnet->conf, CONF_termtype);
             strbuf *sb = strbuf_new();
+            size_t tt_start;
+            size_t tt_end;
+            size_t n;
             put_byte(sb, IAC);
             put_byte(sb, SB);
             put_byte(sb, TELOPT_TTYPE);
             put_byte(sb, TELQUAL_IS);
-            size_t tt_start = sb->len;
-            for (size_t n = 0; termtype[n]; n++)
+            tt_start = sb->len;
+            for (n = 0; termtype[n]; n++)
                 put_byte(sb, (termtype[n] >= 'a' && termtype[n] <= 'z' ?
                               termtype[n] + 'A' - 'a' : termtype[n]));
-            size_t tt_end = sb->len;
+            tt_end = sb->len;
             put_byte(sb, IAC);
             put_byte(sb, SE);
             telnet->bufsize = sk_write(telnet->s, sb->s, sb->len);
@@ -412,6 +415,10 @@ static void process_subneg(Telnet *telnet)
         p = telnet->sb_buf->u;
         q = p + telnet->sb_buf->len;
         if (p < q && *p == TELQUAL_SEND) {
+            strbuf *sb;
+            char *ekey;
+            char *eval;
+            char *user;
             p++;
             logeventf(telnet->logctx, "server subnegotiation: SB %s SEND",
                       telopt(telnet->sb_opt));
@@ -445,12 +452,11 @@ static void process_subneg(Telnet *telnet)
                 var = RFC_VAR;
             }
 
-            strbuf *sb = strbuf_new();
+            sb = strbuf_new();
             put_byte(sb, IAC);
             put_byte(sb, SB);
             put_byte(sb, telnet->sb_opt);
             put_byte(sb, TELQUAL_IS);
-            char *ekey, *eval;
             for (eval = conf_get_str_strs(telnet->conf, CONF_environmt,
                                           NULL, &ekey);
                  eval != NULL;
@@ -461,7 +467,7 @@ static void process_subneg(Telnet *telnet)
                 put_byte(sb, value);
                 put_datapl(sb, ptrlen_from_asciz(eval));
             }
-            char *user = get_remote_username(telnet->conf);
+            user = get_remote_username(telnet->conf);
             if (user) {
                 put_byte(sb, var);
                 put_datalit(sb, "USER");
@@ -665,10 +671,10 @@ static void telnet_sent(Plug *plug, size_t bufsize)
 }
 
 static const PlugVtable Telnet_plugvt = {
-    .log = telnet_log,
-    .closing = telnet_closing,
-    .receive = telnet_receive,
-    .sent = telnet_sent,
+    /* .log = */ telnet_log,
+    /* .closing = */ telnet_closing,
+    /* .receive = */ telnet_receive,
+    /* .sent = */ telnet_sent,
 };
 
 static char *telnet_description(Interactor *itr)
@@ -696,10 +702,10 @@ static void telnet_set_seat(Interactor *itr, Seat *seat)
 }
 
 static const InteractorVtable Telnet_interactorvt = {
-    .description = telnet_description,
-    .logpolicy = telnet_logpolicy,
-    .get_seat = telnet_get_seat,
-    .set_seat = telnet_set_seat,
+    /* .description = */ telnet_description,
+    /* .logpolicy = */ telnet_logpolicy,
+    /* .get_seat = */ telnet_get_seat,
+    /* .set_seat = */ telnet_set_seat,
 };
 
 /*
@@ -1083,24 +1089,26 @@ static int telnet_cfg_info(Backend *be)
 }
 
 const BackendVtable telnet_backend = {
-    .init = telnet_init,
-    .free = telnet_free,
-    .reconfig = telnet_reconfig,
-    .send = telnet_send,
-    .sendbuffer = telnet_sendbuffer,
-    .size = telnet_size,
-    .special = telnet_special,
-    .get_specials = telnet_get_specials,
-    .connected = telnet_connected,
-    .exitcode = telnet_exitcode,
-    .sendok = telnet_sendok,
-    .ldisc_option_state = telnet_ldisc,
-    .provide_ldisc = telnet_provide_ldisc,
-    .unthrottle = telnet_unthrottle,
-    .cfg_info = telnet_cfg_info,
-    .id = "telnet",
-    .displayname_tc = "Telnet",
-    .displayname_lc = "Telnet", /* proper name, so capitalise it anyway */
-    .protocol = PROT_TELNET,
-    .default_port = 23,
+    /* .init = */ telnet_init,
+    /* .free = */ telnet_free,
+    /* .reconfig = */ telnet_reconfig,
+    /* .send = */ telnet_send,
+    /* .sendbuffer = */ telnet_sendbuffer,
+    /* .size = */ telnet_size,
+    /* .special = */ telnet_special,
+    /* .get_specials = */ telnet_get_specials,
+    /* .connected = */ telnet_connected,
+    /* .exitcode = */ telnet_exitcode,
+    /* .sendok = */ telnet_sendok,
+    /* .ldisc_option_state = */ telnet_ldisc,
+    /* .provide_ldisc = */ telnet_provide_ldisc,
+    /* .unthrottle = */ telnet_unthrottle,
+    /* .cfg_info = */ telnet_cfg_info,
+    /* .test_for_upstream = */ NULL,
+    /* .close_warn_text = */ NULL,
+    /* .id = */ "telnet",
+    /* .displayname_tc = */ "Telnet",
+    /* .displayname_lc = */ "Telnet", /* proper name, so capitalise it anyway */
+    /* .protocol = */ PROT_TELNET,
+    /* .default_port = */ 23,
 };

@@ -81,7 +81,7 @@ static inline HttpAuthDetails *auth_error(HttpAuthDetails *d,
                                           const char *fmt, ...)
 {
     d->auth_type = AUTH_ERROR;
-    put_fmt(d->error, "Unable to parse auth header from HTTP proxy");
+    BinarySink_put_fmt(BinarySink_UPCAST(d->error), "Unable to parse auth header from HTTP proxy");
     if (fmt) {
         va_list ap;
         va_start(ap, fmt);
@@ -324,12 +324,13 @@ static HttpAuthDetails *parse_http_auth_header(HttpProxyNegotiator *s)
                                       "field");
                 d->hash_username = !stricmp(s->token->s, "true");
             } else if (!stricmp(s->token->s, "algorithm")) {
+                bool found;
+                size_t i;
                 if (!get_separator(s, '=') ||
                     (!get_token(s) && !get_quoted_string(s)))
                     return auth_error(d, "parse error in Digest algorithm "
                                       "field");
-                bool found = false;
-                size_t i;
+                found = false;
 
                 for (i = 0; i < N_HTTP_DIGEST_HASHES; i++) {
                     if (!stricmp(s->token->s, httphashnames[i])) {
@@ -353,6 +354,9 @@ static HttpAuthDetails *parse_http_auth_header(HttpProxyNegotiator *s)
 
                 d->digest_hash = i;
             } else if (!stricmp(s->token->s, "qop")) {
+                ptrlen list;
+                ptrlen word;
+                bool ok;
                 if (!get_separator(s, '=') ||
                     !get_quoted_string(s))
                     return auth_error(d, "parse error in Digest qop field");
@@ -385,9 +389,8 @@ static HttpAuthDetails *parse_http_auth_header(HttpProxyNegotiator *s)
                  * here we permit any combination of commas and
                  * whitespace as a separator.
                  */
-                ptrlen list = ptrlen_from_strbuf(s->token);
-                ptrlen word;
-                bool ok = false;
+                list = ptrlen_from_strbuf(s->token);
+                ok = false;
                 while ((word = ptrlen_get_word(&list, ", \t")).len)
                     if (ptrlen_eq_string(word, "auth"))
                         ok = true;
@@ -436,30 +439,33 @@ static void proxy_http_process_queue(ProxyNegotiator *pn)
     {
         char dest[512];
         sk_getaddr(pn->ps->remote_addr, dest, lenof(dest));
-        put_fmt(s->uri, "%s:%d", dest, pn->ps->remote_port);
+        BinarySink_put_fmt(BinarySink_UPCAST(s->uri), "%s:%d", dest, pn->ps->remote_port);
     }
 
     while (true) {
         /*
          * Standard prefix for the HTTP CONNECT request.
          */
-        put_fmt(pn->output,
-                "CONNECT %s HTTP/1.1\r\n"
-                "Host: %s\r\n", s->uri->s, s->uri->s);
+        BinarySink_put_fmt(BinarySink_UPCAST(pn->output),
+                           "CONNECT %s HTTP/1.1\r\n"
+                           "Host: %s\r\n", s->uri->s, s->uri->s);
 
         /*
          * Add an auth header, if we're planning to this time round.
          */
         if (s->next_auth->auth_type == AUTH_BASIC) {
+            strbuf *base64_input;
+            char base64_output[4];
+            size_t i;
+            size_t e;
             put_datalit(pn->output, "Proxy-Authorization: Basic ");
 
-            strbuf *base64_input = strbuf_new_nm();
+            base64_input = strbuf_new_nm();
             put_datapl(base64_input, ptrlen_from_strbuf(s->username));
             put_byte(base64_input, ':');
             put_datapl(base64_input, ptrlen_from_strbuf(s->password));
 
-            char base64_output[4];
-            for (size_t i = 0, e = base64_input->len; i < e; i += 3) {
+            for (i = 0, e = base64_input->len; i < e; i += 3) {
                 base64_encode_atom(base64_input->u + i,
                                    e-i > 3 ? 3 : e-i, base64_output);
                 put_data(pn->output, base64_output, 4);
@@ -543,6 +549,7 @@ static void proxy_http_process_queue(ProxyNegotiator *pn)
          * Read the HTTP response header section.
          */
         do {
+            HttpHeader hdr;
             strbuf_clear(s->header);
             crMaybeWaitUntilV(read_line(pn->input, s->header, true));
             s->header_pos = 0;
@@ -555,7 +562,7 @@ static void proxy_http_process_queue(ProxyNegotiator *pn)
             }
 
             /* Parse the header name */
-            HttpHeader hdr = HDR_UNKNOWN;
+            hdr = HDR_UNKNOWN;
             {
                 #define CHECK_HEADER(id, string) \
                     if (!stricmp(s->token->s, string)) hdr = id;
@@ -569,7 +576,7 @@ static void proxy_http_process_queue(ProxyNegotiator *pn)
             if (hdr == HDR_CONTENT_LENGTH) {
                 if (!get_token(s))
                     continue;
-                s->content_length = strtoumax(s->token->s, NULL, 10);
+                s->content_length = strtoul(s->token->s, NULL, 10);
             } else if (hdr == HDR_TRANSFER_ENCODING) {
                 /*
                  * The Transfer-Encoding header value should be a
@@ -810,8 +817,8 @@ static void proxy_http_process_queue(ProxyNegotiator *pn)
 }
 
 const struct ProxyNegotiatorVT http_proxy_negotiator_vt = {
-    .new = proxy_http_new,
-    .free = proxy_http_free,
-    .process_queue = proxy_http_process_queue,
-    .type = "HTTP",
+    /* .new = */ proxy_http_new,
+    /* .process_queue = */ proxy_http_process_queue,
+    /* .free = */ proxy_http_free,
+    /* .type = */ "HTTP",
 };

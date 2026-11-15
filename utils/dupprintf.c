@@ -63,8 +63,9 @@ char *dupvprintf_inner(char *buf, size_t oldlen, size_t *sizeptr,
 
     while (1) {
         va_list aq;
+        int len;
         va_copy(aq, ap);
-        int len = vsnprintf(buf + oldlen, size - oldlen, fmt, aq);
+        len = vsnprintf(buf + oldlen, size - oldlen, fmt, aq);
         va_end(aq);
 
         if (len >= 0 && len < size) {

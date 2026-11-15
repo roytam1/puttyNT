@@ -12,6 +12,21 @@
 #include "network.h"
 #include "proxy/proxy.h"
 
+/*
+ * Return a copy of our end of a pipe that the proxy command won't
+ * inherit, closing the original. (SetHandleInformation would do it
+ * in place, but Windows NT 3.1 doesn't have it.)
+ */
+static HANDLE no_inherit(HANDLE h)
+{
+    HANDLE copy;
+    if (!DuplicateHandle(GetCurrentProcess(), h, GetCurrentProcess(), &copy,
+                         0, false, DUPLICATE_SAME_ACCESS))
+        return h;                      /* better inherited than lost */
+    CloseHandle(h);
+    return copy;
+}
+
 static char *start_subprocess_handle_socket(
     Socket *socket, const char *cmd, SubprocessWaiter **waiter)
 {
@@ -21,6 +36,7 @@ static char *start_subprocess_handle_socket(
     SECURITY_ATTRIBUTES sa;
     STARTUPINFO si;
     PROCESS_INFORMATION pi;
+    char *cmd_mutable;
 
     /*
      * Create the pipes to the proxy command, and spawn the proxy
@@ -50,10 +66,10 @@ static char *start_subprocess_handle_socket(
                          win_strerror(GetLastError()));
     }
 
-    SetHandleInformation(us_to_cmd, HANDLE_FLAG_INHERIT, 0);
-    SetHandleInformation(us_from_cmd, HANDLE_FLAG_INHERIT, 0);
+    us_to_cmd = no_inherit(us_to_cmd);
+    us_from_cmd = no_inherit(us_from_cmd);
     if (us_from_cmd_err != NULL)
-        SetHandleInformation(us_from_cmd_err, HANDLE_FLAG_INHERIT, 0);
+        us_from_cmd_err = no_inherit(us_from_cmd_err);
 
     si.cb = sizeof(si);
     si.lpReserved = NULL;
@@ -65,7 +81,7 @@ static char *start_subprocess_handle_socket(
     si.hStdInput = cmd_from_us;
     si.hStdOutput = cmd_to_us;
     si.hStdError = cmd_err_to_us;
-    char *cmd_mutable = dupstr(cmd); /* CreateProcess needs non-const char * */
+    cmd_mutable = dupstr(cmd);       /* CreateProcess needs non-const char * */
     CreateProcess(NULL, cmd_mutable, NULL, NULL, true,
                   CREATE_NO_WINDOW | NORMAL_PRIORITY_CLASS,
                   NULL, NULL, &si, &pi);
@@ -100,12 +116,14 @@ Socket *platform_new_connection(SockAddr *addr, const char *hostname,
                                 bool oobinline, bool nodelay, bool keepalive,
                                 Plug *plug, Conf *conf, Interactor *itr)
 {
+    DeferredSocketOpener *opener;
+    Socket *socket;
     if (conf_get_int(conf, CONF_proxy_type) != PROXY_CMD)
         return NULL;
 
-    DeferredSocketOpener *opener = local_proxy_opener(
+    opener = local_proxy_opener(
         addr, port, plug, conf, itr);
-    Socket *socket = make_deferred_handle_socket(opener, addr, port, plug);
+    socket = make_deferred_handle_socket(opener, addr, port, plug);
     local_proxy_opener_set_socket(opener, socket);
     return socket;
 }

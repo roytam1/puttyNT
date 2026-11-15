@@ -105,20 +105,9 @@
  * thing is to make the code behave the same as the official
  * algorithm.
  *
- * It's possible that there might still be some undiscovered
- * discrepancies between the behaviour of the standard and modified
- * algorithms. So, just in case, I've kept in this code the ability to
- * implement the _standard_ algorithm too! If you compile with
- * -DREMOVE_FORMATTING_CHARS, this code should go back to implementing
- * the literal UAX#9 bidi algorithm - so you can run your suspect
- * input through both versions, making it much easier to figure out
- * why they differ, and in which of the many stages of the algorithm
- * the difference was introduced.
- *
- * However, beware that when compiling in this mode, the do_bidi
- * interface to the terminal will stop working, and just abort() when
- * called! The only useful thing you can do with this mode is to run
- * the companion program bidi_test.c.
+ * (Upstream PuTTY can also be compiled with -DREMOVE_FORMATTING_CHARS
+ * to implement the literal UAX#9 algorithm, for comparing the two with
+ * its bidi_test.c program. The NT port leaves that mode out.)
  */
 
 #include <stdlib.h>     /* definition of wchar_t */
@@ -411,6 +400,7 @@ static BracketTypeData bracket_type(unsigned int ch)
     };
 
     int i, j, k;
+    static const BracketTypeData null = { 0, 0, BT_NONE };
 
     i = -1;
     j = lenof(bracket_pairs);
@@ -426,7 +416,6 @@ static BracketTypeData bracket_type(unsigned int ch)
         }
     }
 
-    static const BracketTypeData null = { 0, 0, BT_NONE };
     return null;
 }
 
@@ -650,12 +639,14 @@ static void ensure_arrays(BidiContext *ctx, size_t textlen)
 
 static void setup_types(BidiContext *ctx)
 {
-    for (size_t i = 0; i < ctx->textlen; i++)
+    size_t i;
+    for (i = 0; i < ctx->textlen; i++)
         ctx->types[i] = ctx->origTypes[i] = bidi_getType(ctx->text[i].wc);
 }
 
 static bool text_needs_bidi(BidiContext *ctx)
 {
+    size_t i;
     /*
      * Initial optimisation: check for any bidi-active character at
      * all in an input line. If there aren't any, we can skip the
@@ -663,7 +654,7 @@ static bool text_needs_bidi(BidiContext *ctx)
      *
      * Also include the paragraph override in this check!
      */
-    for (size_t i = 0; i < ctx->textlen; i++)
+    for (i = 0; i < ctx->textlen; i++)
         if (typeIsBidiActive(ctx->types[i]))
             return true;
     return typeIsBidiActive(ctx->paragraphOverride);
@@ -692,6 +683,7 @@ static size_t find_matching_pdi(const BidiType *types, size_t i, size_t size)
 
 static unsigned char rule_p2_p3(const BidiType *types, size_t size)
 {
+    size_t i;
     /*
      * Rule P2. Find the first strong type (L, R or AL), ignoring
      * anything inside an isolated segment.
@@ -699,7 +691,7 @@ static unsigned char rule_p2_p3(const BidiType *types, size_t size)
      * Rule P3. If that type is R or AL, choose a paragraph embeddding
      * level of 1, otherwise 0.
      */
-    for (size_t i = 0; i < size; i++) {
+    for (i = 0; i < size; i++) {
         BidiType t = types[i];
         if (typeIsIsolateInitiator(t))
             i = find_matching_pdi(types, i, size);
@@ -741,6 +733,7 @@ static inline void pop(BidiContext *ctx)
 
 static void process_explicit_embeddings(BidiContext *ctx)
 {
+    size_t i;
     /*
      * Rule X1 initialisation.
      */
@@ -752,7 +745,7 @@ static void process_explicit_embeddings(BidiContext *ctx)
 
     #define stk (&ctx->dsstack[ctx->ds_sp])
 
-    for (size_t i = 0; i < ctx->textlen; i++) {
+    for (i = 0; i < ctx->textlen; i++) {
         BidiType t = ctx->types[i];
         switch (t) {
           case RLE: case LRE: case RLO: case LRO: {
@@ -760,9 +753,7 @@ static void process_explicit_embeddings(BidiContext *ctx)
             unsigned char newLevel;
             DirectionalOverride override;
 
-#ifndef REMOVE_FORMATTING_CHARS
             ctx->levels[i] = stk->level;
-#endif
 
             switch (t) {
               case RLE: /* rule X2 */
@@ -799,6 +790,7 @@ static void process_explicit_embeddings(BidiContext *ctx)
           }
 
           case RLI: case LRI: case FSI: {
+            unsigned char newLevel;
             /* Rules X5a, X5b, X5c */
 
             if (t == FSI) {
@@ -815,8 +807,8 @@ static void process_explicit_embeddings(BidiContext *ctx)
                 ctx->types[i] = (stk->override == DO_LTR ? L :
                                  stk->override == DO_RTL ? R : t);
 
-            unsigned char newLevel = (t == RLI ? nextOddLevel(stk->level) :
-                                      nextEvenLevel(stk->level));
+            newLevel = (t == RLI ? nextOddLevel(stk->level) :
+                        nextEvenLevel(stk->level));
 
             if (newLevel <= MAX_DEPTH &&
                 ctx->overflowIsolateCount == 0 &&
@@ -865,9 +857,7 @@ static void process_explicit_embeddings(BidiContext *ctx)
                 /* Do nothing: spurious embedding-pop */
             }
 
-#ifndef REMOVE_FORMATTING_CHARS
             ctx->levels[i] = stk->level;
-#endif
             break;
           }
 
@@ -923,12 +913,12 @@ static void process_explicit_embeddings(BidiContext *ctx)
 
 static void remove_embedding_characters(BidiContext *ctx)
 {
-#ifndef REMOVE_FORMATTING_CHARS
+    size_t i;
     /*
      * Rule X9, as modified by section 5.2: turn embedding (but not
      * isolate) characters into BN.
      */
-    for (size_t i = 0; i < ctx->textlen; i++) {
+    for (i = 0; i < ctx->textlen; i++) {
         BidiType t = ctx->types[i];
         if (typeIsRemovedDuringProcessing(t)) {
             ctx->types[i] = BN;
@@ -958,30 +948,16 @@ static void remove_embedding_characters(BidiContext *ctx)
                 ctx->levels[i] = ctx->levels[i-1];
         }
     }
-#else
-    /*
-     * Rule X9, original version: completely remove embedding
-     * start/end characters and also boundary neutrals.
-     */
-    size_t outpos = 0;
-    for (size_t i = 0; i < ctx->textlen; i++) {
-        BidiType t = ctx->types[i];
-        if (!typeIsRemovedDuringProcessing(t)) {
-            ctx->text[outpos] = ctx->text[i];
-            ctx->levels[outpos] = ctx->levels[i];
-            ctx->types[outpos] = ctx->types[i];
-            ctx->origTypes[outpos] = ctx->origTypes[i];
-            outpos++;
-        }
-    }
-    ctx->textlen = outpos;
-#endif
 }
 
 typedef void (*irs_fn_t)(BidiContext *ctx);
 
 static void find_isolating_run_sequences(BidiContext *ctx, irs_fn_t process)
 {
+    size_t i;
+    size_t n_irs;
+    size_t indexpos;
+    size_t k;
     /*
      * Rule X10 / BD13. Now that we've assigned an embedding level to
      * each character in the text, we have to divide the text into
@@ -1008,10 +984,17 @@ static void find_isolating_run_sequences(BidiContext *ctx, irs_fn_t process)
      */
 
     memset(ctx->irsdone, 0, ctx->textlen);
-    size_t i = 0;
-    size_t n_irs = 0;
-    size_t indexpos = 0;
+    i = 0;
+    n_irs = 0;
+    indexpos = 0;
     while (i < ctx->textlen) {
+        IsolatingRunSequence *irs;
+        size_t j;
+        size_t irslevel;
+        size_t p;
+        unsigned char level_inside;
+        unsigned char level_outside;
+        unsigned char level_max;
         if (ctx->irsdone[i]) {
             i++;
             continue;
@@ -1022,10 +1005,10 @@ static void find_isolating_run_sequences(BidiContext *ctx, irs_fn_t process)
          * sequence here.
          */
         sgrowarray(ctx->irslist, ctx->irslistsize, n_irs);
-        IsolatingRunSequence *irs = &ctx->irslist[n_irs++];
+        irs = &ctx->irslist[n_irs++];
         irs->start = indexpos;
-        size_t j = i;
-        size_t irslevel = ctx->levels[i];
+        j = i;
+        irslevel = ctx->levels[i];
         while (j < ctx->textlen) {
             /*
              * We expect that all level runs in this sequence will be
@@ -1056,8 +1039,6 @@ static void find_isolating_run_sequences(BidiContext *ctx, irs_fn_t process)
          * and not processing any of them until we know where they all
          * are.
          */
-        size_t p;
-        unsigned char level_inside, level_outside, level_max;
 
         p = i;
         level_inside = ctx->levels[p];
@@ -1105,7 +1086,7 @@ static void find_isolating_run_sequences(BidiContext *ctx, irs_fn_t process)
          */
     }
 
-    for (size_t k = 0; k < n_irs; k++) {
+    for (k = 0; k < n_irs; k++) {
         IsolatingRunSequence *irs = &ctx->irslist[k];
         ctx->irs = ctx->irsindices + irs->start;
         ctx->irslen = irs->end - irs->start;
@@ -1129,17 +1110,16 @@ static void remove_nsm(BidiContext *ctx)
      * at the start of the run, with the exception that isolation
      * boundaries turn into ON. */
     BidiType prevType = ctx->sos;
-    for (size_t c = 0; c < ctx->irslen; c++) {
+    size_t c;
+    for (c = 0; c < ctx->irslen; c++) {
         size_t i = ctx->irs[c];
         BidiType t = ctx->types[i];
         if (t == NSM) {
             ctx->types[i] = prevType;
         } else if (typeIsIsolateInitiatorOrPDI(t)) {
             prevType = ON;
-#ifndef REMOVE_FORMATTING_CHARS
         } else if (t == BN) {
             /* section 5.2 adjustment: these don't affect prevType */
-#endif
         } else {
             prevType = t;
         }
@@ -1153,7 +1133,8 @@ static void change_en_to_an(BidiContext *ctx)
      * the start of the run, although it hardly matters, since sos
      * can't be AL.) */
     BidiType prevStrongType = ctx->sos;
-    for (size_t c = 0; c < ctx->irslen; c++) {
+    size_t c;
+    for (c = 0; c < ctx->irslen; c++) {
         size_t i = ctx->irs[c];
         BidiType t = ctx->types[i];
         if (t == EN && prevStrongType == AL) {
@@ -1166,11 +1147,12 @@ static void change_en_to_an(BidiContext *ctx)
 
 static void change_al_to_r(BidiContext *ctx)
 {
+    size_t c;
     /* Rule W3: AL becomes R unconditionally. (The only difference
      * between the two types was their effect on nearby numbers, which
      * was dealt with in rule W2, so now we're done with the
      * distinction.) */
-    for (size_t c = 0; c < ctx->irslen; c++) {
+    for (c = 0; c < ctx->irslen; c++) {
         size_t i = ctx->irs[c];
         if (ctx->types[i] == AL)
             ctx->types[i] = R;
@@ -1189,14 +1171,13 @@ static void eliminate_separators_between_numbers(BidiContext *ctx)
      * we must track the last three indices we saw that were not BN. */
     size_t i1 = 0, i2 = 0;
     BidiType t0 = ON, t1 = ON, t2 = ON;
-    for (size_t c = 0; c < ctx->irslen; c++) {
+    size_t c;
+    for (c = 0; c < ctx->irslen; c++) {
         size_t i = ctx->irs[c];
         BidiType t = ctx->types[i];
 
-#ifndef REMOVE_FORMATTING_CHARS
         if (t == BN)
             continue;
-#endif
 
         i1 = i2; i2 = i;
         t0 = t1; t1 = t2; t2 = t;
@@ -1217,8 +1198,9 @@ static void eliminate_et_next_to_en(BidiContext *ctx)
      * have any BN left in any case.) */
 
     bool modifying = false;
+    size_t c;
 
-    for (size_t c = 0; c < ctx->irslen; c++) {
+    for (c = 0; c < ctx->irslen; c++) {
         size_t i = ctx->irs[c];
         BidiType t = ctx->types[i];
         if (t == EN) {
@@ -1230,7 +1212,7 @@ static void eliminate_et_next_to_en(BidiContext *ctx)
         }
     }
 
-    for (size_t c = ctx->irslen; c-- > 0 ;) {
+    for (c = ctx->irslen; c-- > 0 ;) {
         size_t i = ctx->irs[c];
         BidiType t = ctx->types[i];
         if (t == EN) {
@@ -1245,6 +1227,7 @@ static void eliminate_et_next_to_en(BidiContext *ctx)
 
 static void eliminate_separators_and_terminators(BidiContext *ctx)
 {
+    size_t c;
     /* Rule W6: all separators and terminators change to ON.
      *
      * (The spec is not quite clear on which bidi types are included
@@ -1253,7 +1236,6 @@ static void eliminate_separators_and_terminators(BidiContext *ctx)
      * implicitly supposed to only apply to types designated as weakly
      * directional, so not S.) */
 
-#ifndef REMOVE_FORMATTING_CHARS
     /*
      * Section 5.2 adjustment: this also applies to any BN adjacent on
      * either side to one of these types, which is easiest to
@@ -1265,7 +1247,7 @@ static void eliminate_separators_and_terminators(BidiContext *ctx)
      */
     bool modifying = false;
 
-    for (size_t c = 0; c < ctx->irslen; c++) {
+    for (c = 0; c < ctx->irslen; c++) {
         size_t i = ctx->irs[c];
         BidiType t = ctx->types[i];
         if (typeIsWeakSeparatorOrTerminator(t)) {
@@ -1277,7 +1259,7 @@ static void eliminate_separators_and_terminators(BidiContext *ctx)
         }
     }
 
-    for (size_t c = ctx->irslen; c-- > 0 ;) {
+    for (c = ctx->irslen; c-- > 0 ;) {
         size_t i = ctx->irs[c];
         BidiType t = ctx->types[i];
         if (typeIsWeakSeparatorOrTerminator(t)) {
@@ -1288,10 +1270,9 @@ static void eliminate_separators_and_terminators(BidiContext *ctx)
             modifying = false;
         }
     }
-#endif
 
     /* Now the main part of rule W6 */
-    for (size_t c = 0; c < ctx->irslen; c++) {
+    for (c = 0; c < ctx->irslen; c++) {
         size_t i = ctx->irs[c];
         BidiType t = ctx->types[i];
         if (typeIsWeakSeparatorOrTerminator(t))
@@ -1303,7 +1284,8 @@ static void change_en_to_l(BidiContext *ctx)
 {
     /* Rule W7: EN becomes L if the previous strong type (or sos) is L. */
     BidiType prevStrongType = ctx->sos;
-    for (size_t c = 0; c < ctx->irslen; c++) {
+    size_t c;
+    for (c = 0; c < ctx->irslen; c++) {
         size_t i = ctx->irs[c];
         BidiType t = ctx->types[i];
         if (t == EN && prevStrongType == L) {
@@ -1324,10 +1306,11 @@ static void find_bracket_pairs(BidiContext *ctx, bracket_pair_fn process)
      * Rule BD16.
      */
     size_t sp = 0;
-    for (size_t c = 0; c < ctx->irslen; c++)
+    size_t c;
+    for (c = 0; c < ctx->irslen; c++)
         ctx->bracketpos[c] = NO_BRACKET;
 
-    for (size_t c = 0; c < ctx->irslen; c++) {
+    for (c = 0; c < ctx->irslen; c++) {
         size_t i = ctx->irs[c];
         unsigned wc = ctx->text[i].wc;
         BracketTypeData bt = bracket_type(wc);
@@ -1367,7 +1350,7 @@ static void find_bracket_pairs(BidiContext *ctx, bracket_pair_fn process)
     }
 
   found_all_pairs:
-    for (size_t c = 0; c < ctx->irslen; c++) {
+    for (c = 0; c < ctx->irslen; c++) {
         if (ctx->bracketpos[c] != NO_BRACKET) {
             process(ctx, c, ctx->bracketpos[c]);
         }
@@ -1394,7 +1377,8 @@ static BidiType get_bracket_type(BidiContext *ctx, size_t copen, size_t cclose)
      */
 
     bool foundOppositeTypeInside = false;
-    for (size_t c = copen + 1; c < cclose; c++) {
+    size_t c;
+    for (c = copen + 1; c < cclose; c++) {
         size_t i = ctx->irs[c];
         BidiType t = ctx->types[i];
         if (typeIsStrongOrNumber(t)) {
@@ -1418,7 +1402,7 @@ static BidiType get_bracket_type(BidiContext *ctx, size_t copen, size_t cclose)
     /* There was an opposite strong type in the brackets. Look
      * backwards to the preceding strong type, and go with that,
      * whichever it is. */
-    for (size_t c = copen; c-- > 0 ;) {
+    for (c = copen; c-- > 0 ;) {
         size_t i = ctx->irs[c];
         BidiType t = ctx->types[i];
         if (typeIsStrongOrNumber(t)) {
@@ -1440,12 +1424,10 @@ static void reset_bracket_type(BidiContext *ctx, size_t c, BidiType t)
     do {
         ctx->types[ctx->irs[c++]] = t;
 
-#ifndef REMOVE_FORMATTING_CHARS
         while (c < ctx->irslen && ctx->origTypes[ctx->irs[c]] == BN) {
             /* Section 5.2 adjustment: skip past BN in the process. */
             c++;
         }
-#endif
     } while (c < ctx->irslen && ctx->origTypes[ctx->irs[c]] == NSM);
 }
 
@@ -1472,7 +1454,8 @@ static void remove_ni(BidiContext *ctx)
     const size_t NO_INDEX = ~(size_t)0;
     BidiType prevStrongType = ctx->sos;
     size_t c_ni_start = NO_INDEX;
-    for (size_t c = 0; c <= ctx->irslen; c++) {
+    size_t c;
+    for (c = 0; c <= ctx->irslen; c++) {
         BidiType t;
 
         if (c < ctx->irslen) {
@@ -1490,7 +1473,8 @@ static void remove_ni(BidiContext *ctx)
                 /* There are some NI we have to fix up */
                 BidiType ni_type = (t == prevStrongType ? t :
                                     ctx->embeddingDirection);
-                for (size_t c2 = c_ni_start; c2 < c; c2++) {
+                size_t c2;
+                for (c2 = c_ni_start; c2 < c; c2++) {
                     size_t i2 = ctx->irs[c2];
                     BidiType t2 = ctx->types[i2];
                     if (typeIsNeutralOrIsolate(t2))
@@ -1507,8 +1491,9 @@ static void remove_ni(BidiContext *ctx)
 
 static void resolve_implicit_levels(BidiContext *ctx)
 {
+    size_t c;
     /* Rules I1 and I2 */
-    for (size_t c = 0; c < ctx->irslen; c++) {
+    for (c = 0; c < ctx->irslen; c++) {
         size_t i = ctx->irs[c];
         unsigned char level = ctx->levels[i];
         BidiType t = ctx->types[i];
@@ -1556,7 +1541,8 @@ static void reset_whitespace_and_separators(BidiContext *ctx)
      * the rest of this algorithm has been merrily mutating.
      */
     bool modifying = true;
-    for (size_t i = ctx->textlen; i-- > 0 ;) {
+    size_t i;
+    for (i = ctx->textlen; i-- > 0 ;) {
         BidiType t = ctx->origTypes[i];
         if (typeIsSegmentOrParaSeparator(t)) {
             ctx->levels[i] = ctx->paragraphLevel;
@@ -1570,24 +1556,24 @@ static void reset_whitespace_and_separators(BidiContext *ctx)
         }
     }
 
-#ifndef REMOVE_FORMATTING_CHARS
     /*
      * Section 5.2 adjustment: types removed by rule X9 take the level
      * of the character to their left.
      */
-    for (size_t i = 0; i < ctx->textlen; i++) {
+    for (i = 0; i < ctx->textlen; i++) {
         BidiType t = ctx->origTypes[i];
         if (typeIsRemovedDuringProcessing(t)) {
             /* Section 5.2 adjustment */
             ctx->levels[i] = (i > 0 ? ctx->levels[i-1] : ctx->paragraphLevel);
         }
     }
-#endif /* ! REMOVE_FORMATTING_CHARS */
 }
 
 static void reverse(BidiContext *ctx, size_t start, size_t end)
 {
-    for (size_t i = start, j = end; i < j; i++, j--) {
+    size_t i;
+    size_t j;
+    for (i = start, j = end; i < j; i++, j--) {
         bidi_char tmp = ctx->text[i];
         ctx->text[i] = ctx->text[j];
         ctx->text[j] = tmp;
@@ -1596,6 +1582,7 @@ static void reverse(BidiContext *ctx, size_t start, size_t end)
 
 static void mirror_glyphs(BidiContext *ctx)
 {
+    size_t i;
     /*
      * Rule L3: any character with a mirror-image pair at an odd
      * embedding level is replaced by its mirror image.
@@ -1605,7 +1592,7 @@ static void mirror_glyphs(BidiContext *ctx)
      * implement it before, while our levels[] array still matches up
      * to the text order.
      */
-    for (size_t i = 0; i < ctx->textlen; i++) {
+    for (i = 0; i < ctx->textlen; i++) {
         if (ctx->levels[i] % 2)
             ctx->text[i].wc = mirror_glyph(ctx->text[i].wc);
     }
@@ -1618,11 +1605,13 @@ static void reverse_sequences(BidiContext *ctx)
      * given level or higher is reversed.
      */
     unsigned level = 0;
-    for (size_t i = 0; i < ctx->textlen; i++)
+    size_t i;
+    for (i = 0; i < ctx->textlen; i++)
         level = max(level, ctx->levels[i]);
 
     for (; level >= 1; level--) {
-        for (size_t i = 0; i < ctx->textlen; i++) {
+        size_t i;
+        for (i = 0; i < ctx->textlen; i++) {
             if (ctx->levels[i] >= level) {
                 size_t start = i;
                 while (i+1 < ctx->textlen && ctx->levels[i+1] >= level)
@@ -1676,10 +1665,6 @@ size_t do_bidi_test(BidiContext *ctx, bidi_char *text, size_t textlen,
 
 void do_bidi(BidiContext *ctx, bidi_char *text, size_t textlen)
 {
-#ifdef REMOVE_FORMATTING_CHARACTERS
-    abort(); /* can't use the standard algorithm in a live terminal */
-#else
     ctx->paragraphOverride = ON;
     do_bidi_new(ctx, text, textlen);
-#endif
 }

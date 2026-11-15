@@ -10,7 +10,7 @@ static LRESULT CALLBACK TimingWndProc(HWND hwnd, UINT message,
 {
     switch (message) {
       case WM_TIMER:
-        if ((UINT_PTR)wParam == TIMING_TIMER_ID) {
+        if ((UINT)wParam == TIMING_TIMER_ID) {
             unsigned long next;
 
             KillTimer(hwnd, TIMING_TIMER_ID);

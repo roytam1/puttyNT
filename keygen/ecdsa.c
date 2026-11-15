@@ -8,10 +8,11 @@
 
 int ecdsa_generate(struct ecdsa_key *ek, int bits)
 {
+    mp_int *one;
     if (!ec_nist_alg_and_curve_by_bits(bits, &ek->curve, &ek->sshk.vt))
         return 0;
 
-    mp_int *one = mp_from_integer(1);
+    one = mp_from_integer(1);
     ek->privateKey = mp_random_in_range(one, ek->curve->w.G_order);
     mp_free(one);
 

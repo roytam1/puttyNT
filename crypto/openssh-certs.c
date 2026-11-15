@@ -4,6 +4,7 @@
 
 #include "ssh.h"
 #include "putty.h"
+#include "mpint.h"
 
 enum {
     SSH_CERT_TYPE_USER = 1,
@@ -12,11 +13,11 @@ enum {
 
 typedef struct opensshcert_key {
     strbuf *nonce;
-    uint64_t serial;
+    uint64 serial;
     uint32_t type;
     strbuf *key_id;
     strbuf *valid_principals;
-    uint64_t valid_after, valid_before;
+    uint64 valid_after, valid_before;
     strbuf *critical_options;
     strbuf *extensions;
     strbuf *reserved;
@@ -147,7 +148,8 @@ static inline bool blobtrans_read(BlobTransformer *bt, BinarySource *src,
                                   blob_fmt blob)
 {
     size_t nparts = bt->nparts;
-    for (size_t i = 0; i < blob.len; i++)
+    size_t i;
+    for (i = 0; i < blob.len; i++)
         if (nparts < blob.fmt[i]+1)
             nparts = blob.fmt[i]+1;
 
@@ -157,7 +159,7 @@ static inline bool blobtrans_read(BlobTransformer *bt, BinarySource *src,
             bt->parts[bt->nparts++] = make_ptrlen(NULL, 0);
     }
 
-    for (size_t i = 0; i < blob.len; i++) {
+    for (i = 0; i < blob.len; i++) {
         size_t j = blob.fmt[i];
         ptrlen part = get_string(src);
         if (bt->parts[j].ptr) {
@@ -180,9 +182,11 @@ static inline bool blobtrans_read(BlobTransformer *bt, BinarySource *src,
 static inline void blobtrans_write(BlobTransformer *bt, BinarySink *bs,
                                    blob_fmt blob)
 {
-    for (size_t i = 0; i < blob.len; i++) {
+    size_t i;
+    for (i = 0; i < blob.len; i++) {
+        ptrlen part;
         assert(i < bt->nparts);
-        ptrlen part = bt->parts[blob.fmt[i]];
+        part = bt->parts[blob.fmt[i]];
         assert(part.ptr);
         put_stringpl(bs, part);
     }
@@ -212,7 +216,7 @@ static char *opensshcert_cache_str(ssh_key *key);
 static key_components *opensshcert_components(ssh_key *key);
 static ssh_key *opensshcert_base_key(ssh_key *key);
 static bool opensshcert_check_cert(
-    ssh_key *key, bool host, ptrlen principal, uint64_t time,
+    ssh_key *key, bool host, ptrlen principal, uint64 time,
     const ca_options *opts, BinarySink *error);
 static int opensshcert_pubkey_bits(const ssh_keyalg *self, ptrlen blob);
 static unsigned opensshcert_supported_flags(const ssh_keyalg *self);
@@ -241,46 +245,46 @@ static const ssh_keyalg *opensshcert_related_alg(const ssh_keyalg *self,
 
 #define KEYALG_DEF(name, ssh_alg_id_prefix, ssh_key_id_prefix, fmt_prefix) \
     static const struct opensshcert_extra opensshcert_##name##_extra = { \
-        .pub_fmt = { .fmt = fmt_prefix ## _pub_fmt,                     \
-                     .len = lenof(fmt_prefix ## _pub_fmt) },            \
-        .base_ossh_fmt = { .fmt = fmt_prefix ## _base_ossh_fmt,         \
-                           .len = lenof(fmt_prefix ## _base_ossh_fmt) }, \
-        .cert_ossh_fmt = { .fmt = fmt_prefix ## _cert_ossh_fmt,         \
-                           .len = lenof(fmt_prefix ## _cert_ossh_fmt) }, \
-        .cert_key_ssh_id = ssh_key_id_prefix "-cert-v01@openssh.com",   \
-        .base_key_ssh_id = ssh_key_id_prefix,                           \
+        /* .pub_fmt = */ { /* .fmt = */ fmt_prefix ## _pub_fmt,          \
+                     /* .len = */ lenof(fmt_prefix ## _pub_fmt) },       \
+        /* .base_ossh_fmt = */ { /* .fmt = */ fmt_prefix ## _base_ossh_fmt, \
+                           /* .len = */ lenof(fmt_prefix ## _base_ossh_fmt) }, \
+        /* .cert_ossh_fmt = */ { /* .fmt = */ fmt_prefix ## _cert_ossh_fmt, \
+                           /* .len = */ lenof(fmt_prefix ## _cert_ossh_fmt) }, \
+        /* .cert_key_ssh_id = */ ssh_key_id_prefix "-cert-v01@openssh.com", \
+        /* .base_key_ssh_id = */ ssh_key_id_prefix,                      \
     };                                                                  \
                                                                         \
     const ssh_keyalg opensshcert_##name = {                             \
-        .new_pub = opensshcert_new_pub,                                 \
-        .new_priv = opensshcert_new_priv,                               \
-        .new_priv_openssh = opensshcert_new_priv_openssh,               \
-        .freekey = opensshcert_freekey,                                 \
-        .invalid = opensshcert_invalid,                                 \
-        .sign = opensshcert_sign,                                       \
-        .verify = opensshcert_verify,                                   \
-        .public_blob = opensshcert_public_blob,                         \
-        .private_blob = opensshcert_private_blob,                       \
-        .openssh_blob = opensshcert_openssh_blob,                       \
-        .has_private = opensshcert_has_private,                         \
-        .cache_str = opensshcert_cache_str,                             \
-        .components = opensshcert_components,                           \
-        .base_key = opensshcert_base_key,                               \
-        .ca_public_blob = opensshcert_ca_public_blob,                   \
-        .check_cert = opensshcert_check_cert,                           \
-        .cert_id_string = opensshcert_cert_id_string,                   \
-        .cert_info = opensshcert_cert_info,                             \
-        .pubkey_bits = opensshcert_pubkey_bits,                         \
-        .supported_flags = opensshcert_supported_flags,                 \
-        .alternate_ssh_id = opensshcert_alternate_ssh_id,               \
-        .alg_desc = opensshcert_alg_desc,                               \
-        .variable_size = opensshcert_variable_size,                     \
-        .related_alg = opensshcert_related_alg,                         \
-        .ssh_id = ssh_alg_id_prefix "-cert-v01@openssh.com",            \
-        .cache_id = "opensshcert-" ssh_key_id_prefix,                   \
-        .extra = &opensshcert_##name##_extra,                           \
-        .is_certificate = true,                                         \
-        .base_alg = &name,                                              \
+        /* .new_pub = */ opensshcert_new_pub,                           \
+        /* .new_priv = */ opensshcert_new_priv,                         \
+        /* .new_priv_openssh = */ opensshcert_new_priv_openssh,         \
+        /* .freekey = */ opensshcert_freekey,                           \
+        /* .invalid = */ opensshcert_invalid,                           \
+        /* .sign = */ opensshcert_sign,                                 \
+        /* .verify = */ opensshcert_verify,                             \
+        /* .public_blob = */ opensshcert_public_blob,                   \
+        /* .private_blob = */ opensshcert_private_blob,                 \
+        /* .openssh_blob = */ opensshcert_openssh_blob,                 \
+        /* .has_private = */ opensshcert_has_private,                   \
+        /* .cache_str = */ opensshcert_cache_str,                       \
+        /* .components = */ opensshcert_components,                     \
+        /* .base_key = */ opensshcert_base_key,                         \
+        /* .ca_public_blob = */ opensshcert_ca_public_blob,             \
+        /* .check_cert = */ opensshcert_check_cert,                     \
+        /* .cert_id_string = */ opensshcert_cert_id_string,             \
+        /* .cert_info = */ opensshcert_cert_info,                       \
+        /* .pubkey_bits = */ opensshcert_pubkey_bits,                   \
+        /* .supported_flags = */ opensshcert_supported_flags,           \
+        /* .alternate_ssh_id = */ opensshcert_alternate_ssh_id,         \
+        /* .alg_desc = */ opensshcert_alg_desc,                         \
+        /* .variable_size = */ opensshcert_variable_size,               \
+        /* .related_alg = */ opensshcert_related_alg,                   \
+        /* .ssh_id = */ ssh_alg_id_prefix "-cert-v01@openssh.com",      \
+        /* .cache_id = */ "opensshcert-" ssh_key_id_prefix,             \
+        /* .extra = */ &opensshcert_##name##_extra,                     \
+        /* .is_certificate = */ true,                                   \
+        /* .base_alg = */ &name,                                        \
     };
 KEYALG_LIST(KEYALG_DEF)
 #undef KEYALG_DEF
@@ -294,6 +298,7 @@ static const ssh_keyalg *const opensshcert_all_keyalgs[] = {
 static strbuf *get_base_public_blob(BinarySource *src,
                                     const opensshcert_extra *extra)
 {
+    BLOBTRANS_DECLARE(bt);
     strbuf *basepub = strbuf_new();
     put_stringz(basepub, extra->base_key_ssh_id);
 
@@ -303,7 +308,6 @@ static strbuf *get_base_public_blob(BinarySource *src,
      * does ensure that the right amount of data is copied so that
      * src ends up in the right position to read the remaining
      * certificate fields. */
-    BLOBTRANS_DECLARE(bt);
     blobtrans_read(bt, src, extra->pub_fmt);
     blobtrans_write(bt, BinarySink_UPCAST(basepub), extra->pub_fmt);
     blobtrans_clear(bt);
@@ -317,18 +321,20 @@ static opensshcert_key *opensshcert_new_shared(
     const opensshcert_extra *extra = self->extra;
 
     BinarySource src[1];
+    opensshcert_key *ck;
+    strbuf *basepub;
     BinarySource_BARE_INIT_PL(src, blob);
 
     /* Check the initial key-type string */
     if (!ptrlen_eq_string(get_string(src), extra->cert_key_ssh_id))
         return NULL;
 
-    opensshcert_key *ck = snew(opensshcert_key);
+    ck = snew(opensshcert_key);
     memset(ck, 0, sizeof(*ck));
     ck->sshk.vt = self;
 
     ck->nonce = strbuf_dup(get_string(src));
-    strbuf *basepub = get_base_public_blob(src, extra);
+    basepub = get_base_public_blob(src, extra);
     ck->serial = get_uint64(src);
     ck->type = get_uint32(src);
     ck->key_id = strbuf_dup(get_string(src));
@@ -393,29 +399,32 @@ static ssh_key *opensshcert_new_priv(
 static ssh_key *opensshcert_new_priv_openssh(
     const ssh_keyalg *self, BinarySource *src)
 {
+    BLOBTRANS_DECLARE(bt);
     const opensshcert_extra *extra = self->extra;
 
     ptrlen cert = get_string(src);
 
     strbuf *basepub;
     opensshcert_key *ck = opensshcert_new_shared(self, cert, &basepub);
+    strbuf *baseossh;
+    BinarySource pubsrc[1];
+    bool success;
+    BinarySource osshsrc[1];
     if (!ck)
         return NULL;
 
-    strbuf *baseossh = strbuf_new();
+    baseossh = strbuf_new();
 
     /* Make the base OpenSSH key blob out of the public key blob
      * returned from opensshcert_new_shared, and the trailing
      * private data following the certificate */
-    BLOBTRANS_DECLARE(bt);
 
-    BinarySource pubsrc[1];
     BinarySource_BARE_INIT_PL(pubsrc, ptrlen_from_strbuf(basepub));
     get_string(pubsrc);            /* skip key type id */
 
     /* blobtrans_read might fail in this case, because we're reading
      * from two sources and they might fail to match */
-    bool success = blobtrans_read(bt, pubsrc, extra->pub_fmt) &&
+    success = blobtrans_read(bt, pubsrc, extra->pub_fmt) &&
         blobtrans_read(bt, src, extra->cert_ossh_fmt);
 
     blobtrans_write(bt, BinarySink_UPCAST(baseossh), extra->base_ossh_fmt);
@@ -430,7 +439,6 @@ static ssh_key *opensshcert_new_priv_openssh(
 
     strbuf_free(basepub);
 
-    BinarySource osshsrc[1];
     BinarySource_BARE_INIT_PL(osshsrc, ptrlen_from_strbuf(baseossh));
     ck->basekey = ssh_key_new_priv_openssh(self->base_alg, osshsrc);
     strbuf_free(baseossh);
@@ -482,10 +490,11 @@ static ssh_key *opensshcert_ca_pub_key(
     ptrlen ca_keyblob = ptrlen_from_strbuf(ck->signature_key);
 
     ptrlen alg_source = sig.ptr ? sig : ca_keyblob;
+    const ssh_keyalg *ca_alg;
     if (algname)
         *algname = pubkey_blob_to_alg_name(alg_source);
 
-    const ssh_keyalg *ca_alg = pubkey_blob_to_alg(alg_source);
+    ca_alg = pubkey_blob_to_alg(alg_source);
     if (!ca_alg)
         return NULL;  /* don't even recognise the certifying key type */
 
@@ -495,12 +504,13 @@ static ssh_key *opensshcert_ca_pub_key(
 static void opensshcert_signature_preimage(opensshcert_key *ck, BinarySink *bs)
 {
     const opensshcert_extra *extra = ck->sshk.vt->extra;
+    strbuf *basepub;
+    BinarySource src[1];
     put_stringz(bs, extra->cert_key_ssh_id);
     put_stringpl(bs, ptrlen_from_strbuf(ck->nonce));
 
-    strbuf *basepub = strbuf_new();
+    basepub = strbuf_new();
     ssh_key_public_blob(ck->basekey, BinarySink_UPCAST(basepub));
-    BinarySource src[1];
     BinarySource_BARE_INIT_PL(src, ptrlen_from_strbuf(basepub));
     get_string(src); /* skip initial key type string */
     put_data(bs, get_ptr(src), get_avail(src));
@@ -534,19 +544,20 @@ static void opensshcert_private_blob(ssh_key *key, BinarySink *bs)
 
 static void opensshcert_openssh_blob(ssh_key *key, BinarySink *bs)
 {
+    BLOBTRANS_DECLARE(bt);
     opensshcert_key *ck = container_of(key, opensshcert_key, sshk);
     const opensshcert_extra *extra = key->vt->extra;
 
     strbuf *cert = strbuf_new();
+    strbuf *baseossh;
+    BinarySource basesrc[1];
     ssh_key_public_blob(key, BinarySink_UPCAST(cert));
     put_stringsb(bs, cert);
 
-    strbuf *baseossh = strbuf_new_nm();
+    baseossh = strbuf_new_nm();
     ssh_key_openssh_blob(ck->basekey, BinarySink_UPCAST(baseossh));
-    BinarySource basesrc[1];
     BinarySource_BARE_INIT_PL(basesrc, ptrlen_from_strbuf(baseossh));
 
-    BLOBTRANS_DECLARE(bt);
     blobtrans_read(bt, basesrc, extra->base_ossh_fmt);
     blobtrans_write(bt, bs, extra->cert_ossh_fmt);
     blobtrans_clear(bt);
@@ -578,30 +589,87 @@ static char *opensshcert_cache_str(ssh_key *key)
     return ssh_key_cache_str(ck->basekey);
 }
 
-static void opensshcert_time_to_iso8601(BinarySink *bs, uint64_t time)
+/* The validity times that mean 'no limit' */
+#define CERT_TIME_MIN uint64_make(0, 0)
+#define CERT_TIME_MAX uint64_make(0xFFFFFFFF, 0xFFFFFFFF)
+
+/*
+ * Write a certificate time (seconds since 1970-01-01 UTC) as an ISO
+ * 8601 date. The C library's gmtime can't do it, because time_t has
+ * only 32 bits on NT, so the date is worked out here (the conversion
+ * from a day number to a date is Howard Hinnant's civil_from_days).
+ * Times past about the year 5,000,000 are written as a plain number
+ * of seconds.
+ */
+static void opensshcert_time_to_iso8601(BinarySink *bs, uint64 time)
 {
-    time_t t = time;
-    char buf[256];
-    put_data(bs, buf, strftime(buf, sizeof(buf),
-                               "%Y-%m-%d %H:%M:%S UTC", gmtime(&t)));
+    unsigned r600, r144;
+    uint64 days64;
+    uint32_t sod, z, era, doe, yoe, year, doy, mp, day, month;
+
+    /* 86400 seconds per day = 600 * 144 */
+    days64 = uint64_divmod(uint64_divmod(time, 600, &r600), 144, &r144);
+    if (days64.hi != 0 || days64.lo >= 0x80000000) {
+        char buf[UINT64_DECIMAL_SIZE];
+        BinarySink_put_fmt(bs, "%s seconds after 1970-01-01 00:00:00 UTC",
+                           uint64_decimal(time, buf));
+        return;
+    }
+    sod = r144 * 600 + r600;           /* second of the day */
+
+    z = days64.lo + 719468;            /* days since 0000-03-01 */
+    era = z / 146097;                  /* 400-year period */
+    doe = z - era * 146097;            /* day of the era, [0,146096] */
+    yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365; /* [0,399] */
+    year = yoe + era * 400;
+    doy = doe - (365*yoe + yoe/4 - yoe/100);  /* day of the year, from
+                                               * March 1, [0,365] */
+    mp = (5*doy + 2) / 153;            /* month from March, [0,11] */
+    day = doy - (153*mp + 2) / 5 + 1;  /* [1,31] */
+    month = mp < 10 ? mp + 3 : mp - 9; /* [1,12] */
+    if (month <= 2)
+        year++;
+
+    BinarySink_put_fmt(bs, "%04"PRIu32"-%02"PRIu32"-%02"PRIu32
+                       " %02"PRIu32":%02"PRIu32":%02"PRIu32" UTC",
+                       year, month, day, sod / 3600, sod / 60 % 60, sod % 60);
+}
+
+/* key_components_add_uint takes a uintmax_t, which has only 32 bits
+ * here, so a uint64 goes in as an mp_int */
+static void opensshcert_add_uint64_component(
+    key_components *kc, const char *name, uint64 value)
+{
+    unsigned char buf[8];
+    mp_int *mpvalue;
+    PUT_64BIT_MSB_FIRST(buf, value);
+    mpvalue = mp_from_bytes_be(make_ptrlen(buf, 8));
+    key_components_add_mp(kc, name, mpvalue);
+    mp_free(mpvalue);
 }
 
 static void opensshcert_string_list_key_components(
     key_components *kc, strbuf *input, const char *title, const char *title2)
 {
     BinarySource src[1];
+    const char *titles[2];
+    size_t ntitles;
+    unsigned index;
     BinarySource_BARE_INIT_PL(src, ptrlen_from_strbuf(input));
 
-    const char *titles[2] = { title, title2 };
-    size_t ntitles = (title2 ? 2 : 1);
+    titles[0] = title;
+    titles[1] = title2;
+    ntitles = (title2 ? 2 : 1);
 
-    unsigned index = 0;
+    index = 0;
     while (get_avail(src)) {
-        for (size_t ti = 0; ti < ntitles; ti++) {
+        size_t ti;
+        for (ti = 0; ti < ntitles; ti++) {
             ptrlen value = get_string(src);
+            char *name;
             if (get_err(src))
                 break;
-            char *name = dupprintf("%s_%u", titles[ti], index);
+            name = dupprintf("%s_%u", titles[ti], index);
             key_components_add_text_pl(kc, name, value);
             sfree(name);
         }
@@ -613,8 +681,10 @@ static key_components *opensshcert_components(ssh_key *key)
 {
     opensshcert_key *ck = container_of(key, opensshcert_key, sshk);
     key_components *kc = ssh_key_components(ck->basekey);
+    ptrlen ca_algname;
+    ssh_key *ca_key;
     key_components_add_binary(kc, "cert_nonce", ptrlen_from_strbuf(ck->nonce));
-    key_components_add_uint(kc, "cert_serial", ck->serial);
+    opensshcert_add_uint64_component(kc, "cert_serial", ck->serial);
     switch (ck->type) {
       case SSH_CERT_TYPE_HOST:
         key_components_add_text(kc, "cert_type", "host");
@@ -629,21 +699,23 @@ static key_components *opensshcert_components(ssh_key *key)
     key_components_add_text(kc, "cert_key_id", ck->key_id->s);
     opensshcert_string_list_key_components(kc, ck->valid_principals,
                                            "cert_valid_principal", NULL);
-    key_components_add_uint(kc, "cert_valid_after", ck->valid_after);
-    key_components_add_uint(kc, "cert_valid_before", ck->valid_before);
+    opensshcert_add_uint64_component(kc, "cert_valid_after",
+                                     ck->valid_after);
+    opensshcert_add_uint64_component(kc, "cert_valid_before",
+                                     ck->valid_before);
     /* Translate the validity period into human-legible dates, but
      * only if they're not the min/max integer. Rationale: if you see
      * "584554051223-11-09 07:00:15 UTC" as the expiry time you'll be
      * as likely to think it's a weird buffer overflow as half a
      * trillion years in the future! */
-    if (ck->valid_after != 0) {
+    if (uint64_cmp(ck->valid_after, CERT_TIME_MIN) != 0) {
         strbuf *date = strbuf_new();
         opensshcert_time_to_iso8601(BinarySink_UPCAST(date), ck->valid_after);
         key_components_add_text_pl(kc, "cert_valid_after_date",
                                    ptrlen_from_strbuf(date));
         strbuf_free(date);
     }
-    if (ck->valid_before != 0xFFFFFFFFFFFFFFFF) {
+    if (uint64_cmp(ck->valid_before, CERT_TIME_MAX) != 0) {
         strbuf *date = strbuf_new();
         opensshcert_time_to_iso8601(BinarySink_UPCAST(date), ck->valid_before);
         key_components_add_text_pl(kc, "cert_valid_before_date",
@@ -659,16 +731,16 @@ static key_components *opensshcert_components(ssh_key *key)
     key_components_add_binary(kc, "cert_ca_key", ptrlen_from_strbuf(
                                   ck->signature_key));
 
-    ptrlen ca_algname;
-    ssh_key *ca_key = opensshcert_ca_pub_key(ck, make_ptrlen(NULL, 0),
-                                             &ca_algname);
+    ca_key = opensshcert_ca_pub_key(ck, make_ptrlen(NULL, 0),
+                                    &ca_algname);
     key_components_add_text_pl(kc, "cert_ca_key_algorithm_id", ca_algname);
 
     if (ca_key) {
         key_components *kc_ca_key = ssh_key_components(ca_key);
-        for (size_t i = 0; i < kc_ca_key->ncomponents; i++) {
+        size_t i;
+        for (i = 0; i < kc_ca_key->ncomponents; i++) {
             key_component *comp = &kc_ca_key->components[i];
-            char *subname = dupcat("cert_ca_key_", comp->name);
+            char *subname = dupcat("cert_ca_key_", comp->name, NULL);
             key_components_add_copy(kc, subname, comp);
             sfree(subname);
         }
@@ -686,6 +758,13 @@ static SeatDialogText *opensshcert_cert_info(ssh_key *key)
     opensshcert_key *ck = container_of(key, opensshcert_key, sshk);
     SeatDialogText *text = seat_dialog_text_new();
     strbuf *tmp = strbuf_new();
+    bool x11_ok;
+    bool agent_ok;
+    bool portfwd_ok;
+    bool pty_ok;
+    bool user_rc_ok;
+    char *fp;
+    char serialbuf[UINT64_DECIMAL_SIZE];
 
     seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
                             "Certificate type");
@@ -712,9 +791,10 @@ static SeatDialogText *opensshcert_cert_info(ssh_key *key)
 
     {
         BinarySource src[1];
+        const char *sep;
         BinarySource_BARE_INIT_PL(src, ptrlen_from_strbuf(
                                       ck->valid_principals));
-        const char *sep = "";
+        sep = "";
         strbuf_clear(tmp);
         while (get_avail(src)) {
             ptrlen principal = get_string(src);
@@ -731,8 +811,8 @@ static SeatDialogText *opensshcert_cert_info(ssh_key *key)
     seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
                             "Validity period");
     strbuf_clear(tmp);
-    if (ck->valid_after == 0) {
-        if (ck->valid_before == 0xFFFFFFFFFFFFFFFF) {
+    if (uint64_cmp(ck->valid_after, CERT_TIME_MIN) == 0) {
+        if (uint64_cmp(ck->valid_before, CERT_TIME_MAX) == 0) {
             put_dataz(tmp, "forever");
         } else {
             put_dataz(tmp, "until ");
@@ -740,7 +820,7 @@ static SeatDialogText *opensshcert_cert_info(ssh_key *key)
                                         ck->valid_before);
         }
     } else {
-        if (ck->valid_before == 0xFFFFFFFFFFFFFFFF) {
+        if (uint64_cmp(ck->valid_before, CERT_TIME_MAX) == 0) {
             put_dataz(tmp, "after ");
             opensshcert_time_to_iso8601(BinarySink_UPCAST(tmp),
                                         ck->valid_after);
@@ -772,8 +852,9 @@ static SeatDialogText *opensshcert_cert_info(ssh_key *key)
             if (ck->type == SSH_CERT_TYPE_USER &&
                 ptrlen_eq_string(key, "source-address")) {
                 BinarySource src2[1];
+                ptrlen addresslist;
                 BinarySource_BARE_INIT_PL(src2, value);
-                ptrlen addresslist = get_string(src2);
+                addresslist = get_string(src2);
                 seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
                                         "Permitted client IP addresses");
                 seat_dialog_text_append(text, SDT_MORE_INFO_VALUE_SHORT,
@@ -781,8 +862,9 @@ static SeatDialogText *opensshcert_cert_info(ssh_key *key)
             } else if (ck->type == SSH_CERT_TYPE_USER &&
                        ptrlen_eq_string(key, "force-command")) {
                 BinarySource src2[1];
+                ptrlen command;
                 BinarySource_BARE_INIT_PL(src2, value);
-                ptrlen command = get_string(src2);
+                command = get_string(src2);
                 seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
                                         "Forced remote command");
                 seat_dialog_text_append(text, SDT_MORE_INFO_VALUE_SHORT,
@@ -800,8 +882,11 @@ static SeatDialogText *opensshcert_cert_info(ssh_key *key)
      * things that _aren't_ enabled.
      */
 
-    bool x11_ok = false, agent_ok = false, portfwd_ok = false;
-    bool pty_ok = false, user_rc_ok = false;
+    x11_ok = false;
+    agent_ok = false;
+    portfwd_ok = false;
+    pty_ok = false;
+    user_rc_ok = false;
 
     {
         BinarySource src[1];
@@ -809,7 +894,7 @@ static SeatDialogText *opensshcert_cert_info(ssh_key *key)
                                       ck->extensions));
         while (get_avail(src)) {
             ptrlen key = get_string(src);
-            /* ptrlen value = */ get_string(src); // nothing needs this yet
+            /* ptrlen value = */ get_string(src); /* nothing needs this yet */
             if (get_err(src))
                 break;
             if (ptrlen_eq_string(key, "permit-X11-forwarding")) {
@@ -861,10 +946,10 @@ static SeatDialogText *opensshcert_cert_info(ssh_key *key)
     seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
                             "Certificate serial number");
     seat_dialog_text_append(text, SDT_MORE_INFO_VALUE_SHORT,
-                            "%" PRIu64, ck->serial);
+                            "%s", uint64_decimal(ck->serial, serialbuf));
 
-    char *fp = ssh2_fingerprint_blob(ptrlen_from_strbuf(ck->signature_key),
-                                     SSH_FPTYPE_DEFAULT);
+    fp = ssh2_fingerprint_blob(ptrlen_from_strbuf(ck->signature_key),
+                               SSH_FPTYPE_DEFAULT);
     seat_dialog_text_append(text, SDT_MORE_INFO_KEY,
                             "Fingerprint of signing CA key");
     seat_dialog_text_append(text, SDT_MORE_INFO_VALUE_SHORT, "%s", fp);
@@ -883,12 +968,14 @@ static SeatDialogText *opensshcert_cert_info(ssh_key *key)
 static int opensshcert_pubkey_bits(const ssh_keyalg *self, ptrlen blob)
 {
     BinarySource src[1];
+    strbuf *basepub;
+    int bits;
     BinarySource_BARE_INIT_PL(src, blob);
 
     get_string(src);                   /* key type */
     get_string(src);                   /* nonce */
-    strbuf *basepub = get_base_public_blob(src, self->extra);
-    int bits = ssh_key_public_bits(
+    basepub = get_base_public_blob(src, self->extra);
+    bits = ssh_key_public_bits(
         self->base_alg, ptrlen_from_strbuf(basepub));
     strbuf_free(basepub);
     return bits;
@@ -903,8 +990,9 @@ static const char *opensshcert_alternate_ssh_id(const ssh_keyalg *self,
                                                 unsigned flags)
 {
     const char *base_id = ssh_keyalg_alternate_ssh_id(self->base_alg, flags);
+    size_t i;
 
-    for (size_t i = 0; i < lenof(opensshcert_all_keyalgs); i++) {
+    for (i = 0; i < lenof(opensshcert_all_keyalgs); i++) {
         const ssh_keyalg *alg_i = opensshcert_all_keyalgs[i];
         if (!strcmp(base_id, alg_i->base_alg->ssh_id))
             return alg_i->ssh_id;
@@ -916,7 +1004,7 @@ static const char *opensshcert_alternate_ssh_id(const ssh_keyalg *self,
 static char *opensshcert_alg_desc(const ssh_keyalg *self)
 {
     char *base_desc = ssh_keyalg_desc(self->base_alg);
-    char *our_desc = dupcat(base_desc, " cert");
+    char *our_desc = dupcat(base_desc, " cert", NULL);
     sfree(base_desc);
     return our_desc;
 }
@@ -929,7 +1017,8 @@ static bool opensshcert_variable_size(const ssh_keyalg *self)
 static const ssh_keyalg *opensshcert_related_alg(const ssh_keyalg *self,
                                                  const ssh_keyalg *base)
 {
-    for (size_t i = 0; i < lenof(opensshcert_all_keyalgs); i++) {
+    size_t i;
+    for (i = 0; i < lenof(opensshcert_all_keyalgs); i++) {
         const ssh_keyalg *alg_i = opensshcert_all_keyalgs[i];
         if (base == alg_i->base_alg)
             return alg_i;
@@ -945,7 +1034,7 @@ static char *opensshcert_invalid(ssh_key *key, unsigned flags)
 }
 
 static bool opensshcert_check_cert(
-    ssh_key *key, bool host, ptrlen principal, uint64_t time,
+    ssh_key *key, bool host, ptrlen principal, uint64 time,
     const ca_options *opts, BinarySink *error)
 {
     opensshcert_key *ck = container_of(key, opensshcert_key, sshk);
@@ -955,6 +1044,8 @@ static bool opensshcert_check_cert(
     BinarySource src[1];
 
     ptrlen signature = ptrlen_from_strbuf(ck->signature);
+    const ssh_keyalg *sig_alg;
+    uint32_t expected_type;
 
     /*
      * The OpenSSH certificate spec is one-layer only: it explicitly
@@ -969,12 +1060,12 @@ static bool opensshcert_check_cert(
      */
     ca_key = opensshcert_ca_pub_key(ck, make_ptrlen(NULL, 0), NULL);
     if (!ca_key) {
-        put_fmt(error, "Certificate's signing key is invalid");
+        BinarySink_put_fmt(BinarySink_UPCAST(error), "Certificate's signing key is invalid");
         goto out;
     }
     if (ssh_key_alg(ca_key)->is_certificate) {
-        put_fmt(error, "Certificate is signed with a certified key "
-                "(forbidden by OpenSSH certificate specification)");
+        BinarySink_put_fmt(BinarySink_UPCAST(error), "Certificate is signed with a certified key "
+                           "(forbidden by OpenSSH certificate specification)");
         goto out;
     }
 
@@ -986,59 +1077,59 @@ static bool opensshcert_check_cert(
     ssh_key_free(ca_key);
     ca_key = opensshcert_ca_pub_key(ck, signature, NULL);
     if (!ca_key) {
-        put_fmt(error, "Certificate's signing key does not match "
-                "signature type");
+        BinarySink_put_fmt(BinarySink_UPCAST(error), "Certificate's signing key does not match "
+                           "signature type");
         goto out;
     }
 
     /* Check which signature algorithm is actually in use, because
      * that might be a reason to reject the certificate (e.g. ssh-rsa
      * when we wanted rsa-sha2-*). */
-    const ssh_keyalg *sig_alg = ssh_key_alg(ca_key);
+    sig_alg = ssh_key_alg(ca_key);
     if ((sig_alg == &ssh_rsa && !opts->permit_rsa_sha1) ||
         (sig_alg == &ssh_rsa_sha256 && !opts->permit_rsa_sha256) ||
         (sig_alg == &ssh_rsa_sha512 && !opts->permit_rsa_sha512)) {
-        put_fmt(error, "Certificate signature uses '%s' signature type "
-                "(forbidden by user configuration)", sig_alg->ssh_id);
+        BinarySink_put_fmt(BinarySink_UPCAST(error), "Certificate signature uses '%s' signature type "
+                           "(forbidden by user configuration)", sig_alg->ssh_id);
         goto out;
     }
 
     opensshcert_signature_preimage(ck, BinarySink_UPCAST(preimage));
 
     if (!ssh_key_verify(ca_key, signature, ptrlen_from_strbuf(preimage))) {
-        put_fmt(error, "Certificate's signature is invalid");
+        BinarySink_put_fmt(BinarySink_UPCAST(error), "Certificate's signature is invalid");
         goto out;
     }
 
-    uint32_t expected_type = host ? SSH_CERT_TYPE_HOST : SSH_CERT_TYPE_USER;
+    expected_type = host ? SSH_CERT_TYPE_HOST : SSH_CERT_TYPE_USER;
     if (ck->type != expected_type) {
-        put_fmt(error, "Certificate type is ");
+        BinarySink_put_fmt(BinarySink_UPCAST(error), "Certificate type is ");
         switch (ck->type) {
           case SSH_CERT_TYPE_HOST:
-            put_fmt(error, "host");
+            BinarySink_put_fmt(BinarySink_UPCAST(error), "host");
             break;
           case SSH_CERT_TYPE_USER:
-            put_fmt(error, "user");
+            BinarySink_put_fmt(BinarySink_UPCAST(error), "user");
             break;
           default:
-            put_fmt(error, "unknown value %" PRIu32, ck->type);
+            BinarySink_put_fmt(BinarySink_UPCAST(error), "unknown value %" PRIu32, ck->type);
             break;
         }
-        put_fmt(error, "; expected %s", host ? "host" : "user");
+        BinarySink_put_fmt(BinarySink_UPCAST(error), "; expected %s", host ? "host" : "user");
         goto out;
     }
 
     /*
      * Check the time bounds on the certificate.
      */
-    if (time < ck->valid_after) {
-        put_fmt(error, "Certificate is not valid until ");
+    if (uint64_cmp(time, ck->valid_after) < 0) {
+        BinarySink_put_fmt(BinarySink_UPCAST(error), "Certificate is not valid until ");
         opensshcert_time_to_iso8601(BinarySink_UPCAST(error),
                                     ck->valid_after);
         goto out;
     }
-    if (time >= ck->valid_before) {
-        put_fmt(error, "Certificate expired at ");
+    if (uint64_cmp(time, ck->valid_before) >= 0) {
+        BinarySink_put_fmt(BinarySink_UPCAST(error), "Certificate expired at ");
         opensshcert_time_to_iso8601(BinarySink_UPCAST(error),
                                     ck->valid_before);
         goto out;
@@ -1052,14 +1143,15 @@ static bool opensshcert_check_cert(
      * principal (at least, provided you trust the CA that issued it).
      */
     if (ck->valid_principals->len != 0) {
+        const char *sep;
         BinarySource_BARE_INIT_PL(
             src, ptrlen_from_strbuf(ck->valid_principals));
 
         while (get_avail(src)) {
             ptrlen valid_principal = get_string(src);
             if (get_err(src)) {
-                put_fmt(error, "Certificate's valid principals list is "
-                        "incorrectly formatted");
+                BinarySink_put_fmt(BinarySink_UPCAST(error), "Certificate's valid principals list is "
+                                   "incorrectly formatted");
                 goto out;
             }
             if (ptrlen_eq_ptrlen(valid_principal, principal))
@@ -1077,22 +1169,22 @@ static bool opensshcert_check_cert(
          * I was trying to match it against 'foo'", rather than just
          * "Computer says no".)
          */
-        put_fmt(error, "Certificate's %s list [",
-                host ? "hostname" : "username");
+        BinarySink_put_fmt(BinarySink_UPCAST(error), "Certificate's %s list [",
+                           host ? "hostname" : "username");
         BinarySource_BARE_INIT_PL(
             src, ptrlen_from_strbuf(ck->valid_principals));
-        const char *sep = "";
+        sep = "";
         while (get_avail(src)) {
             ptrlen valid_principal = get_string(src);
-            put_fmt(error, "%s\"", sep);
+            BinarySink_put_fmt(BinarySink_UPCAST(error), "%s\"", sep);
             put_c_string_literal(error, valid_principal);
-            put_fmt(error, "\"");
+            BinarySink_put_fmt(BinarySink_UPCAST(error), "\"");
             sep = ", ";
         }
-        put_fmt(error, "] does not contain expected %s \"",
-                host ? "hostname" : "username");
+        BinarySink_put_fmt(BinarySink_UPCAST(error), "] does not contain expected %s \"",
+                           host ? "hostname" : "username");
         put_c_string_literal(error, principal);
-        put_fmt(error, "\"");
+        BinarySink_put_fmt(BinarySink_UPCAST(error), "\"");
         goto out;
       principal_ok:;
     }
@@ -1108,8 +1200,8 @@ static bool opensshcert_check_cert(
             ptrlen option = get_string(src);
             ptrlen data = get_string(src);
             if (get_err(src)) {
-                put_fmt(error, "Certificate's critical options list is "
-                        "incorrectly formatted");
+                BinarySink_put_fmt(BinarySink_UPCAST(error), "Certificate's critical options list is "
+                                   "incorrectly formatted");
                 goto out;
             }
 
@@ -1128,10 +1220,10 @@ static bool opensshcert_check_cert(
             /*
              * Report an unrecognised literal.
              */
-            put_fmt(error, "Certificate specifies an unsupported critical "
-                    "option \"");
+            BinarySink_put_fmt(BinarySink_UPCAST(error), "Certificate specifies an unsupported critical "
+                               "option \"");
             put_c_string_literal(error, option);
-            put_fmt(error, "\"");
+            BinarySink_put_fmt(BinarySink_UPCAST(error), "\"");
             goto out;
         }
     }

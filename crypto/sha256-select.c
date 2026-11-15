@@ -12,17 +12,12 @@
 static ssh_hash *sha256_select(const ssh_hashalg *alg)
 {
     static const ssh_hashalg *const real_algs[] = {
-#if HAVE_SHA_NI
-        &ssh_sha256_ni,
-#endif
-#if HAVE_NEON_CRYPTO
-        &ssh_sha256_neon,
-#endif
         &ssh_sha256_sw,
         NULL,
     };
+    size_t i;
 
-    for (size_t i = 0; real_algs[i]; i++) {
+    for (i = 0; real_algs[i]; i++) {
         const ssh_hashalg *alg = real_algs[i];
         const struct sha256_extra *alg_extra =
             (const struct sha256_extra *)alg->extra;
@@ -37,8 +32,12 @@ static ssh_hash *sha256_select(const ssh_hashalg *alg)
 }
 
 const ssh_hashalg ssh_sha256 = {
-    .new = sha256_select,
-    .hlen = 32,
-    .blocklen = 64,
-    HASHALG_NAMES_ANNOTATED("SHA-256", "dummy selector vtable"),
+    /* .new = */ sha256_select,
+    /* .reset = */ NULL,
+    /* .copyfrom = */ NULL,
+    /* .digest = */ NULL,
+    /* .free = */ NULL,
+    /* .hlen = */ 32,
+    /* .blocklen = */ 64,
+    /* .text_basename = */ "SHA-256", /* .annotation = */ "dummy selector vtable", /* .text_name = */ "SHA-256" " (" "dummy selector vtable" ")",
 };

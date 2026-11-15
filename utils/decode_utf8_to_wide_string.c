@@ -13,6 +13,7 @@ wchar_t *decode_utf8_to_wide_string(const char *s)
     BinarySource_BARE_INIT_PL(src, ptrlen_from_asciz(s));
 
     while (get_avail(src) > 0) {
+        DecodeUTF8Failure err;
         /*
          * decode_utf8_to_wchar might emit up to 2 wchar_t if wchar_t
          * is 16 bits (because of UTF-16 surrogates), but will emit at
@@ -23,7 +24,6 @@ wchar_t *decode_utf8_to_wide_string(const char *s)
         /* We ignore 'err': if it is set, then the character decode
          * function will have emitted U+FFFD REPLACEMENT CHARACTER,
          * which is what we'd have done in response anyway. */
-        DecodeUTF8Failure err;
         wlen += decode_utf8_to_wchar(src, ws + wlen, &err);
     }
 

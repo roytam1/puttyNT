@@ -10,10 +10,12 @@
 
 void percent_encode_bs(BinarySink *bs, ptrlen data, const char *badchars)
 {
-    for (const char *p = data.ptr, *e = ptrlen_end(data); p < e; p++) {
+    const char *p;
+    const char *e;
+    for (p = data.ptr, e = ptrlen_end(data); p < e; p++) {
         char c = *p;
         if (c == '%' || c < ' ' || (badchars && strchr(badchars, c)))
-            put_fmt(bs, "%%%02X", (unsigned char)c);
+            BinarySink_put_fmt(BinarySink_UPCAST(bs), "%%%02X", (unsigned char)c);
         else
             put_byte(bs, c);
     }

@@ -7,6 +7,7 @@
 Seat *interactor_borrow_seat(Interactor *itr)
 {
     Seat *clientseat = interactor_get_seat(itr);
+    Seat *tempseat;
     if (!clientseat)
         return NULL;
 
@@ -16,7 +17,7 @@ Seat *interactor_borrow_seat(Interactor *itr)
         return tempseat_get_real(clientseat);
 
     /* Otherwise, make a new TempSeat and give that to the client. */
-    Seat *tempseat = tempseat_new(clientseat);
+    tempseat = tempseat_new(clientseat);
     interactor_set_seat(itr, tempseat);
     return clientseat;
 }
@@ -44,6 +45,8 @@ static Interactor *interactor_toplevel(Interactor *itr, unsigned *level_out)
 void interactor_return_seat(Interactor *itr)
 {
     Seat *tempseat = interactor_get_seat(itr);
+    Seat *realseat;
+    Interactor *itr_top;
     if (!is_tempseat(tempseat))
         return;                        /* no-op */
 
@@ -55,7 +58,7 @@ void interactor_return_seat(Interactor *itr)
      *
      * However, this may be overridden by the tempseat_flush call.
      */
-    Seat *realseat = tempseat_get_real(tempseat);
+    realseat = tempseat_get_real(tempseat);
     seat_set_trust_status(realseat, true);
 
     tempseat_flush(tempseat);
@@ -67,7 +70,7 @@ void interactor_return_seat(Interactor *itr)
      * interactor_announce, then all Interactors from now on will
      * announce themselves even if they have nothing to say.
      */
-    Interactor *itr_top = interactor_toplevel(itr, NULL);
+    itr_top = interactor_toplevel(itr, NULL);
     if (itr_top->last_to_talk)
         interactor_announce(itr);
 }
@@ -75,14 +78,16 @@ void interactor_return_seat(Interactor *itr)
 InteractionReadySeat interactor_announce(Interactor *itr)
 {
     Seat *seat = interactor_get_seat(itr);
+    InteractionReadySeat iseat;
+    unsigned level;
+    Interactor *itr_top;
+    bool need_announcement;
     assert(!is_tempseat(seat) &&
            "Shouldn't call announce when someone else is using our seat");
 
-    InteractionReadySeat iseat;
     iseat.seat = seat;
 
-    unsigned level;
-    Interactor *itr_top = interactor_toplevel(itr, &level);
+    itr_top = interactor_toplevel(itr, &level);
 
     /*
      * Generally, we should announce ourself if the previous
@@ -92,20 +97,23 @@ InteractionReadySeat interactor_announce(Interactor *itr)
      * doesn't need to announce itself, if no proxy has intervened
      * before it.
      */
-    bool need_announcement = (itr_top->last_to_talk != itr);
+    need_announcement = (itr_top->last_to_talk != itr);
     if (!itr->parent && !itr_top->last_to_talk)
         need_announcement = false;
 
     if (need_announcement) {
         const char *prefix = "";
+        char *desc;
+        char *adjective;
+        char *msg;
         if (itr_top->last_to_talk != NULL)
             seat_antispoof_msg(iseat, ""); /* leave a separating blank line */
 
-        char *desc = interactor_description(itr);
-        char *adjective = (level == 0 ? dupstr("primary") :
-                           level == 1 ? dupstr("proxy") :
-                           dupprintf("proxy^%u", level));
-        char *msg = dupprintf("%sMaking %s %s", prefix, adjective, desc);
+        desc = interactor_description(itr);
+        adjective = (level == 0 ? dupstr("primary") :
+                     level == 1 ? dupstr("proxy") :
+                     dupprintf("proxy^%u", level));
+        msg = dupprintf("%sMaking %s %s", prefix, adjective, desc);
         sfree(adjective);
         sfree(desc);
 

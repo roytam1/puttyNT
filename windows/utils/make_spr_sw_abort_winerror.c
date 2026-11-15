@@ -8,7 +8,7 @@
 
 static void spr_winerror_errfn(SeatPromptResult spr, BinarySink *bs)
 {
-    put_fmt(bs, "%s: %s", spr.errdata_lit, win_strerror(spr.errdata_u));
+    BinarySink_put_fmt(BinarySink_UPCAST(bs), "%s: %s", spr.errdata_lit, win_strerror(spr.errdata_u));
 }
 
 SeatPromptResult make_spr_sw_abort_winerror(const char *prefix, DWORD error)

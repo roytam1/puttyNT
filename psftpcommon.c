@@ -41,7 +41,8 @@ struct list_directory_from_sftp_ctx *list_directory_from_sftp_new(void)
 
 void list_directory_from_sftp_free(struct list_directory_from_sftp_ctx *ctx)
 {
-    for (size_t i = 0; i < ctx->nnames; i++)
+    size_t i;
+    for (i = 0; i < ctx->nnames; i++)
         fxp_free_name(ctx->names[i]);
     sfree(ctx->names);
     sfree(ctx);
@@ -63,10 +64,11 @@ void list_directory_from_sftp_feed(struct list_directory_from_sftp_ctx *ctx,
             strlen(name->longname);
 
         if (MAX_NAMES_MEMORY - ctx->total_memory < this_name_memory) {
+            size_t i;
             list_directory_from_sftp_warn_unsorted();
 
             /* Output all the previously stored names. */
-            for (size_t i = 0; i < ctx->nnames; i++) {
+            for (i = 0; i < ctx->nnames; i++) {
                 list_directory_from_sftp_print(ctx->names[i]);
                 fxp_free_name(ctx->names[i]);
             }
@@ -94,9 +96,10 @@ void list_directory_from_sftp_feed(struct list_directory_from_sftp_ctx *ctx,
 void list_directory_from_sftp_finish(struct list_directory_from_sftp_ctx *ctx)
 {
     if (ctx->nnames > 0) {
+        size_t i;
         assert(ctx->sorting);
         qsort(ctx->names, ctx->nnames, sizeof(*ctx->names), sftp_name_compare);
-        for (size_t i = 0; i < ctx->nnames; i++)
+        for (i = 0; i < ctx->nnames; i++)
             list_directory_from_sftp_print(ctx->names[i]);
     }
 }

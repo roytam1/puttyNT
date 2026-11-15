@@ -43,6 +43,8 @@ PrimeCandidateSource *pcs_new_with_firstbits(unsigned bits,
                                              unsigned first, unsigned nfirst)
 {
     PrimeCandidateSource *s = snew(PrimeCandidateSource);
+    mp_int *firstmp;
+    mp_int *base;
 
     assert(first >> (nfirst-1) == 1);
 
@@ -59,8 +61,8 @@ PrimeCandidateSource *pcs_new_with_firstbits(unsigned bits,
     s->navoids = s->avoidsize = 0;
 
     /* Make the number that's the lower limit of our range */
-    mp_int *firstmp = mp_from_integer(first);
-    mp_int *base = mp_lshift_fixed(firstmp, bits - nfirst);
+    firstmp = mp_from_integer(first);
+    base = mp_lshift_fixed(firstmp, bits - nfirst);
     mp_free(firstmp);
 
     /* Set the low bit of that, because all (nontrivial) primes are odd */
@@ -91,10 +93,11 @@ PrimeCandidateSource *pcs_new(unsigned bits)
 
 void pcs_free(PrimeCandidateSource *s)
 {
+    size_t i;
     mp_free(s->limit);
     mp_free(s->factor);
     mp_free(s->addend);
-    for (size_t i = 0; i < s->nkps; i++)
+    for (i = 0; i < s->nkps; i++)
         mp_free(s->kps[i]);
     sfree(s->avoids);
     sfree(s->kps);
@@ -121,6 +124,16 @@ static void pcs_require_residue_inner(PrimeCandidateSource *s,
     mp_int *gcd = mp_gcd(mod, s->factor);
     mp_int *test1 = mp_mod(s->addend, gcd);
     mp_int *test2 = mp_mod(res, gcd);
+    mp_int *A;
+    mp_int *M;
+    mp_int *Rpre;
+    mp_int *R;
+    mp_int *Ainv;
+    mp_int *K;
+    mp_int *dividend;
+    mp_int *addend_old;
+    mp_int *tmp;
+    mp_int *factor_old;
     assert(mp_cmp_eq(test1, test2));
     mp_free(test1);
     mp_free(test2);
@@ -150,12 +163,12 @@ static void pcs_require_residue_inner(PrimeCandidateSource *s,
      * so we just need AK == R (mod M). So our congruence is solved by
      * setting K to be R * A^{-1} mod M.
      */
-    mp_int *A = mp_div(s->factor, gcd);
-    mp_int *M = mp_div(mod, gcd);
-    mp_int *Rpre = mp_modsub(res, s->addend, mod);
-    mp_int *R = mp_div(Rpre, gcd);
-    mp_int *Ainv = mp_invert(A, M);
-    mp_int *K = mp_modmul(R, Ainv, M);
+    A = mp_div(s->factor, gcd);
+    M = mp_div(mod, gcd);
+    Rpre = mp_modsub(res, s->addend, mod);
+    R = mp_div(Rpre, gcd);
+    Ainv = mp_invert(A, M);
+    K = mp_modmul(R, Ainv, M);
 
     mp_free(gcd);
     mp_free(Rpre);
@@ -173,7 +186,7 @@ static void pcs_require_residue_inner(PrimeCandidateSource *s,
      * RHS is a fraction, so in integers, we need y < ceil of it.
      */
     assert(!mp_cmp_hs(K, s->limit));
-    mp_int *dividend = mp_add(s->limit, M);
+    dividend = mp_add(s->limit, M);
     mp_sub_integer_into(dividend, dividend, 1);
     mp_sub_into(dividend, dividend, K);
     mp_free(s->limit);
@@ -184,13 +197,13 @@ static void pcs_require_residue_inner(PrimeCandidateSource *s,
      * Now just update the real factor and addend, and we're done.
      */
 
-    mp_int *addend_old = s->addend;
-    mp_int *tmp = mp_mul(s->factor, K); /* use the _old_ value of factor */
+    addend_old = s->addend;
+    tmp = mp_mul(s->factor, K);         /* use the _old_ value of factor */
     s->addend = mp_add(s->addend, tmp);
     mp_free(tmp);
     mp_free(addend_old);
 
-    mp_int *factor_old = s->factor;
+    factor_old = s->factor;
     s->factor = mp_mul(s->factor, M);
     mp_free(factor_old);
 
@@ -232,6 +245,7 @@ void pcs_avoid_residue_small(PrimeCandidateSource *s,
                              unsigned mod, unsigned res)
 {
     assert(!s->avoid_modulus);         /* can't cope with more than one */
+    assert(mod > 0 && mod < 0x20000);  /* see pcs_ready */
     s->avoid_modulus = mod;
     s->avoid_residue = res % mod;      /* reduce, just in case */
 }
@@ -243,21 +257,38 @@ static int avoid_cmp(const void *av, const void *bv)
     return a->mod < b->mod ? -1 : a->mod > b->mod ? +1 : 0;
 }
 
-static uint64_t invert(uint64_t a, uint64_t m)
+/* The inverse of a mod m, from 0 to m-1, for 0 < a < m < 2^17 */
+static unsigned invert(unsigned a, unsigned m)
 {
-    int64_t v0 = a, i0 = 1;
-    int64_t v1 = m, i1 = 0;
+    long v0 = a, i0 = 1;
+    long v1 = m, i1 = 0;
+    long inv;
     while (v0) {
-        int64_t tmp, q = v1 / v0;
+        long tmp, q = v1 / v0;
         tmp = v0; v0 = v1 - q*v0; v1 = tmp;
         tmp = i0; i0 = i1 - q*i0; i1 = tmp;
     }
     assert(v1 == 1 || v1 == -1);
-    return i1 * v1;
+    inv = i1 * v1;                     /* -m < inv < m */
+    return inv < 0 ? inv + m : inv;
+}
+
+/* a * b mod m, for a, b < m < 2^17. Splitting b into its top 9 and
+ * bottom 8 bits keeps every intermediate value below 2^26. */
+static unsigned mulmod(unsigned a, unsigned b, unsigned m)
+{
+    unsigned r = a * (b >> 8) % m;
+    return ((r << 8) + a * (b & 0xFF)) % m;
 }
 
 void pcs_ready(PrimeCandidateSource *s)
 {
+    unsigned limit;
+    unsigned factor_m;
+    unsigned addend_m;
+    unsigned last_mod;
+    size_t out;
+    size_t i;
     /*
      * List all the small (modulus, residue) pairs we want to avoid.
      */
@@ -271,8 +302,8 @@ void pcs_ready(PrimeCandidateSource *s)
         s->navoids++;                                           \
     } while (0)
 
-    unsigned limit = (mp_hs_integer(s->addend, 65536) ? 65536 :
-                      mp_get_integer(s->addend));
+    limit = (mp_hs_integer(s->addend, 65536) ? 65536 :
+             mp_get_integer(s->addend));
 
     /*
      * Don't be divisible by any small prime, or at least, any prime
@@ -281,10 +312,11 @@ void pcs_ready(PrimeCandidateSource *s)
      * embarrassing to rule out legitimate answers on the grounds that
      * they were divisible by themselves.)
      */
-    for (size_t i = 0; i < NSMALLPRIMES && smallprimes[i] < limit; i++)
+    for (i = 0; i < NSMALLPRIMES && smallprimes[i] < limit; i++)
         ADD_AVOID(smallprimes[i], 0);
 
     if (s->try_sophie_germain) {
+        size_t i;
         /*
          * If we're aiming to generate a Sophie Germain prime (i.e. p
          * such that 2p+1 is also prime), then we also want to ensure
@@ -302,7 +334,7 @@ void pcs_ready(PrimeCandidateSource *s)
          * mod q is just (q-1)/2. (Proof: multiplying it by -2 gives
          * 1-q, which is congruent to 1 mod q.)
          */
-        for (size_t i = 0; i < NSMALLPRIMES && smallprimes[i] < limit; i++)
+        for (i = 0; i < NSMALLPRIMES && smallprimes[i] < limit; i++)
             if (smallprimes[i] != 2)
                 ADD_AVOID(smallprimes[i], (smallprimes[i] - 1) / 2);
     }
@@ -333,12 +365,18 @@ void pcs_ready(PrimeCandidateSource *s)
      *
      * If factor == 0 modulo mod, then the answer will have a fixed
      * residue anyway, so we can discard it from our list to test.
+     *
+     * Every modulus is less than 2^17 (the small primes below 2^16,
+     * and the one from pcs_avoid_residue_small, which for RSA is the
+     * exponent 65537), so this is done in 32-bit arithmetic.
      */
-    int64_t factor_m = 0, addend_m = 0, last_mod = 0;
+    factor_m = 0;
+    addend_m = 0;
+    last_mod = 0;
 
-    size_t out = 0;
-    for (size_t i = 0; i < s->navoids; i++) {
-        int64_t mod = s->avoids[i].mod, res = s->avoids[i].res;
+    out = 0;
+    for (i = 0; i < s->navoids; i++) {
+        unsigned mod = s->avoids[i].mod, res = s->avoids[i].res;
         if (mod != last_mod) {
             last_mod = mod;
             addend_m = mp_mod_known_integer(s->addend, mod);
@@ -350,10 +388,7 @@ void pcs_ready(PrimeCandidateSource *s)
             continue;
         }
 
-        res = (res - addend_m) * invert(factor_m, mod);
-        res %= mod;
-        if (res < 0)
-            res += mod;
+        res = mulmod((res + mod - addend_m) % mod, invert(factor_m, mod), mod);
 
         s->avoids[out].mod = mod;
         s->avoids[out].res = res;
@@ -377,11 +412,13 @@ mp_int *pcs_generate(PrimeCandidateSource *s)
     while (true) {
         mp_int *x = mp_random_upto(s->limit);
 
-        int64_t x_res = 0, last_mod = 0;
+        unsigned x_res = 0, last_mod = 0;
         bool ok = true;
+        mp_int *toret;
+        size_t i;
 
-        for (size_t i = 0; i < s->navoids; i++) {
-            int64_t mod = s->avoids[i].mod, avoid_res = s->avoids[i].res;
+        for (i = 0; i < s->navoids; i++) {
+            unsigned mod = s->avoids[i].mod, avoid_res = s->avoids[i].res;
 
             if (mod != last_mod) {
                 last_mod = mod;
@@ -404,7 +441,7 @@ mp_int *pcs_generate(PrimeCandidateSource *s)
         /*
          * We've found a viable x. Make the final output value.
          */
-        mp_int *toret = mp_new(s->bits);
+        toret = mp_new(s->bits);
         mp_mul_into(toret, x, s->factor);
         mp_add_into(toret, toret, s->addend);
         mp_free(x);

@@ -228,6 +228,7 @@ static void pfd_receive(Plug *plug, int urgent, const char *data, size_t len)
             strbuf *output;
 
             switch (pf->socks_state) {
+              size_t i;
               case SOCKS_INITIAL:
               case SOCKS_NONE:
                 unreachable("These case values cannot appear");
@@ -303,7 +304,7 @@ static void pfd_receive(Plug *plug, int urgent, const char *data, size_t len)
 
                 /* Search the method list for AUTH_NONE, which is the
                  * only one this client code can speak */
-                for (size_t i = 0; i < methods.len; i++) {
+                for (i = 0; i < methods.len; i++) {
                     unsigned char this_method =
                         ((const unsigned char *)methods.ptr)[i];
                     if (this_method == SOCKS5_AUTH_NONE) {
@@ -419,10 +420,10 @@ static void pfd_sent(Plug *plug, size_t bufsize)
 }
 
 static const PlugVtable PortForwarding_plugvt = {
-    .log = nullplug_log,
-    .closing = pfd_closing,
-    .receive = pfd_receive,
-    .sent = pfd_sent,
+    /* .log = */ nullplug_log,
+    /* .closing = */ pfd_closing,
+    /* .receive = */ pfd_receive,
+    /* .sent = */ pfd_sent,
 };
 
 static void pfd_chan_free(Channel *chan);
@@ -435,28 +436,28 @@ static void pfd_set_input_wanted(Channel *chan, bool wanted);
 static char *pfd_log_close_msg(Channel *chan);
 
 static const ChannelVtable PortForwarding_channelvt = {
-    .free = pfd_chan_free,
-    .open_confirmation = pfd_open_confirmation,
-    .open_failed = pfd_open_failure,
-    .send = pfd_send,
-    .send_eof = pfd_send_eof,
-    .set_input_wanted = pfd_set_input_wanted,
-    .log_close_msg = pfd_log_close_msg,
-    .want_close = chan_default_want_close,
-    .rcvd_exit_status = chan_no_exit_status,
-    .rcvd_exit_signal = chan_no_exit_signal,
-    .rcvd_exit_signal_numeric = chan_no_exit_signal_numeric,
-    .run_shell = chan_no_run_shell,
-    .run_command = chan_no_run_command,
-    .run_subsystem = chan_no_run_subsystem,
-    .enable_x11_forwarding = chan_no_enable_x11_forwarding,
-    .enable_agent_forwarding = chan_no_enable_agent_forwarding,
-    .allocate_pty = chan_no_allocate_pty,
-    .set_env = chan_no_set_env,
-    .send_break = chan_no_send_break,
-    .send_signal = chan_no_send_signal,
-    .change_window_size = chan_no_change_window_size,
-    .request_response = chan_no_request_response,
+    /* .free = */ pfd_chan_free,
+    /* .open_confirmation = */ pfd_open_confirmation,
+    /* .open_failed = */ pfd_open_failure,
+    /* .send = */ pfd_send,
+    /* .send_eof = */ pfd_send_eof,
+    /* .set_input_wanted = */ pfd_set_input_wanted,
+    /* .log_close_msg = */ pfd_log_close_msg,
+    /* .want_close = */ chan_default_want_close,
+    /* .rcvd_exit_status = */ chan_no_exit_status,
+    /* .rcvd_exit_signal = */ chan_no_exit_signal,
+    /* .rcvd_exit_signal_numeric = */ chan_no_exit_signal_numeric,
+    /* .run_shell = */ chan_no_run_shell,
+    /* .run_command = */ chan_no_run_command,
+    /* .run_subsystem = */ chan_no_run_subsystem,
+    /* .enable_x11_forwarding = */ chan_no_enable_x11_forwarding,
+    /* .enable_agent_forwarding = */ chan_no_enable_agent_forwarding,
+    /* .allocate_pty = */ chan_no_allocate_pty,
+    /* .set_env = */ chan_no_set_env,
+    /* .send_break = */ chan_no_send_break,
+    /* .send_signal = */ chan_no_send_signal,
+    /* .change_window_size = */ chan_no_change_window_size,
+    /* .request_response = */ chan_no_request_response,
 };
 
 Channel *portfwd_raw_new(ConnectionLayer *cl, Plug **plug, bool start_ready)
@@ -542,9 +543,11 @@ static int pfl_accepting(Plug *p, accept_fn_t constructor, accept_ctx_t ctx)
 }
 
 static const PlugVtable PortListener_plugvt = {
-    .log = nullplug_log,
-    .closing = pfl_closing,
-    .accepting = pfl_accepting,
+    /* .log = */ nullplug_log,
+    /* .closing = */ pfl_closing,
+    /* .receive = */ NULL,
+    /* .sent = */ NULL,
+    /* .accepting = */ pfl_accepting,
 };
 
 /*
@@ -618,16 +621,18 @@ static void pfl_terminate(struct PortListener *pl)
 
 static void pfd_set_input_wanted(Channel *chan, bool wanted)
 {
+    PortForwarding *pf;
     assert(chan->vt == &PortForwarding_channelvt);
-    PortForwarding *pf = container_of(chan, PortForwarding, chan);
+    pf = container_of(chan, PortForwarding, chan);
     pf->input_wanted = wanted;
     sk_set_frozen(pf->s, !pf->input_wanted);
 }
 
 static void pfd_chan_free(Channel *chan)
 {
+    PortForwarding *pf;
     assert(chan->vt == &PortForwarding_channelvt);
-    PortForwarding *pf = container_of(chan, PortForwarding, chan);
+    pf = container_of(chan, PortForwarding, chan);
     pfd_close(pf);
 }
 
@@ -637,22 +642,25 @@ static void pfd_chan_free(Channel *chan)
 static size_t pfd_send(
     Channel *chan, bool is_stderr, const void *data, size_t len)
 {
+    PortForwarding *pf;
     assert(chan->vt == &PortForwarding_channelvt);
-    PortForwarding *pf = container_of(chan, PortForwarding, chan);
+    pf = container_of(chan, PortForwarding, chan);
     return sk_write(pf->s, data, len);
 }
 
 static void pfd_send_eof(Channel *chan)
 {
+    PortForwarding *pf;
     assert(chan->vt == &PortForwarding_channelvt);
-    PortForwarding *pf = container_of(chan, PortForwarding, chan);
+    pf = container_of(chan, PortForwarding, chan);
     sk_write_eof(pf->s);
 }
 
 static void pfd_open_confirmation(Channel *chan)
 {
+    PortForwarding *pf;
     assert(chan->vt == &PortForwarding_channelvt);
-    PortForwarding *pf = container_of(chan, PortForwarding, chan);
+    pf = container_of(chan, PortForwarding, chan);
 
     pf->ready = true;
     sk_set_frozen(pf->s, false);
@@ -667,8 +675,9 @@ static void pfd_open_confirmation(Channel *chan)
 
 static void pfd_open_failure(Channel *chan, const char *errtext)
 {
+    PortForwarding *pf;
     assert(chan->vt == &PortForwarding_channelvt);
-    PortForwarding *pf = container_of(chan, PortForwarding, chan);
+    pf = container_of(chan, PortForwarding, chan);
 
     logeventf(pf->cl->logctx,
               "Forwarded connection refused by remote%s%s",
@@ -866,6 +875,7 @@ void portfwdmgr_config(PortFwdManager *mgr, Conf *conf)
         }
 
         if (sport && dport) {
+            PortFwdRecord *existing;
             /* Set up a description of the source port. */
             pfr = snew(PortFwdRecord);
             pfr->type = type;
@@ -881,7 +891,7 @@ void portfwdmgr_config(PortFwdManager *mgr, Conf *conf)
                                   address_family == '6' ? ADDRTYPE_IPV6 :
                                   ADDRTYPE_UNSPEC);
 
-            PortFwdRecord *existing = add234(mgr->forwardings, pfr);
+            existing = add234(mgr->forwardings, pfr);
             if (existing != pfr) {
                 if (existing->status == DESTROY) {
                     /*
@@ -1047,6 +1057,8 @@ bool portfwdmgr_listen(PortFwdManager *mgr, const char *host, int port,
                        const char *keyhost, int keyport, Conf *conf)
 {
     PortFwdRecord *pfr;
+    PortFwdRecord *existing;
+    char *err;
 
     pfr = snew(PortFwdRecord);
     pfr->type = 'L';
@@ -1059,7 +1071,7 @@ bool portfwdmgr_listen(PortFwdManager *mgr, const char *host, int port,
     pfr->remote = NULL;
     pfr->addressfamily = ADDRTYPE_UNSPEC;
 
-    PortFwdRecord *existing = add234(mgr->forwardings, pfr);
+    existing = add234(mgr->forwardings, pfr);
     if (existing != pfr) {
         /*
          * We had this record already. Return failure.
@@ -1068,8 +1080,8 @@ bool portfwdmgr_listen(PortFwdManager *mgr, const char *host, int port,
         return false;
     }
 
-    char *err = pfl_listen(keyhost, keyport, host, port,
-                           mgr->cl, conf, &pfr->local, pfr->addressfamily);
+    err = pfl_listen(keyhost, keyport, host, port,
+                     mgr->cl, conf, &pfr->local, pfr->addressfamily);
     logeventf(mgr->cl->logctx,
               "%s on port %s:%d to forward to client%s%s",
               err ? "Failed to listen" : "Listening", host, port,
@@ -1087,6 +1099,7 @@ bool portfwdmgr_listen(PortFwdManager *mgr, const char *host, int port,
 bool portfwdmgr_unlisten(PortFwdManager *mgr, const char *host, int port)
 {
     PortFwdRecord pfr_key;
+    PortFwdRecord *pfr;
 
     pfr_key.type = 'L';
     /* Safe to cast the const away here, because it will only be used
@@ -1098,7 +1111,7 @@ bool portfwdmgr_unlisten(PortFwdManager *mgr, const char *host, int port)
     pfr_key.remote = NULL;
     pfr_key.addressfamily = ADDRTYPE_UNSPEC;
 
-    PortFwdRecord *pfr = del234(mgr->forwardings, &pfr_key);
+    pfr = del234(mgr->forwardings, &pfr_key);
 
     if (!pfr)
         return false;

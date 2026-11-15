@@ -22,6 +22,17 @@
 
 #include <commctrl.h>
 
+/*
+ * Buttons that tell the dialog when they get or lose the focus came
+ * with Windows NT 3.51. With older SDKs the dialog doesn't know when
+ * a button has the focus.
+ */
+#ifndef BS_NOTIFY
+#define BS_NOTIFY 0
+#define BN_SETFOCUS 6
+#define BN_KILLFOCUS 7
+#endif
+
 #define GAPBETWEEN 3
 #define GAPWITHIN 1
 #define GAPXBOX 7
@@ -50,7 +61,8 @@ void init_common_controls(void)
     GET_WINDOWS_FUNCTION(comctl32_module, MakeDragList);
     GET_WINDOWS_FUNCTION(comctl32_module, LBItemFromPt);
     GET_WINDOWS_FUNCTION(comctl32_module, DrawInsert);
-    p_InitCommonControls();
+    if (p_InitCommonControls)
+        p_InitCommonControls();
 }
 
 void ctlposinit(struct ctlpos *cp, HWND hwnd,
@@ -91,7 +103,7 @@ HWND doctl(struct ctlpos *cp, RECT r, const char *wclass, int wstyle,
     if (cp->hwnd) {
         ctl = CreateWindowEx(exstyle, wclass, wtext, wstyle,
                              r.left, r.top, r.right, r.bottom,
-                             cp->hwnd, (HMENU)(ULONG_PTR)wid, hinst, NULL);
+                             cp->hwnd, (HMENU)(UINT)wid, hinst, NULL);
         SendMessage(ctl, WM_SETFONT, cp->font, MAKELPARAM(true, 0));
 
         if (!strcmp(wclass, "LISTBOX")) {
@@ -182,10 +194,10 @@ void editboxfw(struct ctlpos *cp, bool password, bool readonly,
     r.top = cp->ypos;
     r.bottom = EDITHEIGHT;
     doctl(cp, r, "EDIT",
-          WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL |
+          WS_CHILD | WS_VISIBLE | EDGE_STYLE | WS_TABSTOP | ES_AUTOHSCROLL |
           (password ? ES_PASSWORD : 0) |
           (readonly ? ES_READONLY : 0),
-          WS_EX_CLIENTEDGE, "", editid);
+          EDGE_EXSTYLE, "", editid);
     cp->ypos += EDITHEIGHT + GAPBETWEEN;
 }
 
@@ -209,7 +221,7 @@ void combobox(struct ctlpos *cp, const char *text, int staticid, int listid)
     r.bottom = COMBOHEIGHT * 10;
     doctl(cp, r, "COMBOBOX",
           WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
-          CBS_DROPDOWN | CBS_HASSTRINGS, WS_EX_CLIENTEDGE, "", listid);
+          CBS_DROPDOWN | CBS_HASSTRINGS, EDGE_EXSTYLE, "", listid);
     cp->ypos += COMBOHEIGHT + GAPBETWEEN;
 }
 
@@ -485,9 +497,10 @@ void statictext(struct ctlpos *cp, const char *text, int lines, int id)
 }
 
 /*
- * An owner-drawn static text control for a panel title.
+ * A static text control for a panel title, centred. (The etched box
+ * that used to go round it needs DrawEdge, from Windows NT 4.0.)
  */
-void paneltitle(struct ctlpos *cp, int id)
+void paneltitle(struct ctlpos *cp, const char *title, int id)
 {
     RECT r;
 
@@ -496,8 +509,8 @@ void paneltitle(struct ctlpos *cp, int id)
     r.right = cp->width;
     r.bottom = TITLEHEIGHT;
     cp->ypos += r.bottom + GAPBETWEEN;
-    doctl(cp, r, "STATIC", WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
-          0, NULL, id);
+    doctl(cp, r, "STATIC", WS_CHILD | WS_VISIBLE | SS_CENTER | SS_NOPREFIX,
+          0, title, id);
 }
 
 /*
@@ -627,8 +640,8 @@ static void staticedit_internal(struct ctlpos *cp, const char *stext,
     r.right = rwid;
     r.bottom = EDITHEIGHT;
     doctl(cp, r, "EDIT",
-          WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | style,
-          WS_EX_CLIENTEDGE, "", eid);
+          WS_CHILD | WS_VISIBLE | EDGE_STYLE | WS_TABSTOP | ES_AUTOHSCROLL |
+          style, EDGE_EXSTYLE, "", eid);
 
     cp->ypos += height + GAPBETWEEN;
 }
@@ -674,7 +687,7 @@ void staticddl(struct ctlpos *cp, const char *stext,
     r.bottom = COMBOHEIGHT*4;
     doctl(cp, r, "COMBOBOX",
           WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
-          CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_CLIENTEDGE, "", lid);
+          CBS_DROPDOWNLIST | CBS_HASSTRINGS, EDGE_EXSTYLE, "", lid);
 
     cp->ypos += height + GAPBETWEEN;
 }
@@ -707,7 +720,7 @@ void staticcombo(struct ctlpos *cp, const char *stext,
     r.bottom = COMBOHEIGHT*10;
     doctl(cp, r, "COMBOBOX",
           WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
-          CBS_DROPDOWN | CBS_HASSTRINGS, WS_EX_CLIENTEDGE, "", lid);
+          CBS_DROPDOWN | CBS_HASSTRINGS, EDGE_EXSTYLE, "", lid);
 
     cp->ypos += height + GAPBETWEEN;
 }
@@ -735,7 +748,7 @@ void staticddlbig(struct ctlpos *cp, const char *stext,
     r.bottom = COMBOHEIGHT*4;
     doctl(cp, r, "COMBOBOX",
           WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
-          CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_CLIENTEDGE, "", lid);
+          CBS_DROPDOWNLIST | CBS_HASSTRINGS, EDGE_EXSTYLE, "", lid);
     cp->ypos += COMBOHEIGHT + GAPBETWEEN;
 }
 
@@ -762,8 +775,8 @@ void bigeditctrl(struct ctlpos *cp, const char *stext,
     r.bottom = EDITHEIGHT + (lines - 1) * STATICHEIGHT;
     cp->ypos += r.bottom + GAPBETWEEN;
     doctl(cp, r, "EDIT",
-          WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | ES_MULTILINE,
-          WS_EX_CLIENTEDGE, "", eid);
+          WS_CHILD | WS_VISIBLE | EDGE_STYLE | WS_TABSTOP | WS_VSCROLL |
+          ES_MULTILINE, EDGE_EXSTYLE, "", eid);
 }
 
 /*
@@ -789,53 +802,10 @@ void listbox(struct ctlpos *cp, const char *stext,
     r.bottom = LISTHEIGHT + (lines - 1) * LISTINCREMENT;
     cp->ypos += r.bottom + GAPBETWEEN;
     doctl(cp, r, "LISTBOX",
-          WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
+          WS_CHILD | WS_VISIBLE | EDGE_STYLE | WS_TABSTOP | WS_VSCROLL |
           LBS_NOTIFY | LBS_HASSTRINGS | LBS_USETABSTOPS |
           (multi ? LBS_MULTIPLESEL : 0),
-          WS_EX_CLIENTEDGE, "", lid);
-}
-
-/*
- * A tab-control substitute when a real tab control is unavailable.
- */
-void ersatztab(struct ctlpos *cp, const char *stext, int sid, int lid,
-               int s2id)
-{
-    const int height = (COMBOHEIGHT > STATICHEIGHT ?
-                        COMBOHEIGHT : STATICHEIGHT);
-    RECT r;
-    int bigwid, lwid, rwid, rpos;
-    static const int BIGGAP = 15;
-    static const int MEDGAP = 3;
-
-    bigwid = cp->width + 2 * GAPBETWEEN - 2 * BIGGAP;
-    cp->ypos += MEDGAP;
-    rpos = BIGGAP + (bigwid + BIGGAP) / 2;
-    lwid = rpos - 2 * BIGGAP;
-    rwid = bigwid + BIGGAP - rpos;
-
-    r.left = BIGGAP;
-    r.top = cp->ypos + (height - STATICHEIGHT) / 2;
-    r.right = lwid;
-    r.bottom = STATICHEIGHT;
-    doctl(cp, r, "STATIC", WS_CHILD | WS_VISIBLE, 0, stext, sid);
-
-    r.left = rpos;
-    r.top = cp->ypos + (height - COMBOHEIGHT) / 2;
-    r.right = rwid;
-    r.bottom = COMBOHEIGHT * 10;
-    doctl(cp, r, "COMBOBOX",
-          WS_CHILD | WS_VISIBLE | WS_TABSTOP |
-          CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_CLIENTEDGE, "", lid);
-
-    cp->ypos += height + MEDGAP + GAPBETWEEN;
-
-    r.left = GAPBETWEEN;
-    r.top = cp->ypos;
-    r.right = cp->width;
-    r.bottom = 2;
-    doctl(cp, r, "STATIC", WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ,
-          0, "", s2id);
+          EDGE_EXSTYLE, "", lid);
 }
 
 /*
@@ -866,8 +836,8 @@ void editbutton(struct ctlpos *cp, const char *stext, int sid,
     r.right = lwid;
     r.bottom = EDITHEIGHT;
     doctl(cp, r, "EDIT",
-          WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-          WS_EX_CLIENTEDGE, "", eid);
+          WS_CHILD | WS_VISIBLE | EDGE_STYLE | WS_TABSTOP | ES_AUTOHSCROLL,
+          EDGE_EXSTYLE, "", eid);
 
     r.left = rpos;
     r.top = cp->ypos + (height - PUSHBTNHEIGHT) / 2;
@@ -928,15 +898,17 @@ void prefslist(struct prefslist *hdl, struct ctlpos *cp, int lines,
 
         switch (i) {
           case 1: {
+            HWND ctl;
             /* The drag list box. */
             r.left = left; r.right = wid;
             r.top = cp->ypos; r.bottom = listheight;
-            HWND ctl = doctl(cp, r, "LISTBOX",
-                             WS_CHILD | WS_VISIBLE | WS_TABSTOP |
-                             WS_VSCROLL | LBS_HASSTRINGS | LBS_USETABSTOPS,
-                             WS_EX_CLIENTEDGE,
-                             "", listid);
-            p_MakeDragList(ctl);
+            ctl = doctl(cp, r, "LISTBOX",
+                        WS_CHILD | WS_VISIBLE | EDGE_STYLE | WS_TABSTOP |
+                        WS_VSCROLL | LBS_HASSTRINGS | LBS_USETABSTOPS,
+                        EDGE_EXSTYLE,
+                        "", listid);
+            if (p_MakeDragList)
+                p_MakeDragList(ctl);
             break;
           }
 
@@ -1065,7 +1037,7 @@ int handle_prefslist(struct prefslist *hdl,
                 hdl->srcitem = p_LBItemFromPt(dlm->hWnd, dlm->ptCursor, true);
                 hdl->dragging = false;
                 /* XXX hack Q183115 */
-                SetWindowLongPtr(hwnd, DWLP_MSGRESULT, true);
+                SetWindowLong(hwnd, DWL_MSGRESULT, true);
                 ret |= 1; break;
               case DL_CANCELDRAG:
                 p_DrawInsert(hwnd, dlm->hWnd, -1);     /* Clear arrow */
@@ -1079,9 +1051,9 @@ int handle_prefslist(struct prefslist *hdl,
                 if (dest > hdl->dummyitem) dest = hdl->dummyitem;
                 p_DrawInsert (hwnd, dlm->hWnd, dest);
                 if (dest >= 0)
-                    SetWindowLongPtr(hwnd, DWLP_MSGRESULT, DL_MOVECURSOR);
+                    SetWindowLong(hwnd, DWL_MSGRESULT, DL_MOVECURSOR);
                 else
-                    SetWindowLongPtr(hwnd, DWLP_MSGRESULT, DL_STOPCURSOR);
+                    SetWindowLong(hwnd, DWL_MSGRESULT, DL_STOPCURSOR);
                 ret |= 1; break;
               case DL_DROPPED:
                 if (hdl->dragging) {
@@ -1142,13 +1114,76 @@ int handle_prefslist(struct prefslist *hdl,
 }
 
 /*
- * A progress bar (from Common Controls). We like our progress bars
- * to be smooth and unbroken, without those ugly divisions; some
- * older compilers may not support that, but that's life.
+ * A progress bar. The progress bar of Common Controls came with
+ * Windows NT 3.51, so this is a simple one of our own, which takes
+ * the messages PROGBAR_SETRANGE and PROGBAR_SETPOS (see platform.h).
  */
+#define PROGRESSBAR_CLASS "PuTTYProgressBar"
+#define PB_MIN 0                       /* window words: the range... */
+#define PB_MAX 4
+#define PB_POS 8                       /* ... and the position */
+
+static LRESULT CALLBACK progressbar_wndproc(HWND hwnd, UINT msg,
+                                            WPARAM wParam, LPARAM lParam)
+{
+    switch (msg) {
+      case PROGBAR_SETRANGE:
+        SetWindowLong(hwnd, PB_MIN, LOWORD(lParam));
+        SetWindowLong(hwnd, PB_MAX, HIWORD(lParam));
+        InvalidateRect(hwnd, NULL, false);
+        return 0;
+      case PROGBAR_SETPOS:
+        SetWindowLong(hwnd, PB_POS, (LONG)wParam);
+        InvalidateRect(hwnd, NULL, false);
+        return 0;
+      case WM_ERASEBKGND:
+        return 1;                      /* WM_PAINT covers it all */
+      case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        LONG min = GetWindowLong(hwnd, PB_MIN);
+        LONG max = GetWindowLong(hwnd, PB_MAX);
+        LONG pos = GetWindowLong(hwnd, PB_POS);
+        HBRUSH done = CreateSolidBrush(GetSysColor(COLOR_HIGHLIGHT));
+        HBRUSH todo = CreateSolidBrush(GetSysColor(COLOR_WINDOW));
+        RECT r, rdone;
+
+        GetClientRect(hwnd, &r);
+        rdone = r;
+        if (pos <= min || max <= min)
+            rdone.right = r.left;
+        else if (pos < max)
+            rdone.right = r.left + MulDiv(r.right - r.left,
+                                          pos - min, max - min);
+        r.left = rdone.right;
+        FillRect(hdc, &rdone, done);
+        FillRect(hdc, &r, todo);
+
+        DeleteObject(done);
+        DeleteObject(todo);
+        EndPaint(hwnd, &ps);
+        return 0;
+      }
+    }
+    return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
 void progressbar(struct ctlpos *cp, int id)
 {
+    static bool registered = false;
     RECT r;
+
+    if (!registered) {
+        WNDCLASS wc;
+        memset(&wc, 0, sizeof(wc));
+        wc.lpfnWndProc = progressbar_wndproc;
+        wc.cbWndExtra = 3 * sizeof(LONG);
+        wc.hInstance = hinst;
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        wc.lpszClassName = PROGRESSBAR_CLASS;
+        RegisterClass(&wc);
+        registered = true;
+    }
 
     r.left = GAPBETWEEN;
     r.top = cp->ypos;
@@ -1156,11 +1191,8 @@ void progressbar(struct ctlpos *cp, int id)
     r.bottom = PROGBARHEIGHT;
     cp->ypos += r.bottom + GAPBETWEEN;
 
-    doctl(cp, r, PROGRESS_CLASS, WS_CHILD | WS_VISIBLE
-#ifdef PBS_SMOOTH
-          | PBS_SMOOTH
-#endif
-          , WS_EX_CLIENTEDGE, "", id);
+    doctl(cp, r, PROGRESSBAR_CLASS, WS_CHILD | WS_VISIBLE | EDGE_STYLE,
+          EDGE_EXSTYLE, "", id);
 }
 
 /* ----------------------------------------------------------------------
@@ -1178,13 +1210,15 @@ void progressbar(struct ctlpos *cp, int id)
  */
 static char *shortcut_escape(const char *text, char shortcut)
 {
+    strbuf *sb;
+    const char *p;
     if (!text)
         return NULL;                   /* sfree won't choke on this */
 
-    strbuf *sb = strbuf_new();
+    sb = strbuf_new();
     shortcut = tolower((unsigned char)shortcut);
 
-    const char *p = text;
+    p = text;
     while (*p) {
         if (shortcut != NO_SHORTCUT &&
             tolower((unsigned char)*p) == shortcut) {
@@ -1321,16 +1355,17 @@ struct winctrl *winctrl_findbyindex(struct winctrls *wc, int index)
 
 static void move_windows(HWND hwnd, int base_id, int num_ids, LONG dy)
 {
+    int i;
     if (!dy)
         return;
-    for (int i = 0; i < num_ids; i++) {
+    for (i = 0; i < num_ids; i++) {
         HWND win = GetDlgItem(hwnd, base_id + i);
 
         RECT rect;
+        POINT p;
         if (!GetWindowRect(win, &rect))
             continue;
 
-        POINT p;
         p.x = rect.left;
         p.y = rect.top + dy;
         if (!ScreenToClient(hwnd, &p))
@@ -1382,10 +1417,10 @@ void winctrl_layout(struct dlgparam *dp, struct winctrls *wc,
         c->ctrl = NULL;
         c->base_id = c->align_id = base_id;
         c->num_ids = 1;
-        c->data = dupstr(s->boxtitle);
+        c->data = NULL;
         memset(c->shortcuts, NO_SHORTCUT, lenof(c->shortcuts));
         winctrl_add(wc, c);
-        paneltitle(cp, base_id);
+        paneltitle(cp, s->boxtitle, base_id);
         base_id++;
     }
 
@@ -1562,9 +1597,9 @@ void winctrl_layout(struct dlgparam *dp, struct winctrls *wc,
             sfree(escaped);
             break;
           case CTRL_RADIO: {
-            num_ids = ctrl->radio.nbuttons + 1;   /* label as well */
             struct radio *buttons;
             int i;
+            num_ids = ctrl->radio.nbuttons + 1;   /* label as well */
 
             escaped = shortcut_escape(ctrl->label,
                                       ctrl->radio.shortcut);
@@ -1638,7 +1673,7 @@ void winctrl_layout(struct dlgparam *dp, struct winctrls *wc,
             } else {
                 /* Ordinary list. */
                 listbox(&pos, escaped, base_id, base_id+1,
-                        ctrl->listbox.height, ctrl->listbox.multisel);
+                        ctrl->listbox.height, ctrl->listbox.multisel != 0);
             }
             if (ctrl->listbox.ncols) {
                 /*
@@ -1721,34 +1756,38 @@ void winctrl_layout(struct dlgparam *dp, struct winctrls *wc,
                  * centred on a common horizontal line.
                  */
                 LONG mid2 = 0;
-                for (dlgcontrol *thisctrl = ctrl; thisctrl;
+                dlgcontrol *thisctrl;
+                for (thisctrl = ctrl; thisctrl;
                      thisctrl = thisctrl->align_next_to) {
                     struct winctrl *thisc = winctrl_findbyctrl(wc, thisctrl);
+                    HWND win;
+                    RECT rect;
                     assert(thisc);
 
-                    HWND win = GetDlgItem(pos.hwnd, thisc->align_id);
+                    win = GetDlgItem(pos.hwnd, thisc->align_id);
                     assert(win);
 
-                    RECT rect;
                     if (!GetWindowRect(win, &rect))
                         continue;
                     if (mid2 < rect.top + rect.bottom)
                         mid2 = rect.top + rect.bottom;
                 }
 
-                for (dlgcontrol *thisctrl = ctrl; thisctrl;
+                for (thisctrl = ctrl; thisctrl;
                      thisctrl = thisctrl->align_next_to) {
                     struct winctrl *thisc = winctrl_findbyctrl(wc, thisctrl);
+                    HWND win;
+                    RECT rect;
+                    LONG dy;
                     assert(thisc);
 
-                    HWND win = GetDlgItem(pos.hwnd, thisc->align_id);
+                    win = GetDlgItem(pos.hwnd, thisc->align_id);
                     assert(win);
 
-                    RECT rect;
                     if (!GetWindowRect(win, &rect))
                         continue;
 
-                    LONG dy = (mid2 - (rect.top + rect.bottom)) / 2;
+                    dy = (mid2 - (rect.top + rect.bottom)) / 2;
                     move_windows(pos.hwnd, thisc->base_id, thisc->num_ids, dy);
                 }
             }
@@ -1815,11 +1854,13 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
     /*
      * Filter out pointless window messages. Our interest is in
      * WM_COMMAND and the drag list message, and nothing else.
+     * (The name of the drag list message is DRAGLISTMSGSTRING, but
+     * the SDK for Windows NT 3.5 has that as a wide string.)
      */
     if (draglistmsg == WM_NULL)
-        draglistmsg = RegisterWindowMessage (DRAGLISTMSGSTRING);
+        draglistmsg = RegisterWindowMessage("commctrl_DragListMsg");
 
-    if (msg != draglistmsg && msg != WM_COMMAND && msg != WM_DRAWITEM)
+    if (msg != draglistmsg && msg != WM_COMMAND)
         return false;
 
     /*
@@ -1833,28 +1874,6 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
     }
     if (!c)
         return false;                  /* we have nothing to do */
-
-    if (msg == WM_DRAWITEM) {
-        /*
-         * Owner-draw request for a panel title.
-         */
-        LPDRAWITEMSTRUCT di = (LPDRAWITEMSTRUCT) lParam;
-        HDC hdc = di->hDC;
-        RECT r = di->rcItem;
-        SIZE s;
-
-        SetMapMode(hdc, MM_TEXT);      /* ensure logical units == pixels */
-
-        GetTextExtentPoint32(hdc, (char *)c->data,
-                             strlen((char *)c->data), &s);
-        DrawEdge(hdc, &r, EDGE_ETCHED, BF_ADJUST | BF_RECT);
-        TextOut(hdc,
-                r.left + (r.right-r.left-s.cx)/2,
-                r.top + (r.bottom-r.top-s.cy)/2,
-                (char *)c->data, strlen((char *)c->data));
-
-        return true;
-    }
 
     ctrl = c->ctrl;
     id = LOWORD(wParam) - c->base_id;
@@ -1989,6 +2008,7 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
              (HIWORD(wParam) == BN_CLICKED ||
               HIWORD(wParam) == BN_DOUBLECLICKED))) {
             Filename *fn_prev = NULL;
+            Filename *fn;
             if (!ctrl->fileselect.just_button) {
                 wchar_t *text = GetDlgItemTextW_alloc(dp->hwnd, c->base_id+1);
                 if (*text)
@@ -1996,7 +2016,7 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
                 sfree(text);
             }
 
-            Filename *fn = request_file(
+            fn = request_file(
                 dp->hwnd, ctrl->fileselect.title, fn_prev,
                 ctrl->fileselect.for_writing, NULL, false,
                 ctrl->fileselect.filter);
@@ -2097,38 +2117,6 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
 }
 
 /*
- * This function can be called to produce context help on a
- * control. Returns true if it has actually launched some help.
- */
-bool winctrl_context_help(struct dlgparam *dp, HWND hwnd, int id)
-{
-    int i;
-    struct winctrl *c;
-
-    /*
-     * Look up the control ID in our data.
-     */
-    c = NULL;
-    for (i = 0; i < dp->nctrltrees; i++) {
-        c = winctrl_findbyid(dp->controltrees[i], id);
-        if (c)
-            break;
-    }
-    if (!c)
-        return false;                  /* we have nothing to do */
-
-    /*
-     * This is the Windows front end, so we're allowed to assume
-     * `helpctx' is a context string.
-     */
-    if (!c->ctrl || !c->ctrl->helpctx)
-        return false;            /* no help available for this ctrl */
-
-    launch_help(hwnd, c->ctrl->helpctx);
-    return true;
-}
-
-/*
  * Now the various functions that the platform-independent
  * mechanism can call to access the dialog box entries.
  */
@@ -2201,8 +2189,9 @@ void dlg_editbox_set(dlgcontrol *ctrl, dlgparam *dp, char const *text)
 void dlg_editbox_set_utf8(dlgcontrol *ctrl, dlgparam *dp, char const *text)
 {
     struct winctrl *c = dlg_findbyctrl(dp, ctrl);
+    wchar_t *wtext;
     assert(c && c->ctrl->type == CTRL_EDITBOX);
-    wchar_t *wtext = dup_mb_to_wc(CP_UTF8, text);
+    wtext = dup_mb_to_wc(CP_UTF8, text);
     SetDlgItemTextW(dp->hwnd, c->base_id+1, wtext);
     sfree(wtext);
 }
@@ -2217,9 +2206,11 @@ char *dlg_editbox_get(dlgcontrol *ctrl, dlgparam *dp)
 char *dlg_editbox_get_utf8(dlgcontrol *ctrl, dlgparam *dp)
 {
     struct winctrl *c = dlg_findbyctrl(dp, ctrl);
+    wchar_t *wtext;
+    char *text;
     assert(c && c->ctrl->type == CTRL_EDITBOX);
-    wchar_t *wtext = GetDlgItemTextW_alloc(dp->hwnd, c->base_id+1);
-    char *text = dup_wc_to_mb(CP_UTF8, wtext, "");
+    wtext = GetDlgItemTextW_alloc(dp->hwnd, c->base_id+1);
+    text = dup_wc_to_mb(CP_UTF8, wtext, "");
     sfree(wtext);
     return text;
 }
@@ -2333,7 +2324,7 @@ bool dlg_listbox_issel(dlgcontrol *ctrl, dlgparam *dp, int index)
            c->ctrl->listbox.multisel &&
            c->ctrl->listbox.height != 0);
     return
-        SendDlgItemMessage(dp->hwnd, c->base_id+1, LB_GETSEL, index, 0);
+        SendDlgItemMessage(dp->hwnd, c->base_id+1, LB_GETSEL, index, 0) != 0;
 }
 
 void dlg_listbox_select(dlgcontrol *ctrl, dlgparam *dp, int index)

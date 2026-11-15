@@ -186,19 +186,19 @@ static int preconn_never_accepting(Plug *p, accept_fn_t constructor,
 }
 
 static const PlugVtable preconn_cmd_plugvt = {
-    .log = preconn_cmdplug_log,
-    .closing = preconn_cmdplug_closing,
-    .receive = preconn_cmdplug_receive,
-    .sent = preconn_cmdplug_sent,
-    .accepting = preconn_never_accepting,
+    /* .log = */ preconn_cmdplug_log,
+    /* .closing = */ preconn_cmdplug_closing,
+    /* .receive = */ preconn_cmdplug_receive,
+    /* .sent = */ preconn_cmdplug_sent,
+    /* .accepting = */ preconn_never_accepting,
 };
 
 static const PlugVtable preconn_main_plugvt = {
-    .log = preconn_mainplug_log,
-    .closing = preconn_mainplug_closing,
-    .receive = preconn_mainplug_receive,
-    .sent = preconn_mainplug_sent,
-    .accepting = preconn_never_accepting,
+    /* .log = */ preconn_mainplug_log,
+    /* .closing = */ preconn_mainplug_closing,
+    /* .receive = */ preconn_mainplug_receive,
+    /* .sent = */ preconn_mainplug_sent,
+    /* .accepting = */ preconn_never_accepting,
 };
 
 static Plug *preconn_plug(Socket *s, Plug *p)
@@ -292,14 +292,14 @@ static SocketEndpointInfo *preconn_endpoint_info(Socket *s, bool peer)
 }
 
 static const SocketVtable preconn_sockvt = {
-    .plug = preconn_plug,
-    .close = preconn_close,
-    .write = preconn_write,
-    .write_oob = preconn_write_oob,
-    .write_eof = preconn_write_eof,
-    .set_frozen = preconn_set_frozen,
-    .socket_error = preconn_socket_error,
-    .endpoint_info = preconn_endpoint_info,
+    /* .plug = */ preconn_plug,
+    /* .close = */ preconn_close,
+    /* .write = */ preconn_write,
+    /* .write_oob = */ preconn_write_oob,
+    /* .write_eof = */ preconn_write_eof,
+    /* .set_frozen = */ preconn_set_frozen,
+    /* .socket_error = */ preconn_socket_error,
+    /* .endpoint_info = */ preconn_endpoint_info,
 };
 
 Socket *new_main_connection(
@@ -310,12 +310,13 @@ Socket *new_main_connection(
     char *command = NULL;
 
     const char *template = conf_get_str(conf, CONF_pre_connect_command);
+    PreConnWrapper *wr;
     assert(template);
     if (*template) {
         Conf *tmpconf = conf_copy(conf);
+        unsigned flags;
         conf_set_str(conf, CONF_proxy_username, "");
         conf_set_str(conf, CONF_proxy_password, "");
-        unsigned flags;
         command = format_connection_setup_command(
             template, addr, port, tmpconf, &flags);
         if (flags & (TELNET_CMD_MISSING_USERNAME |
@@ -334,7 +335,7 @@ Socket *new_main_connection(
                               nodelay, keepalive, plug, conf, itr);
     }
 
-    PreConnWrapper *wr = snew(PreConnWrapper);
+    wr = snew(PreConnWrapper);
     memset(wr, 0, sizeof(PreConnWrapper));
     wr->plug = plug;
     wr->addr = addr;                   /* we now own this */

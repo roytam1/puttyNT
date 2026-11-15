@@ -11,59 +11,70 @@ static bool sha512_sw_available(void)
     return true;
 }
 
-static inline uint64_t ror(uint64_t x, unsigned y)
+/*
+ * The 64-bit words are uint64 (two 32-bit halves, see defs.h), so the
+ * arithmetic is done by the uint64_* functions in misc.h.
+ */
+static inline uint64 Ch(uint64 ctrl, uint64 if1, uint64 if0)
 {
-    return (x << (63 & -y)) | (x >> (63 & y));
+    uint64 r;
+    r.hi = if0.hi ^ (ctrl.hi & (if1.hi ^ if0.hi));
+    r.lo = if0.lo ^ (ctrl.lo & (if1.lo ^ if0.lo));
+    return r;
 }
 
-static inline uint64_t Ch(uint64_t ctrl, uint64_t if1, uint64_t if0)
+static inline uint64 Maj(uint64 x, uint64 y, uint64 z)
 {
-    return if0 ^ (ctrl & (if1 ^ if0));
+    uint64 r;
+    r.hi = (x.hi & y.hi) | (z.hi & (x.hi | y.hi));
+    r.lo = (x.lo & y.lo) | (z.lo & (x.lo | y.lo));
+    return r;
 }
 
-static inline uint64_t Maj(uint64_t x, uint64_t y, uint64_t z)
+static inline uint64 Sigma_0(uint64 x)
 {
-    return (x & y) | (z & (x | y));
+    return uint64_xor(uint64_xor(uint64_rotr(x,28), uint64_rotr(x,34)),
+                      uint64_rotr(x,39));
 }
 
-static inline uint64_t Sigma_0(uint64_t x)
+static inline uint64 Sigma_1(uint64 x)
 {
-    return ror(x,28) ^ ror(x,34) ^ ror(x,39);
+    return uint64_xor(uint64_xor(uint64_rotr(x,14), uint64_rotr(x,18)),
+                      uint64_rotr(x,41));
 }
 
-static inline uint64_t Sigma_1(uint64_t x)
+static inline uint64 sigma_0(uint64 x)
 {
-    return ror(x,14) ^ ror(x,18) ^ ror(x,41);
+    return uint64_xor(uint64_xor(uint64_rotr(x,1), uint64_rotr(x,8)),
+                      uint64_shr(x,7));
 }
 
-static inline uint64_t sigma_0(uint64_t x)
+static inline uint64 sigma_1(uint64 x)
 {
-    return ror(x,1) ^ ror(x,8) ^ (x >> 7);
-}
-
-static inline uint64_t sigma_1(uint64_t x)
-{
-    return ror(x,19) ^ ror(x,61) ^ (x >> 6);
+    return uint64_xor(uint64_xor(uint64_rotr(x,19), uint64_rotr(x,61)),
+                      uint64_shr(x,6));
 }
 
 static inline void sha512_sw_round(
-    unsigned round_index, const uint64_t *schedule,
-    uint64_t *a, uint64_t *b, uint64_t *c, uint64_t *d,
-    uint64_t *e, uint64_t *f, uint64_t *g, uint64_t *h)
+    unsigned round_index, const uint64 *schedule,
+    uint64 *a, uint64 *b, uint64 *c, uint64 *d,
+    uint64 *e, uint64 *f, uint64 *g, uint64 *h)
 {
-    uint64_t t1 = *h + Sigma_1(*e) + Ch(*e,*f,*g) +
-        sha512_round_constants[round_index] + schedule[round_index];
+    uint64 t1 = uint64_add(
+        uint64_add(uint64_add(*h, Sigma_1(*e)), Ch(*e,*f,*g)),
+        uint64_add(sha512_round_constants[round_index],
+                   schedule[round_index]));
 
-    uint64_t t2 = Sigma_0(*a) + Maj(*a,*b,*c);
+    uint64 t2 = uint64_add(Sigma_0(*a), Maj(*a,*b,*c));
 
-    *d += t1;
-    *h = t1 + t2;
+    *d = uint64_add(*d, t1);
+    *h = uint64_add(t1, t2);
 }
 
-static void sha512_sw_block(uint64_t *core, const uint8_t *block)
+static void sha512_sw_block(uint64 *core, const uint8_t *block)
 {
-    uint64_t w[SHA512_ROUNDS];
-    uint64_t a,b,c,d,e,f,g,h;
+    uint64 w[SHA512_ROUNDS];
+    uint64 a,b,c,d,e,f,g,h;
 
     int t;
 
@@ -71,7 +82,8 @@ static void sha512_sw_block(uint64_t *core, const uint8_t *block)
         w[t] = GET_64BIT_MSB_FIRST(block + 8*t);
 
     for (t = 16; t < SHA512_ROUNDS; t++)
-        w[t] = w[t-16] + w[t-7] + sigma_0(w[t-15]) + sigma_1(w[t-2]);
+        w[t] = uint64_add(uint64_add(w[t-16], w[t-7]),
+                          uint64_add(sigma_0(w[t-15]), sigma_1(w[t-2])));
 
     a = core[0]; b = core[1]; c = core[2]; d = core[3];
     e = core[4]; f = core[5]; g = core[6]; h = core[7];
@@ -87,14 +99,16 @@ static void sha512_sw_block(uint64_t *core, const uint8_t *block)
         sha512_sw_round(t+7, w, &b,&c,&d,&e,&f,&g,&h,&a);
     }
 
-    core[0] += a; core[1] += b; core[2] += c; core[3] += d;
-    core[4] += e; core[5] += f; core[6] += g; core[7] += h;
+    core[0] = uint64_add(core[0], a); core[1] = uint64_add(core[1], b);
+    core[2] = uint64_add(core[2], c); core[3] = uint64_add(core[3], d);
+    core[4] = uint64_add(core[4], e); core[5] = uint64_add(core[5], f);
+    core[6] = uint64_add(core[6], g); core[7] = uint64_add(core[7], h);
 
     smemclr(w, sizeof(w));
 }
 
 typedef struct sha512_sw {
-    uint64_t core[8];
+    uint64 core[8];
     sha512_block blk;
     BinarySink_IMPLEMENTATION;
     ssh_hash hash;
@@ -152,9 +166,10 @@ static void sha512_sw_write(BinarySink *bs, const void *vp, size_t len)
 static void sha512_sw_digest(ssh_hash *hash, uint8_t *digest)
 {
     sha512_sw *s = container_of(hash, sha512_sw, hash);
+    size_t i;
 
     sha512_block_pad(&s->blk, BinarySink_UPCAST(s));
-    for (size_t i = 0; i < hash->vt->hlen / 8; i++)
+    for (i = 0; i < hash->vt->hlen / 8; i++)
         PUT_64BIT_MSB_FIRST(digest + 8*i, s->core[i]);
 }
 

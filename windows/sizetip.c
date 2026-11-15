@@ -99,7 +99,7 @@ void UpdateSizeTip(HWND src, int cx, int cy)
         return;
 
     if (!tip_wnd) {
-        NONCLIENTMETRICS nci;
+        LOGFONT lf;
 
         /* First make sure the window class is registered */
 
@@ -118,24 +118,17 @@ void UpdateSizeTip(HWND src, int cx, int cy)
 
             tip_class = RegisterClass(&wc);
         }
-#if 0
-        /* Default values based on Windows Standard color scheme */
-
-        tip_font = GetStockObject(SYSTEM_FONT);
+        /*
+         * Prepare other GDI objects and drawing info: the usual
+         * tooltip colours, and the variable-pitch system font. (The
+         * system colours and metrics for tooltips came with Windows
+         * NT 4.0.)
+         */
         tip_bg = RGB(255, 255, 225);
         tip_text = RGB(0, 0, 0);
-#endif
 
-        /* Prepare other GDI objects and drawing info */
-
-        tip_bg = GetSysColor(COLOR_INFOBK);
-        tip_text = GetSysColor(COLOR_INFOTEXT);
-
-        memset(&nci, 0, sizeof(NONCLIENTMETRICS));
-        nci.cbSize = sizeof(NONCLIENTMETRICS);
-        SystemParametersInfo(SPI_GETNONCLIENTMETRICS,
-                             sizeof(NONCLIENTMETRICS), &nci, 0);
-        tip_font = CreateFontIndirect(&nci.lfStatusFont);
+        GetObject(GetStockObject(ANSI_VAR_FONT), sizeof(lf), &lf);
+        tip_font = CreateFontIndirect(&lf);
     }
 
     /* Generate the tip text */
@@ -164,12 +157,13 @@ void UpdateSizeTip(HWND src, int cx, int cy)
         if (iy < 16)
             iy = 16;
 
-        /* Create the tip window */
+        /* Create the tip window. It is owned by the terminal window,
+         * which keeps it off the Windows NT 4.0 taskbar. */
 
         tip_wnd =
-            CreateWindowEx(WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+            CreateWindowEx(WS_EX_TOPMOST,
                            MAKEINTRESOURCE(tip_class), str, WS_POPUP, ix,
-                           iy, sz.cx, sz.cy, NULL, NULL, hinst, NULL);
+                           iy, sz.cx, sz.cy, src, NULL, hinst, NULL);
 
         ShowWindow(tip_wnd, SW_SHOWNOACTIVATE);
 

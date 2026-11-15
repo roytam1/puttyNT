@@ -3,11 +3,17 @@
  */
 
 #include "putty.h"
-
-#include "putty.h"
 #include "ssh.h"
 
 #include "cryptoapi.h"
+
+/* CryptProtectMemory came with Windows XP; these are its names */
+#ifndef CRYPTPROTECTMEMORY_BLOCK_SIZE
+#define CRYPTPROTECTMEMORY_BLOCK_SIZE 16
+#endif
+#ifndef CRYPTPROTECTMEMORY_CROSS_PROCESS
+#define CRYPTPROTECTMEMORY_CROSS_PROCESS 0x01
+#endif
 
 DEF_WINDOWS_FUNCTION(CryptProtectMemory);
 
@@ -21,7 +27,7 @@ bool got_crypt(void)
         attempted = true;
         crypt = load_system32_dll("crypt32.dll");
         successful = crypt &&
-            GET_WINDOWS_FUNCTION(crypt, CryptProtectMemory);
+            GET_WINDOWS_FUNCTION_NO_TYPECHECK(crypt, CryptProtectMemory);
     }
     return successful;
 }

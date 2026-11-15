@@ -1,10 +1,11 @@
 /*
- * Implementation function behind dupcat() in misc.h.
+ * dupcat() in misc.h.
  *
  * This function is called with an arbitrary number of 'const char *'
- * parameters, of which the last one is a null pointer. The wrapper
- * macro puts on the null pointer itself, so normally callers don't
- * have to.
+ * parameters, of which the last one is a null pointer. (NT port:
+ * upstream has a variadic wrapper macro that adds the null pointer.
+ * The compilers of 1993-1996 have no variadic macros, so callers
+ * pass it themselves.)
  */
 
 #include <string.h>
@@ -13,7 +14,7 @@
 #include "defs.h"
 #include "misc.h"
 
-char *dupcat_fn(const char *s1, ...)
+char *dupcat(const char *s1, ...)
 {
     int len;
     char *p, *q, *sn;

@@ -5,16 +5,6 @@
 #ifndef PUTTY_SSH2TRANSPORT_H
 #define PUTTY_SSH2TRANSPORT_H
 
-#ifndef NO_GSSAPI
-#include "gssc.h"
-#include "gss.h"
-#define MIN_CTXT_LIFETIME 5     /* Avoid rekey with short lifetime (seconds) */
-#define GSS_KEX_CAPABLE (1<<0)  /* Can do GSS KEX */
-#define GSS_CRED_UPDATED (1<<1) /* Cred updated since previous delegation */
-#define GSS_CTXT_EXPIRES (1<<2) /* Context expires before next timer */
-#define GSS_CTXT_MAYFAIL (1<<3) /* Context may expire during handshake */
-#endif
-
 #define DH_MIN_SIZE 1024
 #define DH_MAX_SIZE 8192
 
@@ -167,11 +157,6 @@ struct ssh2_transport_state {
      * NO_GSSAPI is not defined, then it's just an opaque structure
      * tag and the pointer will be NULL. */
     struct ssh_connection_shared_gss_state *shgss;
-#ifndef NO_GSSAPI
-    int gss_status;
-    time_t gss_cred_expiry;             /* Re-delegate if newer */
-    unsigned long gss_ctxt_lifetime;    /* Re-delegate when short */
-#endif
     ssh_transient_hostkey_cache *thc;
 
     bool gss_kex_used;
@@ -212,15 +197,6 @@ struct ssh2_transport_state {
     bool guessok;
     bool ignorepkt;
     struct kexinit_algorithm_list kexlists[NKEXLIST];
-#ifndef NO_GSSAPI
-    Ssh_gss_buf gss_buf;
-    Ssh_gss_buf gss_rcvtok, gss_sndtok;
-    Ssh_gss_stat gss_stat;
-    Ssh_gss_buf mic;
-    bool init_token_sent;
-    bool complete_rcvd;
-    bool gss_delegate;
-#endif
 
     /* List of crypto primitives below the warning threshold that the
      * user has already clicked OK to, so that we don't keep asking

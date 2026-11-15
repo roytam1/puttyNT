@@ -78,8 +78,11 @@ static bool create_named_pipe(NamedPipeServerSocket *ps, bool first_instance)
 
         /* dwOpenMode */
         PIPE_ACCESS_DUPLEX |
-        FILE_FLAG_OVERLAPPED |
-        (first_instance ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0),
+        FILE_FLAG_OVERLAPPED
+#ifdef FILE_FLAG_FIRST_PIPE_INSTANCE
+        | (first_instance ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0)
+#endif
+        ,
 
         /* dwPipeMode */
         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT
@@ -188,10 +191,14 @@ static void named_pipe_connect_callback(void *vps)
  * be asked to write or set_frozen.
  */
 static const SocketVtable NamedPipeServerSocket_sockvt = {
-    .plug = sk_namedpipeserver_plug,
-    .close = sk_namedpipeserver_close,
-    .socket_error = sk_namedpipeserver_socket_error,
-    .endpoint_info = nullsock_endpoint_info,
+    /* .plug = */ sk_namedpipeserver_plug,
+    /* .close = */ sk_namedpipeserver_close,
+    /* .write = */ NULL,
+    /* .write_oob = */ NULL,
+    /* .write_eof = */ NULL,
+    /* .set_frozen = */ NULL,
+    /* .socket_error = */ sk_namedpipeserver_socket_error,
+    /* .endpoint_info = */ nullsock_endpoint_info,
 };
 
 Socket *new_named_pipe_listener(const char *pipename, Plug *plug)

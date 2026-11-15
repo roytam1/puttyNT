@@ -15,8 +15,9 @@ static inline bool valid_char_main(char c)
 bool base64_valid(ptrlen data)
 {
     size_t blocklen = 0, nequals = 0;
+    size_t i;
 
-    for (size_t i = 0; i < data.len; i++) {
+    for (i = 0; i < data.len; i++) {
         char c = ((const char *)data.ptr)[i];
 
         if (c == '\n' || c == '\r')

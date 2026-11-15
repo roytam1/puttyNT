@@ -61,20 +61,15 @@ static const char *terrapin_vulnerable(
 static bool try_to_avoid_terrapin(const struct ssh2_transport_state *s);
 
 static const PacketProtocolLayerVtable ssh2_transport_vtable = {
-    .free = ssh2_transport_free,
-    .process_queue = ssh2_transport_process_queue,
-    .get_specials = ssh2_transport_get_specials,
-    .special_cmd = ssh2_transport_special_cmd,
-    .reconfigure = ssh2_transport_reconfigure,
-    .queued_data_size = ssh2_transport_queued_data_size,
-    .final_output = ssh2_transport_final_output,
-    .name = NULL, /* no protocol name for this layer */
+    /* .free = */ ssh2_transport_free,
+    /* .process_queue = */ ssh2_transport_process_queue,
+    /* .get_specials = */ ssh2_transport_get_specials,
+    /* .special_cmd = */ ssh2_transport_special_cmd,
+    /* .reconfigure = */ ssh2_transport_reconfigure,
+    /* .queued_data_size = */ ssh2_transport_queued_data_size,
+    /* .final_output = */ ssh2_transport_final_output,
+    /* .name = */ NULL, /* no protocol name for this layer */
 };
-
-#ifndef NO_GSSAPI
-static void ssh2_transport_gss_update(struct ssh2_transport_state *s,
-                                      bool definitely_rekeying);
-#endif
 
 static bool ssh2_transport_timer_update(struct ssh2_transport_state *s,
                                         unsigned long rekey_time);
@@ -128,11 +123,6 @@ PacketProtocolLayer *ssh2_transport_new(
     s->higher_layer->selfptr = &s->higher_layer;
     ssh_ppl_setup_queues(s->higher_layer, &s->pq_in_higher, &s->pq_out_higher);
 
-#ifndef NO_GSSAPI
-    s->gss_cred_expiry = GSS_NO_EXPIRATION;
-    s->shgss->srv_name = GSS_C_NO_NAME;
-    s->shgss->ctx = NULL;
-#endif
     s->thc = ssh_transient_hostkey_cache_new();
     s->gss_kex_used = false;
 
@@ -164,6 +154,7 @@ static void ssh2_transport_free(PacketProtocolLayer *ppl)
 {
     struct ssh2_transport_state *s =
         container_of(ppl, struct ssh2_transport_state, ppl);
+    size_t i;
 
     /*
      * As our last act before being freed, move any outgoing packets
@@ -204,7 +195,7 @@ static void ssh2_transport_free(PacketProtocolLayer *ppl)
         ssh_key_free(s->hkey);
         s->hkey = NULL;
     }
-    for (size_t i = 0; i < NKEXLIST; i++)
+    for (i = 0; i < NKEXLIST; i++)
         sfree(s->kexlists[i].algs);
     if (s->f) mp_free(s->f);
     if (s->p) mp_free(s->p);
@@ -299,12 +290,14 @@ static void ssh2_mkkey(
 static struct kexinit_algorithm *ssh2_kexinit_addalg_pl(
     struct kexinit_algorithm_list *list, ptrlen name)
 {
-    for (size_t i = 0; i < list->nalgs; i++)
+    struct kexinit_algorithm *entry;
+    size_t i;
+    for (i = 0; i < list->nalgs; i++)
         if (ptrlen_eq_ptrlen(list->algs[i].name, name))
             return &list->algs[i];
 
     sgrowarray(list->algs, list->algsize, list->nalgs);
-    struct kexinit_algorithm *entry = &list->algs[list->nalgs++];
+    entry = &list->algs[list->nalgs++];
     entry->name = name;
     return entry;
 }
@@ -359,7 +352,7 @@ bool ssh2_common_filter_queue(PacketProtocolLayer *ppl)
             /* XXX maybe we should actually take notice of the return value */
             get_bool(pktin);
             msg = get_string(pktin);
-            ppl_logevent("Remote debug message: %.*s", PTRLEN_PRINTF(msg));
+            ppl_logevent(("Remote debug message: %.*s", PTRLEN_PRINTF(msg)));
             pq_pop(ppl->in_pq);
             break;
 
@@ -391,7 +384,8 @@ bool ssh2_common_filter_queue(PacketProtocolLayer *ppl)
              * the session before the BPP aborts it anyway.
              */
             uint32_t nexts = get_uint32(pktin);
-            for (uint32_t i = 0; i < nexts && !get_err(pktin); i++) {
+            uint32_t i;
+            for (i = 0; i < nexts && !get_err(pktin); i++) {
                 ptrlen extname = get_string(pktin);
                 ptrlen extvalue = get_string(pktin);
                 if (ptrlen_eq_string(extname, "server-sig-algs")) {
@@ -676,6 +670,12 @@ static void ssh2_write_kexinit_lists(
          */
         for (i = 0; i < our_nhostkeys; i++) {
             const ssh_keyalg *keyalg = ssh_key_alg(our_hostkeys[i]);
+            uint32_t supported_flags;
+            static const uint32_t try_flags[] = {
+                SSH_AGENT_RSA_SHA2_256,
+                SSH_AGENT_RSA_SHA2_512,
+            };
+            size_t fi;
 
             alg = ssh2_kexinit_addalg(&kexlists[KEXLIST_HOSTKEY],
                                       keyalg->ssh_id);
@@ -683,21 +683,17 @@ static void ssh2_write_kexinit_lists(
             alg->u.hk.hkflags = 0;
             alg->u.hk.warn = false;
 
-            uint32_t supported_flags = ssh_keyalg_supported_flags(keyalg);
-            static const uint32_t try_flags[] = {
-                SSH_AGENT_RSA_SHA2_256,
-                SSH_AGENT_RSA_SHA2_512,
-            };
-            for (size_t i = 0; i < lenof(try_flags); i++) {
-                if (try_flags[i] & ~supported_flags)
+            supported_flags = ssh_keyalg_supported_flags(keyalg);
+            for (fi = 0; fi < lenof(try_flags); fi++) {
+                if (try_flags[fi] & ~supported_flags)
                     continue;          /* these flags not supported */
 
                 alg = ssh2_kexinit_addalg(
                     &kexlists[KEXLIST_HOSTKEY],
-                    ssh_keyalg_alternate_ssh_id(keyalg, try_flags[i]));
+                    ssh_keyalg_alternate_ssh_id(keyalg, try_flags[fi]));
 
                 alg->u.hk.hostkey = keyalg;
-                alg->u.hk.hkflags = try_flags[i];
+                alg->u.hk.hkflags = try_flags[fi];
                 alg->u.hk.warn = false;
             }
         }
@@ -803,37 +799,6 @@ static void ssh2_write_kexinit_lists(
                 alg->u.hk.warn = warn;
             }
         }
-#ifndef NO_GSSAPI
-    } else if (transient_hostkey_mode) {
-        /*
-         * If we've previously done a GSSAPI KEX, then we list
-         * precisely the algorithms for which a previous GSS key
-         * exchange has delivered us a host key, because we expect
-         * one of exactly those keys to be used in any subsequent
-         * non-GSS-based rekey.
-         *
-         * An exception is if this is the key exchange we
-         * triggered for the purposes of populating that cache -
-         * in which case the cache will currently be empty, which
-         * isn't helpful!
-         */
-        warn = false;
-        for (i = 0; i < n_preferred_hk; i++) {
-            if (preferred_hk[i] == HK_WARN)
-                warn = true;
-            for (j = 0; j < lenof(ssh2_hostkey_algs); j++) {
-                if (ssh2_hostkey_algs[j].id != preferred_hk[i])
-                    continue;
-                if (ssh_transient_hostkey_cache_has(
-                        thc, ssh2_hostkey_algs[j].alg)) {
-                    alg = ssh2_kexinit_addalg(&kexlists[KEXLIST_HOSTKEY],
-                                              ssh2_hostkey_algs[j].alg->ssh_id);
-                    alg->u.hk.hostkey = ssh2_hostkey_algs[j].alg;
-                    alg->u.hk.warn = warn;
-                }
-            }
-        }
-#endif
     } else {
         /*
          * In subsequent key exchanges, we list only the host key
@@ -969,7 +934,8 @@ struct server_hostkeys {
 
 static bool kexinit_keyword_found(ptrlen list, ptrlen keyword)
 {
-    for (ptrlen word; get_commasep_word(&list, &word) ;)
+    ptrlen word;
+    for (; get_commasep_word(&list, &word) ;)
         if (ptrlen_eq_ptrlen(word, keyword))
             return true;
     return false;
@@ -1004,6 +970,7 @@ static ScanKexinitsResult ssh2_scan_kexinits(
     bool guess_correct;
     ptrlen clists[NKEXLIST], slists[NKEXLIST];
     const struct kexinit_algorithm *selected[NKEXLIST];
+    ScanKexinitsResult skr = { /* .success = */ true };
 
     BinarySource_BARE_INIT_PL(client, client_kexinit);
     BinarySource_BARE_INIT_PL(server, server_kexinit);
@@ -1025,7 +992,7 @@ static ScanKexinitsResult ssh2_scan_kexinits(
         slists[i] = get_string(server);
         if (get_err(client) || get_err(server)) {
             ScanKexinitsResult skr = {
-                .success = false, .error = SKR_INCOMPLETE,
+                /* .success = */ false, /* .error = */ SKR_INCOMPLETE,
             };
             return skr;
         }
@@ -1075,10 +1042,11 @@ static ScanKexinitsResult ssh2_scan_kexinits(
              * produce a reasonably useful message instead of an
              * assertion failure.
              */
-            ScanKexinitsResult skr = {
-                .success = false, .error = SKR_UNKNOWN_ID,
-                .kind = kexlist_descr[i], .desc = found,
-            };
+            ScanKexinitsResult skr;
+            skr.success = false;
+            skr.error = SKR_UNKNOWN_ID;
+            skr.kind = kexlist_descr[i];
+            skr.desc = found;
             return skr;
         }
 
@@ -1134,10 +1102,11 @@ static ScanKexinitsResult ssh2_scan_kexinits(
             /*
              * Otherwise, any match failure _is_ a fatal error.
              */
-            ScanKexinitsResult skr = {
-                .success = false, .error = SKR_NO_AGREEMENT,
-                .kind = kexlist_descr[i], .desc = slists[i],
-            };
+            ScanKexinitsResult skr;
+            skr.success = false;
+            skr.error = SKR_NO_AGREEMENT;
+            skr.kind = kexlist_descr[i];
+            skr.desc = slists[i];
             return skr;
         }
 
@@ -1223,7 +1192,8 @@ static ScanKexinitsResult ssh2_scan_kexinits(
          * constant ssh2_hostkey_algs[] array.
          */
         ptrlen list = slists[KEXLIST_HOSTKEY];
-        for (ptrlen word; get_commasep_word(&list, &word) ;) {
+        ptrlen word;
+        for (; get_commasep_word(&list, &word) ;) {
             for (i = 0; i < lenof(ssh2_hostkey_algs); i++)
                 if (ptrlen_eq_string(word, ssh2_hostkey_algs[i].alg->ssh_id)) {
                     sgrowarray(server_hostkeys->indices, server_hostkeys->size,
@@ -1234,7 +1204,6 @@ static ScanKexinitsResult ssh2_scan_kexinits(
         }
     }
 
-    ScanKexinitsResult skr = { .success = true };
     return skr;
 }
 
@@ -1276,6 +1245,8 @@ static void filter_outgoing_kexinit(struct ssh2_transport_state *s)
 {
     strbuf *pktout = strbuf_new();
     BinarySource osrc[1], isrc[1];
+    strbuf *out;
+    size_t i;
     BinarySource_BARE_INIT(
         osrc, s->outgoing_kexinit->u, s->outgoing_kexinit->len);
     BinarySource_BARE_INIT(
@@ -1298,13 +1269,19 @@ static void filter_outgoing_kexinit(struct ssh2_transport_state *s)
      * lists the same as the rest. In the rest of this code base we
      * ignore those.
      */
-    strbuf *out = strbuf_new();
-    for (size_t i = 0; i < NKEXLIST+2; i++) {
+    out = strbuf_new();
+    for (i = 0; i < NKEXLIST+2; i++) {
+        ptrlen olist;
+        ptrlen ilist;
+        ptrlen oword;
         strbuf_clear(out);
-        ptrlen olist = get_string(osrc), ilist = get_string(isrc);
-        for (ptrlen oword; get_commasep_word(&olist, &oword) ;) {
+        olist = get_string(osrc);
+        ilist = get_string(isrc);
+        for (; get_commasep_word(&olist, &oword) ;) {
             ptrlen searchword = oword;
             ptrlen ilist_copy = ilist;
+            bool add;
+            ptrlen iword;
 
             /*
              * Special case: the kex_strict keywords are
@@ -1320,8 +1297,8 @@ static void filter_outgoing_kexinit(struct ssh2_transport_state *s)
                     searchword = kex_strict_c;
             }
 
-            bool add = false;
-            for (ptrlen iword; get_commasep_word(&ilist_copy, &iword) ;) {
+            add = false;
+            for (; get_commasep_word(&ilist_copy, &iword) ;) {
                 if (ptrlen_eq_ptrlen(searchword, iword)) {
                     /* Found this word in the incoming list. */
                     add = true;
@@ -1373,7 +1350,7 @@ void ssh2transport_finalise_exhash(struct ssh2_transport_state *s)
     s->exhash = NULL;
 
 #if 0
-    debug("Exchange hash is:\n");
+    debug(("Exchange hash is:\n"));
     dmemdump(s->exchange_hash, s->kex_alg->hash->hlen);
 #endif
 }
@@ -1404,53 +1381,6 @@ static void ssh2_transport_process_queue(PacketProtocolLayer *ppl)
     s->warned_about_no_gss_transient_hostkey = false;
 
   begin_key_exchange:
-
-#ifndef NO_GSSAPI
-    if (s->need_gss_transient_hostkey) {
-        /*
-         * This flag indicates a special case in which we must not do
-         * GSS key exchange even if we could. (See comments below,
-         * where the flag was set on the previous key exchange.)
-         */
-        s->can_gssapi_keyex = false;
-    } else if (conf_get_bool(s->conf, CONF_try_gssapi_kex)) {
-        /*
-         * We always check if we have GSS creds before we come up with
-         * the kex algorithm list, otherwise future rekeys will fail
-         * when creds expire. To make this so, this code section must
-         * follow the begin_key_exchange label above, otherwise this
-         * section would execute just once per-connection.
-         *
-         * Update GSS state unless the reason we're here is that a
-         * timer just checked the GSS state and decided that we should
-         * rekey to update delegated credentials. In that case, the
-         * state is "fresh".
-         */
-        if (s->rekey_class != RK_GSS_UPDATE)
-            ssh2_transport_gss_update(s, true);
-
-        /* Do GSSAPI KEX when capable */
-        s->can_gssapi_keyex = s->gss_status & GSS_KEX_CAPABLE;
-
-        /*
-         * But not when failure is likely. [ GSS implementations may
-         * attempt (and fail) to use a ticket that is almost expired
-         * when retrieved from the ccache that actually expires by the
-         * time the server receives it. ]
-         *
-         * Note: The first time always try KEXGSS if we can, failures
-         * will be very rare, and disabling the initial GSS KEX is
-         * worse. Some day GSS libraries will ignore cached tickets
-         * whose lifetime is critically short, and will instead use
-         * fresh ones.
-         */
-        if (!s->got_session_id && (s->gss_status & GSS_CTXT_MAYFAIL) != 0)
-            s->can_gssapi_keyex = false;
-        s->gss_delegate = conf_get_bool(s->conf, CONF_gssapifwd);
-    } else {
-        s->can_gssapi_keyex = false;
-    }
-#endif
 
     s->ppl.bpp->pls->kctx = SSH2_PKTCTX_NOKEX;
 
@@ -1549,6 +1479,7 @@ static void ssh2_transport_process_queue(PacketProtocolLayer *ppl)
                 &s->warn_sccipher, NULL, &s->ignorepkt, &hks,
                 &s->hkflags, &s->can_send_ext_info, !s->got_session_id,
                 &s->strict_kex);
+        int i;
 
         if (!skr.success) {
             sfree(hks.indices);
@@ -1561,7 +1492,7 @@ static void ssh2_transport_process_queue(PacketProtocolLayer *ppl)
          * retrospectively fault any pre-KEXINIT extraneous packets.
          */
         if (!s->got_session_id && s->strict_kex) {
-            ppl_logevent("Enabling strict key exchange semantics");
+            ppl_logevent(("Enabling strict key exchange semantics"));
             if (s->seen_non_kexinit) {
                 ssh_proto_error(s->ppl.ssh, "Received a packet before KEXINIT "
                                 "in strict-kex mode");
@@ -1581,7 +1512,7 @@ static void ssh2_transport_process_queue(PacketProtocolLayer *ppl)
          */
         s->n_uncert_hostkeys = 0;
 
-        for (int i = 0; i < hks.n; i++) {
+        for (i = 0; i < hks.n; i++) {
             int j = hks.indices[i];
             if (ssh2_hostkey_algs[j].alg != s->hostkey_alg &&
                 ssh2_hostkey_algs[j].alg->cache_id &&
@@ -1686,8 +1617,8 @@ static void ssh2_transport_process_queue(PacketProtocolLayer *ppl)
         s->terrapin.wcr = WCR_TERRAPIN;
 
         if (s->terrapin.csvuln || s->terrapin.scvuln) {
-            ppl_logevent("SSH connection is vulnerable to 'Terrapin' attack "
-                         "(CVE-2023-48795)");
+            ppl_logevent(("SSH connection is vulnerable to 'Terrapin' attack "
+                          "(CVE-2023-48795)"));
             if (try_to_avoid_terrapin(s))
                 s->terrapin.wcr = WCR_TERRAPIN_AVOIDABLE;
         }
@@ -1715,8 +1646,8 @@ static void ssh2_transport_process_queue(PacketProtocolLayer *ppl)
         }
 
         if (s->terrapin.csvuln || s->terrapin.scvuln) {
-            ppl_logevent("Continuing despite 'Terrapin' vulnerability, "
-                         "at user request");
+            ppl_logevent(("Continuing despite 'Terrapin' vulnerability, "
+                          "at user request"));
         }
     }
 
@@ -1822,12 +1753,14 @@ static void ssh2_transport_process_queue(PacketProtocolLayer *ppl)
             uint32_t n_exts = 0;
 
             if (s->ssc) {
+                strbuf *list;
+                size_t i;
                 /* Server->client EXT_INFO lists our supported user
                  * key algorithms. */
                 n_exts++;
                 put_stringz(extinfo, "server-sig-algs");
-                strbuf *list = strbuf_new();
-                for (size_t i = 0; i < n_keyalgs; i++)
+                list = strbuf_new();
+                for (i = 0; i < n_keyalgs; i++)
                     add_to_commasep(list, all_keyalgs[i]->ssh_id);
                 put_stringsb(extinfo, list);
             } else {
@@ -1922,7 +1855,7 @@ static void ssh2_transport_process_queue(PacketProtocolLayer *ppl)
      * deferred rekey reason.
      */
     if (s->deferred_rekey_reason) {
-        ppl_logevent("%s", s->deferred_rekey_reason);
+        ppl_logevent(("%s", s->deferred_rekey_reason));
         pktin = NULL;
         s->deferred_rekey_reason = NULL;
         goto begin_key_exchange;
@@ -2010,7 +1943,7 @@ static void ssh2_transport_process_queue(PacketProtocolLayer *ppl)
                 return;
             }
             pq_push_front(s->ppl.in_pq, pktin);
-            ppl_logevent("Remote side initiated key re-exchange");
+            ppl_logevent(("Remote side initiated key re-exchange"));
             s->rekey_class = RK_SERVER;
         }
 
@@ -2055,8 +1988,8 @@ static void ssh2_transport_process_queue(PacketProtocolLayer *ppl)
              * rekey, we process it anyway!)
              */
             if ((s->ppl.remote_bugs & BUG_SSH2_REKEY)) {
-                ppl_logevent("Remote bug prevents key re-exchange (%s)",
-                             s->rekey_reason);
+                ppl_logevent(("Remote bug prevents key re-exchange (%s)",
+                              s->rekey_reason));
                 /* Reset the counters, so that at least this message doesn't
                  * hit the event log _too_ often. */
                 dts_reset(&s->stats->in, s->max_data_size);
@@ -2064,8 +1997,8 @@ static void ssh2_transport_process_queue(PacketProtocolLayer *ppl)
                 (void) ssh2_transport_timer_update(s, 0);
                 s->rekey_class = RK_NONE;
             } else {
-                ppl_logevent("Initiating key re-exchange (%s)",
-                             s->rekey_reason);
+                ppl_logevent(("Initiating key re-exchange (%s)",
+                              s->rekey_reason));
             }
         }
     } while (s->rekey_class == RK_NONE);
@@ -2104,24 +2037,6 @@ static void ssh2_transport_timer(void *ctx, unsigned long now)
         return;
     }
 
-#ifndef NO_GSSAPI
-    /*
-     * Rekey now if we have a new cred or context expires this cycle,
-     * but not if this is unsafe.
-     */
-    if (conf_get_int(s->conf, CONF_gssapirekey)) {
-        ssh2_transport_gss_update(s, false);
-        if ((s->gss_status & GSS_KEX_CAPABLE) != 0 &&
-            (s->gss_status & GSS_CTXT_MAYFAIL) == 0 &&
-            (s->gss_status & (GSS_CRED_UPDATED|GSS_CTXT_EXPIRES)) != 0) {
-            s->rekey_reason = "GSS credentials updated";
-            s->rekey_class = RK_GSS_UPDATE;
-            queue_idempotent_callback(&s->ppl.ic_process_queue);
-            return;
-        }
-    }
-#endif
-
     /* Try again later. */
     (void) ssh2_transport_timer_update(s, 0);
 }
@@ -2157,35 +2072,6 @@ static bool ssh2_transport_timer_update(struct ssh2_transport_state *s,
         ticks = next - now;
     }
 
-#ifndef NO_GSSAPI
-    if (s->gss_kex_used) {
-        /*
-         * If we've used GSSAPI key exchange, then we should
-         * periodically check whether we need to do another one to
-         * pass new credentials to the server.
-         */
-        unsigned long gssmins;
-
-        /* Check cascade conditions more frequently if configured */
-        gssmins = sanitise_rekey_time(
-            conf_get_int(s->conf, CONF_gssapirekey), GSS_DEF_REKEY_MINS);
-        if (gssmins > 0) {
-            if (gssmins < mins)
-                ticks = (mins = gssmins) * 60 * TICKSPERSEC;
-
-            if ((s->gss_status & GSS_KEX_CAPABLE) != 0) {
-                /*
-                 * Run next timer even sooner if it would otherwise be
-                 * too close to the context expiration time
-                 */
-                if ((s->gss_status & GSS_CTXT_EXPIRES) == 0 &&
-                    s->gss_ctxt_lifetime - mins * 60 < 2 * MIN_CTXT_LIFETIME)
-                    ticks -= 2 * MIN_CTXT_LIFETIME * TICKSPERSEC;
-            }
-        }
-    }
-#endif
-
     /* Schedule the next timer */
     s->next_rekey = schedule_timer(ticks, ssh2_transport_timer, s);
     return false;
@@ -2197,131 +2083,6 @@ void ssh2_transport_dialog_callback(void *vctx, SeatPromptResult spr)
     s->spr = spr;
     ssh_ppl_process_queue(&s->ppl);
 }
-
-#ifndef NO_GSSAPI
-/*
- * This is called at the beginning of each SSH rekey to determine
- * whether we are GSS capable, and if we did GSS key exchange, and are
- * delegating credentials, it is also called periodically to determine
- * whether we should rekey in order to delegate (more) fresh
- * credentials. This is called "credential cascading".
- *
- * On Windows, with SSPI, we may not get the credential expiration, as
- * Windows automatically renews from cached passwords, so the
- * credential effectively never expires. Since we still want to
- * cascade when the local TGT is updated, we use the expiration of a
- * newly obtained context as a proxy for the expiration of the TGT.
- */
-static void ssh2_transport_gss_update(struct ssh2_transport_state *s,
-                                      bool definitely_rekeying)
-{
-    PacketProtocolLayer *ppl = &s->ppl; /* for ppl_logevent */
-    int gss_stat;
-    time_t gss_cred_expiry;
-    unsigned long mins;
-    Ssh_gss_buf gss_sndtok;
-    Ssh_gss_buf gss_rcvtok;
-    Ssh_gss_ctx gss_ctx;
-
-    s->gss_status = 0;
-
-    /*
-     * Nothing to do if no GSSAPI libraries are configured or GSSAPI
-     * auth is not enabled.
-     */
-    if (s->shgss->libs->nlibraries == 0)
-        return;
-    if (!conf_get_bool(s->conf, CONF_try_gssapi_auth) &&
-        !conf_get_bool(s->conf, CONF_try_gssapi_kex))
-        return;
-
-    /* Import server name and cache it */
-    if (s->shgss->srv_name == GSS_C_NO_NAME) {
-        gss_stat = s->shgss->lib->import_name(
-            s->shgss->lib, s->fullhostname, &s->shgss->srv_name);
-        if (gss_stat != SSH_GSS_OK) {
-            if (gss_stat == SSH_GSS_BAD_HOST_NAME)
-                ppl_logevent("GSSAPI import name failed - Bad service name;"
-                             " won't use GSS key exchange");
-            else
-                ppl_logevent("GSSAPI import name failed;"
-                             " won't use GSS key exchange");
-            return;
-        }
-    }
-
-    /*
-     * Do we (still) have credentials? Capture the credential
-     * expiration when available
-     */
-    gss_stat = s->shgss->lib->acquire_cred(
-        s->shgss->lib, &gss_ctx, &gss_cred_expiry);
-    if (gss_stat != SSH_GSS_OK)
-        return;
-
-    SSH_GSS_CLEAR_BUF(&gss_sndtok);
-    SSH_GSS_CLEAR_BUF(&gss_rcvtok);
-
-    /*
-     * When acquire_cred yields no useful expiration, get a proxy for
-     * the cred expiration from the context expiration.
-     */
-    gss_stat = s->shgss->lib->init_sec_context(
-        s->shgss->lib, &gss_ctx, s->shgss->srv_name,
-        0 /* don't delegate */, &gss_rcvtok, &gss_sndtok,
-        (gss_cred_expiry == GSS_NO_EXPIRATION ? &gss_cred_expiry : NULL),
-        &s->gss_ctxt_lifetime);
-
-    /* This context was for testing only. */
-    if (gss_ctx)
-        s->shgss->lib->release_cred(s->shgss->lib, &gss_ctx);
-
-    if (gss_stat != SSH_GSS_OK &&
-        gss_stat != SSH_GSS_S_CONTINUE_NEEDED) {
-        /*
-         * No point in verbosely interrupting the user to tell them we
-         * couldn't get GSS credentials, if this was only a check
-         * between key exchanges to see if fresh ones were available.
-         * When we do do a rekey, this message (if displayed) will
-         * appear among the standard rekey blurb, but when we're not,
-         * it shouldn't pop up all the time regardless.
-         */
-        if (definitely_rekeying)
-            ppl_logevent("No GSSAPI security context available");
-
-        return;
-    }
-
-    if (gss_sndtok.length)
-        s->shgss->lib->free_tok(s->shgss->lib, &gss_sndtok);
-
-    s->gss_status |= GSS_KEX_CAPABLE;
-
-    /*
-     * When rekeying to cascade, avoid doing this too close to the
-     * context expiration time, since the key exchange might fail.
-     */
-    if (s->gss_ctxt_lifetime < MIN_CTXT_LIFETIME)
-        s->gss_status |= GSS_CTXT_MAYFAIL;
-
-    /*
-     * If we're not delegating credentials, rekeying is not used to
-     * refresh them. We must avoid setting GSS_CRED_UPDATED or
-     * GSS_CTXT_EXPIRES when credential delegation is disabled.
-     */
-    if (!conf_get_bool(s->conf, CONF_gssapifwd))
-        return;
-
-    if (s->gss_cred_expiry != GSS_NO_EXPIRATION &&
-        difftime(gss_cred_expiry, s->gss_cred_expiry) > 0)
-        s->gss_status |= GSS_CRED_UPDATED;
-
-    mins = sanitise_rekey_time(
-        conf_get_int(s->conf, CONF_gssapirekey), GSS_DEF_REKEY_MINS);
-    if (mins > 0 && s->gss_ctxt_lifetime <= mins * 60)
-        s->gss_status |= GSS_CTXT_EXPIRES;
-}
-#endif /* NO_GSSAPI */
 
 ptrlen ssh2_transport_get_session_id(PacketProtocolLayer *ppl)
 {
@@ -2611,6 +2372,21 @@ static bool try_to_avoid_terrapin(const struct ssh2_transport_state *s)
     strbuf *alt_client_kexinit = strbuf_new();
     Conf *alt_conf = conf_copy(s->conf);
     struct kexinit_algorithm_list alt_kexlists[NKEXLIST];
+    int ccp_pos_now;
+    int ccp_pos_wanted;
+    transport_direction cstrans;
+    transport_direction sctrans;
+    bool warn_kex;
+    bool warn_hk;
+    bool warn_cscipher;
+    bool warn_sccipher;
+    bool can_send_ext_info;
+    bool strict_kex;
+    unsigned hkflags;
+    const ssh_kex *kex_alg;
+    const ssh_keyalg *hostkey_alg;
+    ScanKexinitsResult skr;
+    int i;
     memset(alt_kexlists, 0, sizeof(alt_kexlists));
 
     /*
@@ -2625,8 +2401,9 @@ static bool try_to_avoid_terrapin(const struct ssh2_transport_state *s)
      * previously above it. If not, don't do anything - we don't want
      * to _promote_ it.
      */
-    int ccp_pos_now = -1, ccp_pos_wanted = -1;
-    for (int i = 0; i < CIPHER_MAX; i++) {
+    ccp_pos_now = -1;
+    ccp_pos_wanted = -1;
+    for (i = 0; i < CIPHER_MAX; i++) {
         switch (conf_get_int_int(alt_conf, CONF_ssh_cipherlist,
                                  i)) {
           case CIPHER_CHACHA20:
@@ -2670,14 +2447,10 @@ static bool try_to_avoid_terrapin(const struct ssh2_transport_state *s)
      * Re-analyse the incoming KEXINIT with respect to this one, to
      * see what we'd have decided on.
      */
-    transport_direction cstrans, sctrans;
-    bool warn_kex, warn_hk, warn_cscipher, warn_sccipher;
-    bool can_send_ext_info = false, strict_kex = false;
-    unsigned hkflags;
-    const ssh_kex *kex_alg;
-    const ssh_keyalg *hostkey_alg;
+    can_send_ext_info = false;
+    strict_kex = false;
 
-    ScanKexinitsResult skr = ssh2_scan_kexinits(
+    skr = ssh2_scan_kexinits(
         ptrlen_from_strbuf(alt_client_kexinit),
         ptrlen_from_strbuf(s->server_kexinit),
         s->ssc != NULL, alt_kexlists, &kex_alg, &hostkey_alg,
@@ -2713,7 +2486,7 @@ static bool try_to_avoid_terrapin(const struct ssh2_transport_state *s)
 
   out:
 
-    for (size_t i = 0; i < NKEXLIST; i++)
+    for (i = 0; i < NKEXLIST; i++)
         sfree(alt_kexlists[i].algs);
     strbuf_free(alt_client_kexinit);
     conf_free(alt_conf);

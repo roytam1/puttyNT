@@ -89,8 +89,9 @@ static void hprime_final(ssh_hash *h, unsigned length, void *vout)
 strbuf *argon2_long_hash(unsigned length, ptrlen data)
 {
     ssh_hash *h = hprime_new(length);
+    strbuf *out;
     put_datapl(h, data);
-    strbuf *out = strbuf_new();
+    out = strbuf_new();
     hprime_final(h, length, strbuf_append(out, length));
     return out;
 }
@@ -104,29 +105,31 @@ strbuf *argon2_long_hash(unsigned length, ptrlen data)
  * could perfectly well regard G as a 1Kb->1Kb function.
  */
 
-static inline uint64_t ror(uint64_t x, unsigned rotation)
+/*
+ * The 64-bit words are uint64 (two 32-bit halves, see defs.h), and
+ * misc.h has the functions that do arithmetic on them.
+ *
+ * add_mul returns a + b + 2 * trunc32(a) * trunc32(b), where trunc32
+ * takes the low 32 bits.
+ */
+static inline uint64 add_mul(uint64 a, uint64 b)
 {
-    unsigned lshift = 63 & -rotation, rshift = 63 & rotation;
-    return (x << lshift) | (x >> rshift);
-}
-
-static inline uint64_t trunc32(uint64_t x)
-{
-    return x & 0xFFFFFFFF;
+    return uint64_add(uint64_add(a, b),
+                      uint64_shl(uint64_mul32(a.lo, b.lo), 1));
 }
 
 /* Internal function similar to the BLAKE2b round, which mixes up four 64-bit
  * words */
-static inline void GB(uint64_t *a, uint64_t *b, uint64_t *c, uint64_t *d)
+static inline void GB(uint64 *a, uint64 *b, uint64 *c, uint64 *d)
 {
-    *a += *b + 2 * trunc32(*a) * trunc32(*b);
-    *d = ror(*d ^ *a, 32);
-    *c += *d + 2 * trunc32(*c) * trunc32(*d);
-    *b = ror(*b ^ *c, 24);
-    *a += *b + 2 * trunc32(*a) * trunc32(*b);
-    *d = ror(*d ^ *a, 16);
-    *c += *d + 2 * trunc32(*c) * trunc32(*d);
-    *b = ror(*b ^ *c, 63);
+    *a = add_mul(*a, *b);
+    *d = uint64_rotr(uint64_xor(*d, *a), 32);
+    *c = add_mul(*c, *d);
+    *b = uint64_rotr(uint64_xor(*b, *c), 24);
+    *a = add_mul(*a, *b);
+    *d = uint64_rotr(uint64_xor(*d, *a), 16);
+    *c = add_mul(*c, *d);
+    *b = uint64_rotr(uint64_xor(*b, *c), 63);
 }
 
 /* Higher-level internal function which mixes up sixteen 64-bit words. This is
@@ -136,10 +139,11 @@ static inline void GB(uint64_t *a, uint64_t *b, uint64_t *c, uint64_t *d)
  * memory, whose addresses are in arithmetic progression. So the 16 input
  * words are in[0], in[1], in[instep], in[instep+1], ..., in[7*instep],
  * in[7*instep+1], and the 16 output words similarly. */
-static inline void P(uint64_t *out, unsigned outstep,
-                     uint64_t *in, unsigned instep)
+static inline void P(uint64 *out, unsigned outstep,
+                     uint64 *in, unsigned instep)
 {
-    for (unsigned i = 0; i < 8; i++) {
+    unsigned i;
+    for (i = 0; i < 8; i++) {
         out[i*outstep] = in[i*instep];
         out[i*outstep+1] = in[i*instep+1];
     }
@@ -161,25 +165,31 @@ static inline void P(uint64_t *out, unsigned outstep,
  * 1Kb of data is already at 'out'. */
 static void G_xor(uint8_t *out, const uint8_t *X, const uint8_t *Y)
 {
-    uint64_t R[128], Q[128], Z[128];
+    uint64 R[128], Q[128], Z[128];
+    unsigned i;
 
-    for (unsigned i = 0; i < 128; i++)
-        R[i] = GET_64BIT_LSB_FIRST(X + 8*i) ^ GET_64BIT_LSB_FIRST(Y + 8*i);
+    for (i = 0; i < 128; i++)
+        R[i] = uint64_xor(GET_64BIT_LSB_FIRST(X + 8*i),
+                          GET_64BIT_LSB_FIRST(Y + 8*i));
 
-    for (unsigned i = 0; i < 8; i++)
+    for (i = 0; i < 8; i++)
         P(Q+16*i, 2, R+16*i, 2);
 
-    for (unsigned i = 0; i < 8; i++)
+    for (i = 0; i < 8; i++)
         P(Z+2*i, 16, Q+2*i, 16);
 
-    for (unsigned i = 0; i < 128; i++)
+    for (i = 0; i < 128; i++)
         PUT_64BIT_LSB_FIRST(out + 8*i,
-                            GET_64BIT_LSB_FIRST(out + 8*i) ^ R[i] ^ Z[i]);
+                            uint64_xor(GET_64BIT_LSB_FIRST(out + 8*i),
+                                       uint64_xor(R[i], Z[i])));
 
     smemclr(R, sizeof(R));
     smemclr(Q, sizeof(Q));
     smemclr(Z, sizeof(Z));
 }
+
+/* One 1Kb block of the Argon2 memory array */
+struct blk { uint8_t data[1024]; };
 
 /* ----------------------------------------------------------------------
  * The main Argon2 function.
@@ -199,6 +209,18 @@ static void argon2_internal(uint32_t p, uint32_t T, uint32_t m, uint32_t t,
      * just makes it extra painful to get the final answer.
      */
     uint8_t h0[64];
+    size_t SL;
+    size_t q;
+    size_t mprime;
+    struct blk *B;
+    size_t jstart;
+    bool d_mode;
+    struct blk out2i;
+    struct blk tmp2i;
+    struct blk in2i;
+    struct blk C;
+    size_t i;
+    size_t pass;
     {
         ssh_hash *h = blake2b_new_general(64);
         put_uint32_le(h, p);
@@ -213,8 +235,6 @@ static void argon2_internal(uint32_t p, uint32_t T, uint32_t m, uint32_t t,
         put_stringpl_le(h, X);
         ssh_hash_final(h, h0);
     }
-
-    struct blk { uint8_t data[1024]; };
 
     /*
      * Array of 1Kb blocks. The total size is (approximately) m, the
@@ -232,12 +252,12 @@ static void argon2_internal(uint32_t p, uint32_t T, uint32_t m, uint32_t t,
      * i.e. slice 0 is the whole left quarter of the array, and slice 3 the
      * whole right quarter.
      */
-    size_t SL = m / (4*p); /* segment length: # of 1Kb blocks in a segment */
-    size_t q = 4 * SL;     /* width of the array: 4 segments times SL */
-    size_t mprime = q * p; /* total size of the array, approximately m */
+    SL = m / (4*p);        /* segment length: # of 1Kb blocks in a segment */
+    q = 4 * SL;            /* width of the array: 4 segments times SL */
+    mprime = q * p;        /* total size of the array, approximately m */
 
     /* Allocate the memory. */
-    struct blk *B = snewn(mprime, struct blk);
+    B = snewn(mprime, struct blk);
     memset(B, 0, mprime * sizeof(struct blk));
 
     /*
@@ -246,14 +266,14 @@ static void argon2_internal(uint32_t p, uint32_t T, uint32_t m, uint32_t t,
      * the long-output hash function H' to hash h0 itself plus the block's
      * coordinates in the array.
      */
-    for (size_t i = 0; i < p; i++) {
+    for (i = 0; i < p; i++) {
         ssh_hash *h = hprime_new(1024);
         put_data(h, h0, 64);
         put_uint32_le(h, 0);
         put_uint32_le(h, i);
         hprime_final(h, 1024, B[i].data);
     }
-    for (size_t i = 0; i < p; i++) {
+    for (i = 0; i < p; i++) {
         ssh_hash *h = hprime_new(1024);
         put_data(h, h0, 64);
         put_uint32_le(h, 1);
@@ -278,15 +298,16 @@ static void argon2_internal(uint32_t p, uint32_t T, uint32_t m, uint32_t t,
      * independent, and then once we've mixed things up enough, switch over to
      * dependent mode to force long serial chains of computation.
      */
-    size_t jstart = 2;
-    bool d_mode = (y == 0);
-    struct blk out2i, tmp2i, in2i;
+    jstart = 2;
+    d_mode = (y == 0);
 
     /* Outermost loop: t whole passes from left to right over the array */
-    for (size_t pass = 0; pass < t; pass++) {
+    for (pass = 0; pass < t; pass++) {
+        unsigned slice;
 
         /* Within that, we process the array in its four main slices */
-        for (unsigned slice = 0; slice < 4; slice++) {
+        for (slice = 0; slice < 4; slice++) {
+            size_t i;
 
             /* In Argon2id mode, if we're half way through the first pass,
              * this is the moment to switch d_mode from false to true */
@@ -295,12 +316,13 @@ static void argon2_internal(uint32_t p, uint32_t T, uint32_t m, uint32_t t,
 
             /* Loop over every segment in the slice (i.e. every row). So i is
              * the y-coordinate of each block we process. */
-            for (size_t i = 0; i < p; i++) {
+            for (i = 0; i < p; i++) {
+                size_t jpre;
 
                 /* And within that segment, process the blocks from left to
                  * right, starting at 'jstart' (usually 0, but 2 in the first
                  * slice). */
-                for (size_t jpre = jstart; jpre < SL; jpre++) {
+                for (jpre = jstart; jpre < SL; jpre++) {
 
                     /* j is the x-coordinate of each block we process, made up
                      * of the slice number and the index 'jpre' within the
@@ -316,6 +338,14 @@ static void argon2_internal(uint32_t p, uint32_t T, uint32_t m, uint32_t t,
                      * the data-dependent and independent modes.
                      */
                     uint32_t J1, J2;
+                    uint32_t index_l;
+                    uint32_t Wstart;
+                    uint32_t Wend;
+                    uint32_t Wsize;
+                    uint32_t x;
+                    uint32_t yy;    /* 'y' in the spec; y is the variant */
+                    uint32_t zz;
+                    uint32_t index_z;
                     if (d_mode) {
                         /*
                          * Data-dependent: grab the first 64 bits of the block
@@ -347,13 +377,20 @@ static void argon2_internal(uint32_t p, uint32_t T, uint32_t m, uint32_t t,
                              * anyway.
                              */
                             memset(in2i.data, 0, sizeof(in2i.data));
-                            PUT_64BIT_LSB_FIRST(in2i.data +  0, pass);
-                            PUT_64BIT_LSB_FIRST(in2i.data +  8, i);
-                            PUT_64BIT_LSB_FIRST(in2i.data + 16, slice);
-                            PUT_64BIT_LSB_FIRST(in2i.data + 24, mprime);
-                            PUT_64BIT_LSB_FIRST(in2i.data + 32, t);
-                            PUT_64BIT_LSB_FIRST(in2i.data + 40, y);
-                            PUT_64BIT_LSB_FIRST(in2i.data + 48, jpre / 128 + 1);
+                            PUT_64BIT_LSB_FIRST(in2i.data +  0,
+                                                uint64_make(0, pass));
+                            PUT_64BIT_LSB_FIRST(in2i.data +  8,
+                                                uint64_make(0, i));
+                            PUT_64BIT_LSB_FIRST(in2i.data + 16,
+                                                uint64_make(0, slice));
+                            PUT_64BIT_LSB_FIRST(in2i.data + 24,
+                                                uint64_make(0, mprime));
+                            PUT_64BIT_LSB_FIRST(in2i.data + 32,
+                                                uint64_make(0, t));
+                            PUT_64BIT_LSB_FIRST(in2i.data + 40,
+                                                uint64_make(0, y));
+                            PUT_64BIT_LSB_FIRST(in2i.data + 48,
+                                                uint64_make(0, jpre / 128 + 1));
 
                             /*
                              * Now apply G twice to generate the hash output
@@ -395,7 +432,7 @@ static void argon2_internal(uint32_t p, uint32_t T, uint32_t m, uint32_t t,
                      * because it's already massively randomised from the real
                      * inputs).
                      */
-                    uint32_t index_l = (pass == 0 && slice == 0) ? i : J2 % p;
+                    index_l = (pass == 0 && slice == 0) ? i : J2 % p;
 
                     /*
                      * The hard part: which block in this array row do we use?
@@ -432,10 +469,9 @@ static void argon2_internal(uint32_t p, uint32_t T, uint32_t m, uint32_t t,
                     /* Start position is the beginning of the _next_ slice
                      * (containing data from the previous pass), unless we're
                      * on pass 0, where the start position has to be 0. */
-                    uint32_t Wstart = (pass == 0 ? 0 : (slice + 1) % 4 * SL);
+                    Wstart = (pass == 0 ? 0 : (slice + 1) % 4 * SL);
 
                     /* End position splits up by cases. */
-                    uint32_t Wend;
                     if (index_l == i) {
                         /* Same lane as output: we can use anything up to (but
                          * not including) the block immediately left of us. */
@@ -451,19 +487,19 @@ static void argon2_internal(uint32_t p, uint32_t T, uint32_t m, uint32_t t,
                     }
 
                     /* Total number of blocks available to choose from */
-                    uint32_t Wsize = (Wend + q - Wstart) % q;
+                    Wsize = (Wend + q - Wstart) % q;
 
                     /* Fiddly computation from the spec that chooses from the
                      * available blocks, in a deliberately non-uniform
                      * fashion, using J1 as pseudorandom input data. Output is
                      * zz which is the index within our contiguous interval. */
-                    uint32_t x = ((uint64_t)J1 * J1) >> 32;
-                    uint32_t y = ((uint64_t)Wsize * x) >> 32;
-                    uint32_t zz = Wsize - 1 - y;
+                    x = uint64_mul32(J1, J1).hi;
+                    yy = uint64_mul32(Wsize, x).hi;
+                    zz = Wsize - 1 - yy;
 
                     /* And index_z is the actual x coordinate of the block we
                      * want. */
-                    uint32_t index_z = (Wstart + zz) % q;
+                    index_z = (Wstart + zz) % q;
 
                     /* Phew! Combine that block with the one immediately to
                      * our left, and XOR over the top of whatever is already
@@ -488,8 +524,8 @@ static void argon2_internal(uint32_t p, uint32_t T, uint32_t m, uint32_t t,
      * deliver to the caller.
      */
 
-    struct blk C = B[p * (q-1)];
-    for (size_t i = 1; i < p; i++)
+    C = B[p * (q-1)];
+    for (i = 1; i < p; i++)
         memxor(C.data, C.data, B[i + p * (q-1)].data, 1024);
 
     {
@@ -519,9 +555,9 @@ char *argon2_params_bad(uint32_t mem, uint32_t passes,
                         size_t Plen, size_t Slen, size_t Klen, size_t Xlen)
 {
     if (Plen > 0xFFFFFFFF)
-        return dupprintf("passphrase length %zu exceeds 2^32-1", Plen);
+        return dupprintf("passphrase length %"SIZEu" exceeds 2^32-1", Plen);
     if (Slen > 0xFFFFFFFF)
-        return dupprintf("salt length %zu exceeds 2^32-1", Slen);
+        return dupprintf("salt length %"SIZEu" exceeds 2^32-1", Slen);
     if (parallel < 1)
         return dupprintf("parallelism level must be at least 1");
     if (parallel > 0xFFFFFF)
@@ -536,9 +572,10 @@ char *argon2_params_bad(uint32_t mem, uint32_t passes,
     if (passes < 1)
         return dupprintf("number of passes must be at least 1");
     if (Klen > 0xFFFFFFFF)
-        return dupprintf("secret length %zu exceeds 2^32-1", Klen);
+        return dupprintf("secret length %"SIZEu" exceeds 2^32-1", Klen);
     if (Xlen > 0xFFFFFFFF)
-        return dupprintf("associated data length %zu exceeds 2^32-1", Xlen);
+        return dupprintf("associated data length %"SIZEu
+                         " exceeds 2^32-1", Xlen);
     return NULL;
 }
 
@@ -583,8 +620,9 @@ void argon2_choose_passes(
 
     while (true) {
         unsigned long start_time = GETTICKCOUNT();
+        unsigned long ticks;
         argon2(flavour, mem, b, parallel, taglen, P, S, K, X, out);
-        unsigned long ticks = GETTICKCOUNT() - start_time;
+        ticks = GETTICKCOUNT() - start_time;
 
         /* But just in case computers get _too_ fast, we have to cap
          * the growth before it gets past the uint32_t upper bound! So

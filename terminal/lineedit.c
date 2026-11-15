@@ -116,13 +116,14 @@ static void lineedit_delete_char(TermLineEditor *le)
 {
     if (le->tail) {
         BufChar *bc = le->tail;
+        unsigned i;
         le->tail = bc->prev;
         if (!le->tail)
             le->head = NULL;
         else
             le->tail->next = NULL;
 
-        for (unsigned i = 0; i < bc->width; i++)
+        for (i = 0; i < bc->width; i++)
             lineedit_term_write(le, PTRLEN_LITERAL("\x08 \x08"));
 
         bufchar_free(bc);
@@ -158,9 +159,10 @@ static void lineedit_delete_line(TermLineEditor *le)
 void lineedit_send_line(TermLineEditor *le)
 {
     bufchain output;
+    BufChar *bc;
     bufchain_init(&output);
 
-    for (BufChar *bc = le->head; bc; bc = bc->next)
+    for (bc = le->head; bc; bc = bc->next)
         bufchain_add(&output, bc->wire, bc->nwire);
 
     while (bufchain_size(&output) > 0) {
@@ -208,7 +210,7 @@ static void lineedit_display_bufchar(TermLineEditor *le, BufChar *bc,
          * UTF-8 mode term_translate shouldn't access it. But that
          * seems needlessly reckless; we'll make up an empty one.
          */
-        term_utf8_decode dummy_utf8 = { .state = 0, .chr = 0, .size = 0 };
+        term_utf8_decode dummy_utf8 = { /* .state = */ 0, /* .chr = */ 0, /* .size = */ 0 };
         chr = term_translate(
             le->term, &dummy_utf8, (unsigned char)chr);
 
@@ -250,7 +252,7 @@ static void lineedit_display_bufchar(TermLineEditor *le, BufChar *bc,
         /*
          * Represent C1 controls as <9B> or similar.
          */
-        put_fmt(bs, "<%02X>", chr);
+        BinarySink_put_fmt(BinarySink_UPCAST(bs), "<%02X>", chr);
         bc->width = 4;
         goto got_char;
     }
@@ -277,9 +279,10 @@ static void lineedit_display_bufchar(TermLineEditor *le, BufChar *bc,
 static void lineedit_check_utf8_complete(TermLineEditor *le, BufChar *bc)
 {
     BinarySource src[1];
-    BinarySource_BARE_INIT(src, bc->wire, bc->nwire);
     DecodeUTF8Failure err;
-    unsigned chr = decode_utf8(src, &err);
+    unsigned chr;
+    BinarySource_BARE_INIT(src, bc->wire, bc->nwire);
+    chr = decode_utf8(src, &err);
     if (err == DUTF8_E_OUT_OF_DATA)
         return;                        /* not complete yet */
 
@@ -301,9 +304,10 @@ static void lineedit_redraw_line(TermLineEditor *le)
     le->head = le->tail = NULL;
     while (prevhead) {
         BufChar *bc = prevhead;
+        unsigned i;
         prevhead = prevhead->next;
 
-        for (unsigned i = 0; i < bc->nwire; i++)
+        for (i = 0; i < bc->nwire; i++)
             lineedit_input_printing_char(le, bc->wire[i]);
         bufchar_free(bc);
     }
@@ -486,6 +490,7 @@ void lineedit_input(TermLineEditor *le, char ch, bool dedicated)
 
 static void lineedit_input_printing_char(TermLineEditor *le, char ch)
 {
+    BufChar *bc;
     /*
      * Append ch to the line buffer, either as a new BufChar or by
      * adding it to a previous one containing an as yet incomplete
@@ -526,7 +531,7 @@ static void lineedit_input_printing_char(TermLineEditor *le, char ch)
     /*
      * Make a fresh BufChar.
      */
-    BufChar *bc = snew(BufChar);
+    bc = snew(BufChar);
     bc->prev = le->tail;
     le->tail = bc;
     if (bc->prev)

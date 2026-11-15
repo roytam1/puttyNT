@@ -104,13 +104,14 @@ Ldisc *ldisc_create(Conf *conf, Terminal *term, Backend *backend, Seat *seat)
 
 void ldisc_configure(Ldisc *ldisc, Conf *conf)
 {
+    unsigned flags;
     ldisc->telnet_keyboard = conf_get_bool(conf, CONF_telnet_keyboard);
     ldisc->telnet_newline = conf_get_bool(conf, CONF_telnet_newline);
     ldisc->protocol = conf_get_int(conf, CONF_protocol);
     ldisc->localecho = conf_get_int(conf, CONF_localecho);
     ldisc->localedit = conf_get_int(conf, CONF_localedit);
 
-    unsigned flags = 0;
+    flags = 0;
     if (ldisc->protocol == PROT_RAW)
         flags |= LE_CRLF_NEWLINE;
     if (ldisc->telnet_keyboard)
@@ -238,10 +239,10 @@ static void ldisc_lineedit_newline(TermLineEditorCallbackReceiver *rcv)
 
 static const TermLineEditorCallbackReceiverVtable
 ldisc_lineedit_receiver_vt = {
-    .to_terminal = ldisc_lineedit_to_terminal,
-    .to_backend = ldisc_lineedit_to_backend,
-    .special = ldisc_lineedit_special,
-    .newline = ldisc_lineedit_newline,
+    /* .to_terminal = */ ldisc_lineedit_to_terminal,
+    /* .to_backend = */ ldisc_lineedit_to_backend,
+    /* .special = */ ldisc_lineedit_special,
+    /* .newline = */ ldisc_lineedit_newline,
 };
 
 void ldisc_check_sendok(Ldisc *ldisc)
@@ -251,6 +252,7 @@ void ldisc_check_sendok(Ldisc *ldisc)
 
 void ldisc_send(Ldisc *ldisc, const void *vbuf, int len, bool interactive)
 {
+    InputType type;
     assert(ldisc->term);
 
     if (interactive) {
@@ -265,7 +267,6 @@ void ldisc_send(Ldisc *ldisc, const void *vbuf, int len, bool interactive)
         term_nopaste(ldisc->term);
     }
 
-    InputType type;
     if (len < 0) {
         /*
          * Less than zero means null terminated special string.
@@ -321,9 +322,10 @@ static void ldisc_input_queue_callback(void *ctx)
 
         while (len > 0 && ldisc->userpass_le) {
             char c = *buf++;
+            bool dedicated;
             len--;
 
-            bool dedicated = is_dedicated_byte(c, type);
+            dedicated = is_dedicated_byte(c, type);
             lineedit_input(ldisc->userpass_le, c, dedicated);
         }
 
@@ -338,9 +340,10 @@ static void ldisc_input_queue_callback(void *ctx)
         if (EDITING) {
             while (len > 0) {
                 char c = *buf++;
+                bool dedicated;
                 len--;
 
-                bool dedicated = is_dedicated_byte(c, type);
+                dedicated = is_dedicated_byte(c, type);
                 lineedit_input(ldisc->le, c, dedicated);
             }
             ldisc_input_queue_consume(ldisc, buf - start);

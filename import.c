@@ -91,11 +91,12 @@ bool import_encrypted_s(const Filename *filename, BinarySource *src,
 bool import_encrypted(const Filename *filename, int type, char **comment)
 {
     LoadedFile *lf = lf_load_keyfile(filename, NULL);
+    bool toret;
     if (!lf)
         return false; /* couldn't even open the file */
 
-    bool toret = import_encrypted_s(filename, BinarySource_UPCAST(lf),
-                                    type, comment);
+    toret = import_encrypted_s(filename, BinarySource_UPCAST(lf),
+                               type, comment);
     lf_free(lf);
     return toret;
 }
@@ -113,11 +114,12 @@ int import_ssh1(const Filename *filename, int type,
                 RSAKey *key, char *passphrase, const char **errmsg_p)
 {
     LoadedFile *lf = lf_load_keyfile(filename, errmsg_p);
+    int toret;
     if (!lf)
         return false;
 
-    int toret = import_ssh1_s(BinarySource_UPCAST(lf),
-                              type, key, passphrase, errmsg_p);
+    toret = import_ssh1_s(BinarySource_UPCAST(lf),
+                          type, key, passphrase, errmsg_p);
     lf_free(lf);
     return toret;
 }
@@ -141,11 +143,12 @@ ssh2_userkey *import_ssh2(const Filename *filename, int type,
                           char *passphrase, const char **errmsg_p)
 {
     LoadedFile *lf = lf_load_keyfile(filename, errmsg_p);
+    ssh2_userkey *toret;
     if (!lf)
         return false;
 
-    ssh2_userkey *toret = import_ssh2_s(BinarySource_UPCAST(lf),
-                                        type, passphrase, errmsg_p);
+    toret = import_ssh2_s(BinarySource_UPCAST(lf),
+                          type, passphrase, errmsg_p);
     lf_free(lf);
     return toret;
 }
@@ -705,10 +708,11 @@ static ssh2_userkey *openssh_pem_read(
         }
 
     } else if (key->keytype == OP_RSA || key->keytype == OP_DSA) {
+        ptrlen rsa_modulus;
 
         put_stringz(blob, key->keytype == OP_DSA ? "ssh-dss" : "ssh-rsa");
 
-        ptrlen rsa_modulus = PTRLEN_LITERAL("");
+        rsa_modulus = PTRLEN_LITERAL("");
 
         for (i = 0; i < num_integers; i++) {
             ber_item integer = get_ber(src);

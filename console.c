@@ -2,7 +2,6 @@
  * Common pieces between the platform console frontend modules.
  */
 
-#include <stdbool.h>
 #include <stdarg.h>
 
 #include "putty.h"
@@ -14,12 +13,12 @@ const char console_abandoned_msg[] = "Connection abandoned.\n";
 const SeatDialogPromptDescriptions *console_prompt_descriptions(Seat *seat)
 {
     static const SeatDialogPromptDescriptions descs = {
-        .hk_accept_action = "enter \"y\"",
-        .hk_connect_once_action = "enter \"n\"",
-        .hk_cancel_action = "press Return",
-        .hk_cancel_action_Participle = "Pressing Return",
-        .weak_accept_action = "enter \"y\"",
-        .weak_cancel_action = "enter \"n\"",
+        /* .hk_accept_action = */ "enter \"y\"",
+        /* .hk_connect_once_action = */ "enter \"n\"",
+        /* .hk_cancel_action = */ "press Return",
+        /* .hk_cancel_action_Participle = */ "Pressing Return",
+        /* .weak_accept_action = */ "enter \"y\"",
+        /* .weak_cancel_action = */ "enter \"n\"",
     };
     return &descs;
 }

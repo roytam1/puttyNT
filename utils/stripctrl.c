@@ -9,7 +9,7 @@
 #include <locale.h>
 #include <string.h>
 #include <wchar.h>
-#include <wctype.h>
+#include <ctype.h>         /* iswprint: old compilers have no wctype.h */
 
 #include "putty.h"
 #include "terminal.h"
@@ -19,10 +19,15 @@
 #define SCC_BUFSIZE 64
 #define LINE_LIMIT 77
 
+/*
+ * Locale-coded data is decoded with the C89 functions mbtowc and
+ * wctomb, because the C libraries of the 1993-1996 SDKs don't have
+ * mbrtowc and wcrtomb. That loses nothing on Windows, whose
+ * multibyte code pages have no shift states.
+ */
+
 typedef struct StripCtrlCharsImpl StripCtrlCharsImpl;
 struct StripCtrlCharsImpl {
-    mbstate_t mbs_in, mbs_out;
-
     bool permit_cr;
     wchar_t substitution;
 
@@ -52,7 +57,7 @@ static StripCtrlCharsImpl *stripctrl_new_common(
     BinarySink *bs_out, bool permit_cr, wchar_t substitution)
 {
     StripCtrlCharsImpl *scc = snew(StripCtrlCharsImpl);
-    memset(scc, 0, sizeof(StripCtrlCharsImpl)); /* zeroes mbstates */
+    memset(scc, 0, sizeof(StripCtrlCharsImpl));
     scc->bs_out = bs_out;
     scc->permit_cr = permit_cr;
     scc->substitution = substitution;
@@ -101,8 +106,6 @@ void stripctrl_reset(StripCtrlChars *sccpub)
      * that hasn't seen the previous output.
      */
     memset(&scc->utf8, 0, sizeof(scc->utf8));
-    memset(&scc->mbs_in, 0, sizeof(scc->mbs_in));
-    memset(&scc->mbs_out, 0, sizeof(scc->mbs_out));
 
     /*
      * Also, reset the line-limiting system to its starting state.
@@ -160,6 +163,8 @@ static inline void stripctrl_check_line_limit(
 static inline void stripctrl_locale_put_wc(StripCtrlCharsImpl *scc, wchar_t wc)
 {
     int width = mk_wcwidth(wc);
+    char outbuf[MB_LEN_MAX];
+    int produced;
     if ((iswprint(wc) && width >= 0) || stripctrl_ctrlchar_ok(scc, wc)) {
         /* Printable character, or one we're going to let through anyway. */
         if (width < 0)
@@ -175,8 +180,7 @@ static inline void stripctrl_locale_put_wc(StripCtrlCharsImpl *scc, wchar_t wc)
 
     stripctrl_check_line_limit(scc, wc, width);
 
-    char outbuf[MB_LEN_MAX];
-    size_t produced = wcrtomb(outbuf, wc, &scc->mbs_out);
+    produced = wctomb(outbuf, wc);
     if (produced > 0)
         put_data(scc->bs_out, outbuf, produced);
 }
@@ -239,36 +243,32 @@ static inline size_t stripctrl_locale_try_consume(
     StripCtrlCharsImpl *scc, const char *p, size_t len)
 {
     wchar_t wc;
-    mbstate_t mbs_orig = scc->mbs_in;
-    size_t consumed = mbrtowc(&wc, p, len, &scc->mbs_in);
+    int consumed = mbtowc(&wc, p, len);
 
-    if (consumed == (size_t)-2) {
+    if (consumed < 0 && len < (size_t)MB_CUR_MAX) {
         /*
-         * The buffer is too short to see the end of the multibyte
-         * character that it appears to be starting with. We return 0
-         * for 'no data consumed', restore the conversion state from
-         * before consuming the partial character, and our caller will
-         * come back when it has more data available.
+         * Perhaps the buffer is too short to see the end of the
+         * multibyte character that it appears to be starting with
+         * (mbtowc doesn't say whether that is why it failed). We
+         * return 0 for 'no data consumed', and our caller will come
+         * back when it has more data available.
          */
-        scc->mbs_in = mbs_orig;
         return 0;
     }
 
-    if (consumed == (size_t)-1) {
+    if (consumed < 0) {
         /*
          * The buffer contains an illegal multibyte sequence. There's
          * no really good way to recover from this, so we'll just
-         * reset our input state, consume a single byte without
-         * emitting anything, and hope we can resynchronise to
-         * _something_ sooner or later.
+         * consume a single byte without emitting anything, and hope
+         * we can resynchronise to _something_ sooner or later.
          */
-        memset(&scc->mbs_in, 0, sizeof(scc->mbs_in));
         return 1;
     }
 
     if (consumed == 0) {
         /*
-         * A zero wide character is encoded by the data, but mbrtowc
+         * A zero wide character is encoded by the data, but mbtowc
          * hasn't told us how many input bytes it takes. There isn't
          * really anything good we can do here, so we just advance by
          * one byte in the hope that that was the NUL.
@@ -307,11 +307,12 @@ static void stripctrl_locale_BinarySink_write(
      */
     while (scc->buflen > 0) {
         size_t to_copy = SCC_BUFSIZE - scc->buflen;
+        size_t consumed;
         if (to_copy > len)
             to_copy = len;
 
         memcpy(scc->buf + scc->buflen, p, to_copy);
-        size_t consumed = stripctrl_locale_try_consume(
+        consumed = stripctrl_locale_try_consume(
             scc, scc->buf, scc->buflen + to_copy);
 
         if (consumed >= scc->buflen) {
@@ -395,12 +396,13 @@ static void stripctrl_term_BinarySink_write(
         container_of(sccpub, StripCtrlCharsImpl, public);
 
     bool utf = in_utf(scc->term);
+    const unsigned char *p;
     if (utf != scc->last_term_utf) {
         scc->last_term_utf = utf;
         scc->utf8.state = 0;
     }
 
-    for (const unsigned char *p = (const unsigned char *)vp;
+    for (p = (const unsigned char *)vp;
          len > 0; len--, p++) {
         unsigned long t = scc->translate(scc->term, &scc->utf8, *p);
         if (t == UCSTRUNCATED) {
@@ -426,45 +428,3 @@ char *stripctrl_string_ptrlen(StripCtrlChars *sccpub, ptrlen str)
     return strbuf_to_str(out);
 }
 
-#ifdef STRIPCTRL_TEST
-
-/*
-gcc -std=c99 -DSTRIPCTRL_TEST -o scctest stripctrl.c marshal.c utils.c memory.c wcwidth.c -I . -I unix -I charset
-*/
-
-void out_of_memory(void) { fprintf(stderr, "out of memory\n"); abort(); }
-
-void stripctrl_write(BinarySink *bs, const void *vdata, size_t len)
-{
-    const uint8_t *p = vdata;
-    printf("[");
-    for (size_t i = 0; i < len; i++)
-        printf("%*s%02x", i?1:0, "", (unsigned)p[i]);
-    printf("]");
-}
-
-void stripctrl_test(StripCtrlChars *scc, ptrlen pl)
-{
-    stripctrl_write(NULL, pl.ptr, pl.len);
-    printf(" -> ");
-    put_datapl(scc, pl);
-    printf("\n");
-}
-
-int main(void)
-{
-    struct foo { BinarySink_IMPLEMENTATION; } foo;
-    BinarySink_INIT(&foo, stripctrl_write);
-    StripCtrlChars *scc = stripctrl_new(BinarySink_UPCAST(&foo), false, '?');
-    stripctrl_test(scc, PTRLEN_LITERAL("a\033[1mb"));
-    stripctrl_test(scc, PTRLEN_LITERAL("a\xC2\x9B[1mb"));
-    stripctrl_test(scc, PTRLEN_LITERAL("a\xC2\xC2[1mb"));
-    stripctrl_test(scc, PTRLEN_LITERAL("\xC3"));
-    stripctrl_test(scc, PTRLEN_LITERAL("\xA9"));
-    stripctrl_test(scc, PTRLEN_LITERAL("\xE2\x80\x8F"));
-    stripctrl_test(scc, PTRLEN_LITERAL("a\0b"));
-    stripctrl_free(scc);
-    return 0;
-}
-
-#endif /* STRIPCTRL_TEST */

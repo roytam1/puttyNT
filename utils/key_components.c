@@ -13,8 +13,9 @@ key_components *key_components_new(void)
 static void key_components_add_str(key_components *kc, const char *name,
                                    KeyComponentType type, ptrlen data)
 {
+    size_t n;
     sgrowarray(kc->components, kc->componentsize, kc->ncomponents);
-    size_t n = kc->ncomponents++;
+    n = kc->ncomponents++;
     kc->components[n].name = dupstr(name);
     kc->components[n].type = type;
     kc->components[n].str = strbuf_dup_nm(data);
@@ -41,8 +42,9 @@ void key_components_add_binary(key_components *kc,
 void key_components_add_mp(key_components *kc,
                            const char *name, mp_int *value)
 {
+    size_t n;
     sgrowarray(kc->components, kc->componentsize, kc->ncomponents);
-    size_t n = kc->ncomponents++;
+    n = kc->ncomponents++;
     kc->components[n].name = dupstr(name);
     kc->components[n].type = KCT_MPINT;
     kc->components[n].mp = mp_copy(value);
@@ -73,7 +75,8 @@ void key_components_add_copy(key_components *kc,
 
 void key_components_free(key_components *kc)
 {
-    for (size_t i = 0; i < kc->ncomponents; i++) {
+    size_t i;
+    for (i = 0; i < kc->ncomponents; i++) {
         key_component *comp = &kc->components[i];
         sfree(comp->name);
         switch (comp->type) {

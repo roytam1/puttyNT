@@ -8,8 +8,9 @@ void base64_decode_bs(BinarySink *bs, ptrlen input)
     while (get_avail(src)) {
         char b64atom[4];
         unsigned char binatom[3];
+        size_t i;
 
-        for (size_t i = 0; i < 4 ;) {
+        for (i = 0; i < 4 ;) {
             char c = get_byte(src);
             if (get_err(src))
                 c = '=';

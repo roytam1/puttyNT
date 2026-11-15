@@ -223,6 +223,7 @@ static char *x11_verify(unsigned long peer_ip, int peer_port,
         time_t tim;
         int i;
         struct XDMSeen *seen, *ret;
+        uint32_t mismatches;
 
         if (dlen != 24)
             return dupprintf("XDM-AUTHORIZATION-1 data was wrong length "
@@ -234,7 +235,7 @@ static char *x11_verify(unsigned long peer_ip, int peer_port,
 
         /* Bitwise-OR together any mismatches in the fixed parts of
          * the data, to allow checking it all at once */
-        uint32_t mismatches = 0;
+        mismatches = 0;
         /* Check non-key half of auth cookie */
         for (i = 0; i < 8; i++)
             mismatches |= auth->data[i] ^ data[i];
@@ -330,10 +331,10 @@ static void x11_sent(Plug *plug, size_t bufsize)
 }
 
 static const PlugVtable X11Connection_plugvt = {
-    .log = nullplug_log,
-    .closing = x11_closing,
-    .receive = x11_receive,
-    .sent = x11_sent,
+    /* .log = */ nullplug_log,
+    /* .closing = */ x11_closing,
+    /* .receive = */ x11_receive,
+    /* .sent = */ x11_sent,
 };
 
 static void x11_chan_free(Channel *chan);
@@ -344,28 +345,28 @@ static void x11_set_input_wanted(Channel *chan, bool wanted);
 static char *x11_log_close_msg(Channel *chan);
 
 static const ChannelVtable X11Connection_channelvt = {
-    .free = x11_chan_free,
-    .open_confirmation = chan_remotely_opened_confirmation,
-    .open_failed = chan_remotely_opened_failure,
-    .send = x11_send,
-    .send_eof = x11_send_eof,
-    .set_input_wanted = x11_set_input_wanted,
-    .log_close_msg = x11_log_close_msg,
-    .want_close = chan_default_want_close,
-    .rcvd_exit_status = chan_no_exit_status,
-    .rcvd_exit_signal = chan_no_exit_signal,
-    .rcvd_exit_signal_numeric = chan_no_exit_signal_numeric,
-    .run_shell = chan_no_run_shell,
-    .run_command = chan_no_run_command,
-    .run_subsystem = chan_no_run_subsystem,
-    .enable_x11_forwarding = chan_no_enable_x11_forwarding,
-    .enable_agent_forwarding = chan_no_enable_agent_forwarding,
-    .allocate_pty = chan_no_allocate_pty,
-    .set_env = chan_no_set_env,
-    .send_break = chan_no_send_break,
-    .send_signal = chan_no_send_signal,
-    .change_window_size = chan_no_change_window_size,
-    .request_response = chan_no_request_response,
+    /* .free = */ x11_chan_free,
+    /* .open_confirmation = */ chan_remotely_opened_confirmation,
+    /* .open_failed = */ chan_remotely_opened_failure,
+    /* .send = */ x11_send,
+    /* .send_eof = */ x11_send_eof,
+    /* .set_input_wanted = */ x11_set_input_wanted,
+    /* .log_close_msg = */ x11_log_close_msg,
+    /* .want_close = */ chan_default_want_close,
+    /* .rcvd_exit_status = */ chan_no_exit_status,
+    /* .rcvd_exit_signal = */ chan_no_exit_signal,
+    /* .rcvd_exit_signal_numeric = */ chan_no_exit_signal_numeric,
+    /* .run_shell = */ chan_no_run_shell,
+    /* .run_command = */ chan_no_run_command,
+    /* .run_subsystem = */ chan_no_run_subsystem,
+    /* .enable_x11_forwarding = */ chan_no_enable_x11_forwarding,
+    /* .enable_agent_forwarding = */ chan_no_enable_agent_forwarding,
+    /* .allocate_pty = */ chan_no_allocate_pty,
+    /* .set_env = */ chan_no_set_env,
+    /* .send_break = */ chan_no_send_break,
+    /* .send_signal = */ chan_no_send_signal,
+    /* .change_window_size = */ chan_no_change_window_size,
+    /* .request_response = */ chan_no_request_response,
 };
 
 /*
@@ -416,8 +417,9 @@ Channel *x11_new_channel(tree234 *authtree, SshChannel *c,
 
 static void x11_chan_free(Channel *chan)
 {
+    X11Connection *xconn;
     assert(chan->vt == &X11Connection_channelvt);
-    X11Connection *xconn = container_of(chan, X11Connection, chan);
+    xconn = container_of(chan, X11Connection, chan);
 
     if (xconn->auth_protocol) {
         sfree(xconn->auth_protocol);
@@ -433,8 +435,9 @@ static void x11_chan_free(Channel *chan)
 
 static void x11_set_input_wanted(Channel *chan, bool wanted)
 {
+    X11Connection *xconn;
     assert(chan->vt == &X11Connection_channelvt);
-    X11Connection *xconn = container_of(chan, X11Connection, chan);
+    xconn = container_of(chan, X11Connection, chan);
 
     xconn->input_wanted = wanted;
     if (xconn->s)
@@ -472,9 +475,11 @@ static void x11_send_init_error(struct X11Connection *xconn,
 static size_t x11_send(
     Channel *chan, bool is_stderr, const void *vdata, size_t len)
 {
+    X11Connection *xconn;
+    const char *data;
     assert(chan->vt == &X11Connection_channelvt);
-    X11Connection *xconn = container_of(chan, X11Connection, chan);
-    const char *data = (const char *)vdata;
+    xconn = container_of(chan, X11Connection, chan);
+    data = (const char *)vdata;
 
     /*
      * Read the first packet.
@@ -630,8 +635,9 @@ static size_t x11_send(
 
 static void x11_send_eof(Channel *chan)
 {
+    X11Connection *xconn;
     assert(chan->vt == &X11Connection_channelvt);
-    X11Connection *xconn = container_of(chan, X11Connection, chan);
+    xconn = container_of(chan, X11Connection, chan);
 
     if (xconn->s) {
         sk_write_eof(xconn->s);

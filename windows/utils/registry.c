@@ -5,12 +5,11 @@
 
 #include "putty.h"
 
-HKEY open_regkey_fn(bool create, bool write, HKEY hk, const char *path, ...)
+static HKEY open_regkey_va(bool create, bool write, HKEY hk,
+                           const char *path, va_list ap)
 {
     HKEY toret = NULL;
     bool hk_needs_close = false;
-    va_list ap;
-    va_start(ap, path);
 
     for (; path; path = va_arg(ap, const char *)) {
         HKEY hk_sub = NULL;
@@ -38,9 +37,38 @@ HKEY open_regkey_fn(bool create, bool write, HKEY hk, const char *path, ...)
     hk_needs_close = false;
 
   out:
-    va_end(ap);
     if (hk_needs_close)
         RegCloseKey(hk);
+    return toret;
+}
+
+HKEY open_regkey_ro(HKEY base, const char *path, ...)
+{
+    HKEY toret;
+    va_list ap;
+    va_start(ap, path);
+    toret = open_regkey_va(false, false, base, path, ap);
+    va_end(ap);
+    return toret;
+}
+
+HKEY open_regkey_rw(HKEY base, const char *path, ...)
+{
+    HKEY toret;
+    va_list ap;
+    va_start(ap, path);
+    toret = open_regkey_va(false, true, base, path, ap);
+    va_end(ap);
+    return toret;
+}
+
+HKEY create_regkey(HKEY base, const char *path, ...)
+{
+    HKEY toret;
+    va_list ap;
+    va_start(ap, path);
+    toret = open_regkey_va(true, true, base, path, ap);
+    va_end(ap);
     return toret;
 }
 
@@ -93,13 +121,15 @@ bool put_reg_dword(HKEY key, const char *name, DWORD value)
 char *get_reg_sz(HKEY key, const char *name)
 {
     DWORD type, size;
+    size_t allocsize;
+    char *toret;
 
     if (RegQueryValueEx(key, name, 0, &type, NULL,
                         &size) != ERROR_SUCCESS || type != REG_SZ)
         return NULL;                   /* not a string */
 
-    size_t allocsize = size+1;         /* allow for an extra NUL if needed */
-    char *toret = snewn(allocsize, char);
+    allocsize = size+1;                /* allow for an extra NUL if needed */
+    toret = snewn(allocsize, char);
     if (RegQueryValueEx(key, name, 0, &type, (BYTE *)toret,
                         &size) != ERROR_SUCCESS || type != REG_SZ) {
         sfree(toret);
@@ -140,13 +170,15 @@ bool put_reg_sz(HKEY key, const char *name, const char *str)
 strbuf *get_reg_multi_sz(HKEY key, const char *name)
 {
     DWORD type, size;
+    strbuf *toret;
+    void *ptr;
 
     if (RegQueryValueEx(key, name, 0, &type, NULL,
                         &size) != ERROR_SUCCESS || type != REG_MULTI_SZ)
         return NULL;                   /* not a string */
 
-    strbuf *toret = strbuf_new();
-    void *ptr = strbuf_append(toret, (size_t)size + 2);
+    toret = strbuf_new();
+    ptr = strbuf_append(toret, (size_t)size + 2);
     if (RegQueryValueEx(key, name, 0, &type, (BYTE *)ptr,
                         &size) != ERROR_SUCCESS || type != REG_MULTI_SZ) {
         strbuf_free(toret);
@@ -175,10 +207,11 @@ bool put_reg_multi_sz(HKEY key, const char *name, strbuf *str)
 
 char *get_reg_sz_simple(HKEY key, const char *name, const char *leaf)
 {
-    HKEY subkey = open_regkey_ro(key, name);
+    HKEY subkey = open_regkey_ro(key, name, NULL);
+    char *toret;
     if (!subkey)
         return NULL;
-    char *toret = get_reg_sz(subkey, leaf);
+    toret = get_reg_sz(subkey, leaf);
     RegCloseKey(subkey);
     return toret;
 }

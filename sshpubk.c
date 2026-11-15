@@ -63,6 +63,7 @@ void lf_free(LoadedFile *lf)
 
 LoadFileStatus lf_load_fp(LoadedFile *lf, FILE *fp)
 {
+    LoadFileStatus status;
     lf->len = 0;
     while (lf->len < lf->max_size) {
         size_t retd = fread(lf->data + lf->len, 1, lf->max_size - lf->len, fp);
@@ -75,7 +76,7 @@ LoadFileStatus lf_load_fp(LoadedFile *lf, FILE *fp)
         lf->len += retd;
     }
 
-    LoadFileStatus status = LF_OK;
+    status = LF_OK;
 
     if (lf->len == lf->max_size) {
         /* The file might be too long to fit in our fixed-size
@@ -92,10 +93,11 @@ LoadFileStatus lf_load_fp(LoadedFile *lf, FILE *fp)
 LoadFileStatus lf_load(LoadedFile *lf, const Filename *filename)
 {
     FILE *fp = f_open(filename, "rb", false);
+    LoadFileStatus status;
     if (!fp)
         return LF_ERROR;
 
-    LoadFileStatus status = lf_load_fp(lf, fp);
+    status = lf_load_fp(lf, fp);
     fclose(fp);
     return status;
 }
@@ -196,12 +198,12 @@ static int rsa1_load_s_internal(BinarySource *src, RSAKey *key, bool pub_only,
      */
     if (ciphertype) {
         size_t enclen = get_avail(src);
+        unsigned char keybuf[16];
         if (enclen & 7)
             goto end;
 
         buf = strbuf_dup_nm(get_data(src, enclen));
 
-        unsigned char keybuf[16];
         hash_simple(&ssh_md5, ptrlen_from_asciz(passphrase), keybuf);
         des3_decrypt_pubkey(keybuf, buf->u, enclen);
         smemclr(keybuf, sizeof(keybuf));        /* burn the evidence */
@@ -260,10 +262,11 @@ int rsa1_load_f(const Filename *filename, RSAKey *key,
                 const char *passphrase, const char **errstr)
 {
     LoadedFile *lf = lf_load_keyfile(filename, errstr);
+    int toret;
     if (!lf)
         return false;
 
-    int toret = rsa1_load_s(BinarySource_UPCAST(lf), key, passphrase, errstr);
+    toret = rsa1_load_s(BinarySource_UPCAST(lf), key, passphrase, errstr);
     lf_free(lf);
     return toret;
 }
@@ -281,10 +284,11 @@ bool rsa1_encrypted_s(BinarySource *src, char **comment)
 bool rsa1_encrypted_f(const Filename *filename, char **comment)
 {
     LoadedFile *lf = lf_load_keyfile(filename, NULL);
+    bool toret;
     if (!lf)
         return false; /* couldn't even open the file */
 
-    bool toret = rsa1_encrypted_s(BinarySource_UPCAST(lf), comment);
+    toret = rsa1_encrypted_s(BinarySource_UPCAST(lf), comment);
     lf_free(lf);
     return toret;
 }
@@ -299,11 +303,12 @@ int rsa1_loadpub_s(BinarySource *src, BinarySink *bs,
     RSAKey key;
     int ret;
     const char *error = NULL;
+    bool is_privkey_file;
 
     /* Default return if we fail. */
     ret = 0;
 
-    bool is_privkey_file = expect_signature(src, rsa1_signature);
+    is_privkey_file = expect_signature(src, rsa1_signature);
     BinarySource_REWIND(src);
 
     if (is_privkey_file) {
@@ -380,11 +385,12 @@ int rsa1_loadpub_f(const Filename *filename, BinarySink *bs,
                    char **commentptr, const char **errorstr)
 {
     LoadedFile *lf = lf_load_keyfile(filename, errorstr);
+    int toret;
     if (!lf)
         return 0;
 
-    int toret = rsa1_loadpub_s(BinarySource_UPCAST(lf), bs,
-                               commentptr, errorstr);
+    toret = rsa1_loadpub_s(BinarySource_UPCAST(lf), bs,
+                           commentptr, errorstr);
     lf_free(lf);
     return toret;
 }
@@ -454,11 +460,13 @@ strbuf *rsa1_save_sb(RSAKey *key, const char *passphrase)
 bool rsa1_save_f(const Filename *filename, RSAKey *key, const char *passphrase)
 {
     FILE *fp = f_open(filename, "wb", true);
+    strbuf *buf;
+    bool toret;
     if (!fp)
         return false;
 
-    strbuf *buf = rsa1_save_sb(key, passphrase);
-    bool toret = fwrite(buf->s, 1, buf->len, fp) == buf->len;
+    buf = rsa1_save_sb(key, passphrase);
+    toret = fwrite(buf->s, 1, buf->len, fp) == buf->len;
     if (fclose(fp))
         toret = false;
     strbuf_free(buf);
@@ -573,7 +581,8 @@ const size_t n_keyalgs = lenof(all_keyalgs);
 
 const ssh_keyalg *find_pubkey_alg_len(ptrlen name)
 {
-    for (size_t i = 0; i < n_keyalgs; i++)
+    size_t i;
+    for (i = 0; i < n_keyalgs; i++)
         if (ptrlen_eq_string(name, all_keyalgs[i]->ssh_id))
             return all_keyalgs[i];
 
@@ -610,18 +619,21 @@ static void ssh2_ppk_derive_keys(
     ptrlen *mackey, ptrlen passphrase_salt, ppk_save_parameters *params)
 {
     size_t mac_keylen;
+    BinarySource src[1];
 
     switch (fmt_version) {
       case 3: {
+        ptrlen empty;
+        uint32_t taglen;
         if (ciphertype->keylen == 0) {
             mac_keylen = 0;
             break;
         }
-        ptrlen empty = PTRLEN_LITERAL("");
+        empty = PTRLEN_LITERAL("");
 
         mac_keylen = 32;
 
-        uint32_t taglen = ciphertype->keylen + ciphertype->ivlen + mac_keylen;
+        taglen = ciphertype->keylen + ciphertype->ivlen + mac_keylen;
 
         if (params->argon2_passes_auto) {
             uint32_t passes;
@@ -645,8 +657,10 @@ static void ssh2_ppk_derive_keys(
 
       case 2:
       case 1: {
+        ssh_hash *h;
+        unsigned ctr;
         /* Counter-mode iteration to generate cipher key data. */
-        for (unsigned ctr = 0; ctr * 20 < ciphertype->keylen; ctr++) {
+        for (ctr = 0; ctr * 20 < ciphertype->keylen; ctr++) {
             ssh_hash *h = ssh_hash_new(&ssh_sha1);
             put_uint32(h, ctr);
             put_datapl(h, passphrase);
@@ -658,7 +672,7 @@ static void ssh2_ppk_derive_keys(
         put_padding(storage, ciphertype->ivlen, 0);
 
         /* Completely separate hash for the MAC key. */
-        ssh_hash *h = ssh_hash_new(&ssh_sha1);
+        h = ssh_hash_new(&ssh_sha1);
         mac_keylen = ssh_hash_alg(h)->hlen;
         put_datapl(h, PTRLEN_LITERAL("putty-private-key-file-mac-key"));
         put_datapl(h, passphrase);
@@ -671,7 +685,6 @@ static void ssh2_ppk_derive_keys(
         unreachable("bad format version in ssh2_ppk_derive_keys");
     }
 
-    BinarySource src[1];
     BinarySource_BARE_INIT_PL(src, ptrlen_from_strbuf(storage));
     *cipherkey = get_data(src, ciphertype->keylen);
     *cipheriv = get_data(src, ciphertype->ivlen);
@@ -790,6 +803,9 @@ ssh2_userkey *ppk_load_s(BinarySource *src, const char *passphrase,
         goto error;
 
     if (fmt_version >= 3 && ciphertype->keylen != 0) {
+        uint32_t taglen;
+        char *msg;
+        size_t i;
         /* Read Argon2 key derivation parameters. */
         if (!read_header(src, header) || 0 != strcmp(header, "Key-Derivation"))
             goto error;
@@ -842,7 +858,7 @@ ssh2_userkey *ppk_load_s(BinarySource *src, const char *passphrase,
             goto error;
         if ((b = read_body(src)) == NULL)
             goto error;
-        for (size_t i = 0; b[i]; i += 2) {
+        for (i = 0; b[i]; i += 2) {
             if (isxdigit((unsigned char)b[i]) && b[i+1] &&
                 isxdigit((unsigned char)b[i+1])) {
                 char s[3];
@@ -858,8 +874,8 @@ ssh2_userkey *ppk_load_s(BinarySource *src, const char *passphrase,
         sfree(b);
 
         /* Check the Argon2 parameters make sense */
-        uint32_t taglen = ciphertype->keylen + ciphertype->ivlen + 32;
-        char *msg = argon2_params_bad(
+        taglen = ciphertype->keylen + ciphertype->ivlen + 32;
+        msg = argon2_params_bad(
                 params.argon2_mem, params.argon2_passes,
                 params.argon2_parallelism, taglen,
                 passphrase_pl.len, passphrase_salt->len, 0, 0);
@@ -1329,11 +1345,12 @@ bool ppk_loadpub_f(const Filename *filename, char **algorithm, BinarySink *bs,
                    char **commentptr, const char **errorstr)
 {
     LoadedFile *lf = lf_load_keyfile(filename, errorstr);
+    bool toret;
     if (!lf)
         return false;
 
-    bool toret = ppk_loadpub_s(BinarySource_UPCAST(lf), algorithm, bs,
-                               commentptr, errorstr);
+    toret = ppk_loadpub_s(BinarySource_UPCAST(lf), algorithm, bs,
+                          commentptr, errorstr);
     lf_free(lf);
     return toret;
 }
@@ -1390,13 +1407,14 @@ bool ppk_encrypted_s(BinarySource *src, char **commentptr)
 bool ppk_encrypted_f(const Filename *filename, char **commentptr)
 {
     LoadedFile *lf = lf_load_keyfile(filename, NULL);
+    bool toret;
     if (!lf) {
         if (commentptr)
             *commentptr = NULL;
         return false;
     }
 
-    bool toret = ppk_encrypted_s(BinarySource_UPCAST(lf), commentptr);
+    toret = ppk_encrypted_s(BinarySource_UPCAST(lf), commentptr);
     lf_free(lf);
     return toret;
 }
@@ -1408,14 +1426,14 @@ int base64_lines(int datalen)
 }
 
 const ppk_save_parameters ppk_save_default_parameters = {
-    .fmt_version = 3,
+    /* .fmt_version = */ 3,
 
     /*
      * The Argon2 spec recommends the hybrid variant Argon2id, where
      * you don't have a good reason to go with the pure Argon2d or
      * Argon2i.
      */
-    .argon2_flavour = Argon2id,
+    /* .argon2_flavour = */ Argon2id,
 
     /*
      * Memory requirement for hashing a password: I don't want to set
@@ -1430,7 +1448,7 @@ const ppk_save_parameters ppk_save_default_parameters = {
      * (which was plain SHA-1), so it still imposes a limit on
      * parallel attacks on someone's key file.
      */
-    .argon2_mem = 8192,                /* require 8 Mb memory */
+    /* .argon2_mem = */ 8192,                /* require 8 Mb memory */
 
     /*
      * Automatically scale the number of Argon2 passes so that the
@@ -1439,8 +1457,9 @@ const ppk_save_parameters ppk_save_default_parameters = {
      * but for the moment, I'm trying to err on the side of not
      * stopping anyone from using the tools at all.)
      */
-    .argon2_passes_auto = true,
-    .argon2_milliseconds = 100,
+    /* .argon2_passes_auto = */ true,
+    /* .argon2_passes = */ 0,
+    /* .argon2_milliseconds = */ 100,
 
     /*
      * PuTTY's own Argon2 implementation is single-threaded. So we
@@ -1452,7 +1471,7 @@ const ppk_save_parameters ppk_save_default_parameters = {
      * least they don't get a speed advantage over us in computing
      * even one hash.)
      */
-    .argon2_parallelism = 1,
+    /* .argon2_parallelism = */ 1,
 };
 
 strbuf *ppk_save_sb(ssh2_userkey *key, const char *passphrase,
@@ -1467,6 +1486,10 @@ strbuf *ppk_save_sb(ssh2_userkey *key, const char *passphrase,
     ptrlen cipherkey, cipheriv, mackey;
     const struct ppk_cipher *ciphertype;
     unsigned char priv_mac[32];
+    ppk_save_parameters params;
+    strbuf *passphrase_salt;
+    const ssh2_macalg *macalg;
+    strbuf *out;
 
     /*
      * Fetch the key component blobs.
@@ -1503,9 +1526,9 @@ strbuf *ppk_save_sb(ssh2_userkey *key, const char *passphrase,
     /* Copy the save parameters, so that when derive_keys chooses the
      * number of Argon2 passes, it can write the result back to our
      * copy for us to retrieve. */
-    ppk_save_parameters params = *params_orig;
+    params = *params_orig;
 
-    strbuf *passphrase_salt = strbuf_new();
+    passphrase_salt = strbuf_new();
 
     if (params.fmt_version == 3) {
         /* Invent a salt for the password hash. */
@@ -1521,8 +1544,8 @@ strbuf *ppk_save_sb(ssh2_userkey *key, const char *passphrase,
                          cipher_mac_keys_blob, &cipherkey, &cipheriv, &mackey,
                          ptrlen_from_strbuf(passphrase_salt), &params);
 
-    const ssh2_macalg *macalg = (params.fmt_version == 2 ?
-                                 &ssh_hmac_sha1 : &ssh_hmac_sha256);
+    macalg = (params.fmt_version == 2 ?
+              &ssh_hmac_sha1 : &ssh_hmac_sha256);
 
     /* Now create the MAC. */
     {
@@ -1545,34 +1568,35 @@ strbuf *ppk_save_sb(ssh2_userkey *key, const char *passphrase,
                               priv_blob_encrypted, priv_encrypted_len);
     }
 
-    strbuf *out = strbuf_new_nm();
-    put_fmt(out, "PuTTY-User-Key-File-%u: %s\n",
-            params.fmt_version, ssh_key_ssh_id(key->key));
-    put_fmt(out, "Encryption: %s\n", cipherstr);
-    put_fmt(out, "Comment: %s\n", key->comment);
-    put_fmt(out, "Public-Lines: %d\n", base64_lines(pub_blob->len));
+    out = strbuf_new_nm();
+    BinarySink_put_fmt(BinarySink_UPCAST(out), "PuTTY-User-Key-File-%u: %s\n",
+                       params.fmt_version, ssh_key_ssh_id(key->key));
+    BinarySink_put_fmt(BinarySink_UPCAST(out), "Encryption: %s\n", cipherstr);
+    BinarySink_put_fmt(BinarySink_UPCAST(out), "Comment: %s\n", key->comment);
+    BinarySink_put_fmt(BinarySink_UPCAST(out), "Public-Lines: %d\n", base64_lines(pub_blob->len));
     base64_encode_bs(BinarySink_UPCAST(out), ptrlen_from_strbuf(pub_blob), 64);
     if (params.fmt_version == 3 && ciphertype->keylen != 0) {
-        put_fmt(out, "Key-Derivation: %s\n",
-                params.argon2_flavour == Argon2d ? "Argon2d" :
-                params.argon2_flavour == Argon2i ? "Argon2i" : "Argon2id");
-        put_fmt(out, "Argon2-Memory: %"PRIu32"\n", params.argon2_mem);
+        size_t i;
+        BinarySink_put_fmt(BinarySink_UPCAST(out), "Key-Derivation: %s\n",
+                           params.argon2_flavour == Argon2d ? "Argon2d" :
+                           params.argon2_flavour == Argon2i ? "Argon2i" : "Argon2id");
+        BinarySink_put_fmt(BinarySink_UPCAST(out), "Argon2-Memory: %"PRIu32"\n", params.argon2_mem);
         assert(!params.argon2_passes_auto);
-        put_fmt(out, "Argon2-Passes: %"PRIu32"\n", params.argon2_passes);
-        put_fmt(out, "Argon2-Parallelism: %"PRIu32"\n",
-                params.argon2_parallelism);
-        put_fmt(out, "Argon2-Salt: ");
-        for (size_t i = 0; i < passphrase_salt->len; i++)
-            put_fmt(out, "%02x", passphrase_salt->u[i]);
-        put_fmt(out, "\n");
+        BinarySink_put_fmt(BinarySink_UPCAST(out), "Argon2-Passes: %"PRIu32"\n", params.argon2_passes);
+        BinarySink_put_fmt(BinarySink_UPCAST(out), "Argon2-Parallelism: %"PRIu32"\n",
+                           params.argon2_parallelism);
+        BinarySink_put_fmt(BinarySink_UPCAST(out), "Argon2-Salt: ");
+        for (i = 0; i < passphrase_salt->len; i++)
+            BinarySink_put_fmt(BinarySink_UPCAST(out), "%02x", passphrase_salt->u[i]);
+        BinarySink_put_fmt(BinarySink_UPCAST(out), "\n");
     }
-    put_fmt(out, "Private-Lines: %d\n", base64_lines(priv_encrypted_len));
+    BinarySink_put_fmt(BinarySink_UPCAST(out), "Private-Lines: %d\n", base64_lines(priv_encrypted_len));
     base64_encode_bs(BinarySink_UPCAST(out),
                      make_ptrlen(priv_blob_encrypted, priv_encrypted_len), 64);
-    put_fmt(out, "Private-MAC: ");
+    BinarySink_put_fmt(BinarySink_UPCAST(out), "Private-MAC: ");
     for (i = 0; i < macalg->len; i++)
-        put_fmt(out, "%02x", priv_mac[i]);
-    put_fmt(out, "\n");
+        BinarySink_put_fmt(BinarySink_UPCAST(out), "%02x", priv_mac[i]);
+    BinarySink_put_fmt(BinarySink_UPCAST(out), "\n");
 
     strbuf_free(cipher_mac_keys_blob);
     strbuf_free(passphrase_salt);
@@ -1587,11 +1611,13 @@ bool ppk_save_f(const Filename *filename, ssh2_userkey *key,
                 const char *passphrase, const ppk_save_parameters *params)
 {
     FILE *fp = f_open(filename, "wb", true);
+    strbuf *buf;
+    bool toret;
     if (!fp)
         return false;
 
-    strbuf *buf = ppk_save_sb(key, passphrase, params);
-    bool toret = fwrite(buf->s, 1, buf->len, fp) == buf->len;
+    buf = ppk_save_sb(key, passphrase, params);
+    toret = fwrite(buf->s, 1, buf->len, fp) == buf->len;
     if (fclose(fp))
         toret = false;
     strbuf_free(buf);
@@ -1612,8 +1638,13 @@ char *ppk_params_bad(const ppk_save_parameters *params, bool encrypted,
     if (params->fmt_version == 3 && encrypted) {
         const struct ppk_cipher *ciphertype = &ppk_cipher_aes256_cbc;
         uint32_t taglen = ciphertype->keylen + ciphertype->ivlen + 32;
+        /* NT port: upstream reads argon2_passes from a union that
+         * holds argon2_milliseconds when argon2_passes_auto is set.
+         * Here they are two fields, so take the one in use. */
+        uint32_t passes = params->argon2_passes_auto ?
+            params->argon2_milliseconds : params->argon2_passes;
         char *msg = argon2_params_bad(
-                params->argon2_mem, params->argon2_passes,
+                params->argon2_mem, passes,
                 params->argon2_parallelism, taglen,
                 passphrase_len, params->saltlen, 0, 0);
         if (msg)
@@ -1757,20 +1788,22 @@ void ssh2_write_pubkey(FILE *fp, const char *comment,
 static void ssh2_fingerprint_blob_md5(ptrlen blob, strbuf *sb)
 {
     unsigned char digest[16];
+    unsigned i;
 
     hash_simple(&ssh_md5, blob, digest);
-    for (unsigned i = 0; i < 16; i++)
-        put_fmt(sb, "%02x%s", digest[i], i==15 ? "" : ":");
+    for (i = 0; i < 16; i++)
+        BinarySink_put_fmt(BinarySink_UPCAST(sb), "%02x%s", digest[i], i==15 ? "" : ":");
 }
 
 static void ssh2_fingerprint_blob_sha256(ptrlen blob, strbuf *sb)
 {
     unsigned char digest[32];
+    unsigned i;
     hash_simple(&ssh_sha256, blob, digest);
 
     put_datapl(sb, PTRLEN_LITERAL("SHA256:"));
 
-    for (unsigned i = 0; i < 32; i += 3) {
+    for (i = 0; i < 32; i += 3) {
         char buf[5];
         unsigned len = 32-i;
         if (len > 3)
@@ -1793,13 +1826,14 @@ char *ssh2_fingerprint_blob(ptrlen blob, FingerprintType fptype)
      * blob, in which case we return only the hash.
      */
     BinarySource src[1];
+    ptrlen algname;
     BinarySource_BARE_INIT_PL(src, blob);
-    ptrlen algname = get_string(src);
+    algname = get_string(src);
     if (!get_err(src)) {
         const ssh_keyalg *alg = find_pubkey_alg_len(algname);
         if (alg) {
             int bits = ssh_key_public_bits(alg, blob);
-            put_fmt(sb, "%.*s %d ", PTRLEN_PRINTF(algname), bits);
+            BinarySink_put_fmt(BinarySink_UPCAST(sb), "%.*s %d ", PTRLEN_PRINTF(algname), bits);
 
             if (!ssh_fptype_is_cert(fptype) && alg->is_certificate) {
                 ssh_key *key = ssh_key_new_pub(alg, blob);
@@ -1812,7 +1846,7 @@ char *ssh2_fingerprint_blob(ptrlen blob, FingerprintType fptype)
                 }
             }
         } else {
-            put_fmt(sb, "%.*s ", PTRLEN_PRINTF(algname));
+            BinarySink_put_fmt(BinarySink_UPCAST(sb), "%.*s ", PTRLEN_PRINTF(algname));
         }
     }
 
@@ -1835,16 +1869,22 @@ char *ssh2_fingerprint_blob(ptrlen blob, FingerprintType fptype)
 
 char *ssh2_double_fingerprint_blob(ptrlen blob, FingerprintType fptype)
 {
+    char *fp;
+    char *p;
+    char *hash;
+    char *fpc;
+    char *pc;
+    char *hashc;
     if (ssh_fptype_is_cert(fptype))
         fptype = ssh_fptype_from_cert(fptype);
 
-    char *fp = ssh2_fingerprint_blob(blob, fptype);
-    char *p = strrchr(fp, ' ');
-    char *hash = p ? p + 1 : fp;
+    fp = ssh2_fingerprint_blob(blob, fptype);
+    p = strrchr(fp, ' ');
+    hash = p ? p + 1 : fp;
 
-    char *fpc = ssh2_fingerprint_blob(blob, ssh_fptype_to_cert(fptype));
-    char *pc = strrchr(fpc, ' ');
-    char *hashc = pc ? pc + 1 : fpc;
+    fpc = ssh2_fingerprint_blob(blob, ssh_fptype_to_cert(fptype));
+    pc = strrchr(fpc, ' ');
+    hashc = pc ? pc + 1 : fpc;
 
     if (strcmp(hash, hashc)) {
         char *tmp = dupprintf("%s (with certificate: %s)", fp, hashc);
@@ -1859,7 +1899,8 @@ char *ssh2_double_fingerprint_blob(ptrlen blob, FingerprintType fptype)
 char **ssh2_all_fingerprints_for_blob(ptrlen blob)
 {
     char **fps = snewn(SSH_N_FPTYPES, char *);
-    for (unsigned i = 0; i < SSH_N_FPTYPES; i++)
+    unsigned i;
+    for (i = 0; i < SSH_N_FPTYPES; i++)
         fps[i] = ssh2_fingerprint_blob(blob, i);
     return fps;
 }
@@ -1867,8 +1908,9 @@ char **ssh2_all_fingerprints_for_blob(ptrlen blob)
 char *ssh2_fingerprint(ssh_key *data, FingerprintType fptype)
 {
     strbuf *blob = strbuf_new();
+    char *ret;
     ssh_key_public_blob(data, BinarySink_UPCAST(blob));
-    char *ret = ssh2_fingerprint_blob(ptrlen_from_strbuf(blob), fptype);
+    ret = ssh2_fingerprint_blob(ptrlen_from_strbuf(blob), fptype);
     strbuf_free(blob);
     return ret;
 }
@@ -1876,8 +1918,9 @@ char *ssh2_fingerprint(ssh_key *data, FingerprintType fptype)
 char *ssh2_double_fingerprint(ssh_key *data, FingerprintType fptype)
 {
     strbuf *blob = strbuf_new();
+    char *ret;
     ssh_key_public_blob(data, BinarySink_UPCAST(blob));
-    char *ret = ssh2_double_fingerprint_blob(ptrlen_from_strbuf(blob), fptype);
+    ret = ssh2_double_fingerprint_blob(ptrlen_from_strbuf(blob), fptype);
     strbuf_free(blob);
     return ret;
 }
@@ -1885,15 +1928,17 @@ char *ssh2_double_fingerprint(ssh_key *data, FingerprintType fptype)
 char **ssh2_all_fingerprints(ssh_key *data)
 {
     strbuf *blob = strbuf_new();
+    char **ret;
     ssh_key_public_blob(data, BinarySink_UPCAST(blob));
-    char **ret = ssh2_all_fingerprints_for_blob(ptrlen_from_strbuf(blob));
+    ret = ssh2_all_fingerprints_for_blob(ptrlen_from_strbuf(blob));
     strbuf_free(blob);
     return ret;
 }
 
 void ssh2_free_all_fingerprints(char **fps)
 {
-    for (unsigned i = 0; i < SSH_N_FPTYPES; i++)
+    unsigned i;
+    for (i = 0; i < SSH_N_FPTYPES; i++)
         sfree(fps[i]);
     sfree(fps);
 }
@@ -1935,7 +1980,7 @@ static int key_type_s_internal(BinarySource *src)
         return SSH_KEYTYPE_SSH1_PUBLIC;
 
     BinarySource_REWIND(src);
-    if (find_pubkey_alg_len(get_nonchars(src, " \n")) > 0 &&
+    if (find_pubkey_alg_len(get_nonchars(src, " \n")) != NULL &&
         get_chars(src, " ").len == 1 &&
         get_chars(src, "0123456789ABCDEFGHIJKLMNOPQRSTUV"
                   "WXYZabcdefghijklmnopqrstuvwxyz+/=").len > 0 &&
@@ -1955,12 +2000,13 @@ int key_type_s(BinarySource *src)
 int key_type(const Filename *filename)
 {
     LoadedFile *lf = lf_new(1024);
+    int toret;
     if (lf_load(lf, filename) == LF_ERROR) {
         lf_free(lf);
         return SSH_KEYTYPE_UNOPENABLE;
     }
 
-    int toret = key_type_s(BinarySource_UPCAST(lf));
+    toret = key_type_s(BinarySource_UPCAST(lf));
     lf_free(lf);
     return toret;
 }

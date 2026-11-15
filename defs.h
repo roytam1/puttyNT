@@ -22,35 +22,57 @@
 #error Do not compile this code base with NDEBUG defined!
 #endif
 
-#if HAVE_CMAKE_H
-#include "cmake.h"
-#endif
+#include "ntconfig.h"
 
 #include <stddef.h>
-#include <stdint.h>
 #include <stdio.h>                     /* for __MINGW_PRINTF_FORMAT */
-#include <stdbool.h>
+#include <limits.h>
 
-#if defined _MSC_VER && _MSC_VER < 1800
-/* Work around lack of inttypes.h and strtoumax in older MSVC */
-#define PRIx32 "x"
+/*
+ * The compilers for NT 3.1 to 4.0 (Microsoft C 8.00 to Visual C++
+ * 4.2) are C89 compilers: they have no stdint.h, inttypes.h or
+ * stdbool.h, and no inline. So what PuTTY uses from those is defined
+ * here. int, long and pointers are 32 bits on every NT CPU (x86,
+ * MIPS, Alpha and PowerPC), and so is size_t.
+ */
+typedef signed char int8_t;
+typedef unsigned char uint8_t;
+typedef unsigned short uint16_t;
+typedef unsigned int uint32_t;
+typedef unsigned long uintmax_t;
+#ifndef _UINTPTR_T_DEFINED
+#define _UINTPTR_T_DEFINED
+typedef unsigned int uintptr_t;
+#endif
+
+/*
+ * A 64-bit unsigned integer, held as two 32-bit halves, because the
+ * NT 3.1 compilers have no 64-bit integer type. misc.h has the
+ * functions that do arithmetic on it.
+ */
+typedef struct uint64 { uint32_t hi, lo; } uint64;
+
+#define UINT32_MAX 0xFFFFFFFFU
+#ifndef SIZE_MAX
+#define SIZE_MAX UINT_MAX
+#endif
+
 #define PRIu32 "u"
-#define PRIu64 "I64u"
-#define PRIdMAX "I64d"
-#define PRIXMAX "I64X"
-#define SCNu64 "I64u"
-#define SIZEx "Ix"
-#define SIZEu "Iu"
-uintmax_t strtoumax(const char *nptr, char **endptr, int base);
-/* Also, define a LEGACY_WINDOWS flag to enable other workarounds */
-#define LEGACY_WINDOWS
-#else
-#include <inttypes.h>
-/* Because we still support older MSVC libraries which don't recognise the
- * standard C "z" modifier for size_t-sized integers, we must use an
- * inttypes.h-style macro for those */
-#define SIZEx "zx"
-#define SIZEu "zu"
+#define PRIx32 "x"
+#define SIZEu "u"                      /* printf formats for size_t */
+#define SIZEx "x"
+
+/*
+ * A bool is an int. Every conversion to bool in this code base is
+ * written out ("!= 0" and so on), so a bool holds only 0 or 1, as a
+ * C99 _Bool would.
+ */
+typedef int bool;
+#define true 1
+#define false 0
+
+#ifdef _MSC_VER
+#define inline __inline
 #endif
 
 #if defined __GNUC__ || defined __clang__
@@ -244,10 +266,8 @@ struct unicode_data;
 
 #if defined __GNUC__ || defined __clang__
 #define NORETURN __attribute__((__noreturn__))
-#elif defined _MSC_VER
-#define NORETURN __declspec(noreturn)
 #else
-#define NORETURN
+#define NORETURN          /* Microsoft C has it only from Visual C++ 6 */
 #endif
 
 /*
@@ -282,6 +302,82 @@ struct unicode_data;
  */
 struct ca_options {
     bool permit_rsa_sha1, permit_rsa_sha256, permit_rsa_sha512;
+};
+
+/*
+ * The two structures below belong with the Seat in putty.h. They are
+ * here because headers such as ssh.h declare functions taking them
+ * by value, and the Microsoft C compilers of 1993-1996 don't accept a
+ * parameter of a struct type that hasn't been defined yet.
+ */
+
+/*
+ * This structure type wraps a Seat pointer, in a way that has no
+ * purpose except to be a different type.
+ *
+ * The Seat wrapper functions that present interactive prompts all
+ * expect one of these in place of their ordinary Seat pointer. You
+ * get one by calling interactor_announce (in putty.h), which will
+ * print a message (if not already done) identifying the Interactor
+ * that originated the prompt.
+ *
+ * This arranges that the C type system itself will check that no call
+ * to any of those Seat methods has omitted the mandatory call to
+ * interactor_announce beforehand.
+ */
+struct InteractionReadySeat {
+    Seat *seat;
+};
+
+/*
+ * The result of an interactive request from a backend to a Seat.
+ */
+/* Enum of result types in SeatPromptResult below */
+typedef enum SeatPromptResultKind {
+    /* Answer not yet available at all; either try again later or wait
+     * for a callback (depending on the request's API) */
+    SPRK_INCOMPLETE,
+
+    /* We're abandoning the connection because the user interactively
+     * told us to. (Hence, no need to present an error message
+     * telling the user we're doing that: they already know.) */
+    SPRK_USER_ABORT,
+
+    /* We're abandoning the connection for some other reason (e.g. we
+     * were unable to present the prompt at all, or a batch-mode
+     * configuration told us to give the answer no). This may
+     * ultimately have stemmed from some user configuration, but they
+     * didn't _tell us right now_ to abandon this connection, so we
+     * still need to inform them that we've done so. */
+    SPRK_SW_ABORT,
+
+    /* We're proceeding with the connection and have all requested
+     * information (if any) */
+    SPRK_OK
+} SeatPromptResultKind;
+
+/* Small struct to present the results of interactive requests from
+ * backend to Seat (see below) */
+struct SeatPromptResult {
+    SeatPromptResultKind kind;
+
+    /*
+     * In the case of SPRK_SW_ABORT, the frontend provides an error
+     * message to present to the user. But dynamically allocating it
+     * up front would mean having to make sure it got freed at any
+     * call site where one of these structs is received (and freed
+     * _once_ no matter how many times the struct is copied). So
+     * instead we provide a function that will generate the error
+     * message into a BinarySink.
+     */
+    void (*errfn)(SeatPromptResult, BinarySink *);
+
+    /*
+     * And some fields the error function can use to construct the
+     * message (holding, e.g. an OS error code).
+     */
+    const char *errdata_lit; /* statically allocated, e.g. a string literal */
+    unsigned errdata_u;
 };
 
 #endif /* PUTTY_DEFS_H */

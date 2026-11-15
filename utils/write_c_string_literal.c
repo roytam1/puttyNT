@@ -9,7 +9,8 @@
 
 void BinarySink_put_c_string_literal(BinarySink *bs, ptrlen str)
 {
-    for (const char *p = str.ptr; p < (const char *)str.ptr + str.len; p++) {
+    const char *p;
+    for (p = str.ptr; p < (const char *)str.ptr + str.len; p++) {
         char c = *p;
 
         if (c == '\n')
@@ -27,7 +28,7 @@ void BinarySink_put_c_string_literal(BinarySink *bs, ptrlen str)
         else if (c >= 32 && c <= 126)
             put_byte(bs, c);
         else
-            put_fmt(bs, "\\%03o", (unsigned)c & 0xFFU);
+            BinarySink_put_fmt(BinarySink_UPCAST(bs), "\\%03o", (unsigned)c & 0xFFU);
     }
 }
 

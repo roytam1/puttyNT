@@ -3,16 +3,18 @@
 void base64_encode_bs(BinarySink *bs, ptrlen input, int cpl)
 {
     BinarySource src[1];
+    int linelen;
     BinarySource_BARE_INIT_PL(src, input);
-    int linelen = 0;
+    linelen = 0;
 
     while (get_avail(src)) {
         size_t n = get_avail(src) < 3 ? get_avail(src) : 3;
         ptrlen binatom = get_data(src, n);
 
         char b64atom[4];
+        size_t i;
         base64_encode_atom(binatom.ptr, binatom.len, b64atom);
-        for (size_t i = 0; i < 4; i++) {
+        for (i = 0; i < 4; i++) {
             if (cpl > 0 && linelen >= cpl) {
                 linelen = 0;
                 put_byte(bs, '\n');

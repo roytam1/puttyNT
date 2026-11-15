@@ -480,22 +480,29 @@ static reverse_mapping *get_existing_reverse_mapping(int codepage)
 static reverse_mapping *make_reverse_mapping_inner(
     int codepage, const wchar_t *mapping)
 {
+    reverse_mapping *rmap;
+    reverse_mapping *added;
+    size_t i;
     if (!reverse_mappings)
         reverse_mappings = newtree234(reverse_mapping_cmp);
 
-    reverse_mapping *rmap = snew(reverse_mapping);
+    rmap = snew(reverse_mapping);
     rmap->blocks = snewn(256, char *);
     memset(rmap->blocks, 0, 256 * sizeof(char *));
 
-    for (size_t i = 0; i < 256; i++) {
+    for (i = 0; i < 256; i++) {
+        size_t chr;
+        size_t block;
+        size_t index;
         /* These special kinds of value correspond to no Unicode character */
         if (DIRECT_CHAR(mapping[i]))
             continue;
         if (DIRECT_FONT(mapping[i]))
             continue;
 
-        size_t chr = mapping[i];
-        size_t block = chr >> 8, index = chr & 0xFF;
+        chr = mapping[i];
+        block = chr >> 8;
+        index = chr & 0xFF;
 
         if (!rmap->blocks[block]) {
             rmap->blocks[block] = snewn(256, char);
@@ -505,7 +512,7 @@ static reverse_mapping *make_reverse_mapping_inner(
     }
 
     rmap->codepage = codepage;
-    reverse_mapping *added = add234(reverse_mappings, rmap);
+    added = add234(reverse_mappings, rmap);
     assert(added == rmap); /* we already checked it wasn't already in there */
     return added;
 }
@@ -526,6 +533,8 @@ static reverse_mapping *get_reverse_mapping(int codepage)
      */
 
     reverse_mapping *rmap = get_existing_reverse_mapping(codepage);
+    const struct cp_list_item *cp;
+    wchar_t mapping[256];
     if (rmap)
         return rmap;
 
@@ -533,11 +542,10 @@ static reverse_mapping *get_reverse_mapping(int codepage)
         return NULL;
     if (codepage >= 65536 + lenof(cp_list))
         return NULL;
-    const struct cp_list_item *cp = &cp_list[codepage - 65536];
+    cp = &cp_list[codepage - 65536];
     if (!cp->cp_table)
         return NULL;
 
-    wchar_t mapping[256];
     get_unitab(codepage, mapping, 0);
     return make_reverse_mapping_inner(codepage, mapping);
 }
@@ -609,14 +617,14 @@ void init_ucs(Conf *conf, struct unicode_data *ucsdata)
     }
 
 #if 0
-    debug("Line cp%d, Font cp%d%s\n", ucsdata->line_codepage,
-          ucsdata->font_codepage, ucsdata->dbcs_screenfont ? " DBCS" : "");
+    debug(("Line cp%d, Font cp%d%s\n", ucsdata->line_codepage,
+           ucsdata->font_codepage, ucsdata->dbcs_screenfont ? " DBCS" : ""));
 
     for (i = 0; i < 256; i += 16) {
         for (j = 0; j < 16; j++) {
-            debug("%04x%s", ucsdata->unitab_line[i + j], j == 15 ? "" : ",");
+            debug(("%04x%s", ucsdata->unitab_line[i + j], j == 15 ? "" : ","));
         }
-        debug("\n");
+        debug(("\n"));
     }
 #endif
 
@@ -1207,6 +1215,12 @@ const char *cp_enumerate(int index)
     return cp_list[index].name;
 }
 
+/* Windows NT 3.1 has no MB_ERR_INVALID_CHARS: there, a byte with no
+ * Unicode equivalent becomes the code page's default character */
+#ifndef MB_ERR_INVALID_CHARS
+#define MB_ERR_INVALID_CHARS 0
+#endif
+
 void get_unitab(int codepage, wchar_t *unitab, int ftype)
 {
     char tbuf[4];
@@ -1248,17 +1262,19 @@ bool BinarySink_put_wc_to_mb(
     BinarySink *bs, int codepage, const wchar_t *wcstr, int wclen,
     const char *defchr)
 {
+    reverse_mapping *rmap;
     if (!wclen)
         return true;
 
-    reverse_mapping *rmap = get_reverse_mapping(codepage);
+    rmap = get_reverse_mapping(codepage);
 
     if (rmap) {
         size_t defchr_len = 0;
         bool defchr_len_known = false;
+        size_t i;
 
         /* Do this by array lookup if we can. */
-        for (size_t i = 0; i < wclen; i++) {
+        for (i = 0; i < wclen; i++) {
             wchar_t ch = wcstr[i];
             int by;
             const char *blk;
@@ -1327,7 +1343,6 @@ bool BinarySink_put_wc_to_mb(
             return true;
     }
 
-#ifdef LEGACY_WINDOWS
     /*
      * Fallback for legacy platforms too old to support UTF-8: if
      * the codepage is UTF-8, we can do the translation ourselves.
@@ -1344,7 +1359,6 @@ bool BinarySink_put_wc_to_mb(
 
         return true;
     }
-#endif
 
     /* No other fallbacks are available */
     return false;
@@ -1360,18 +1374,22 @@ bool BinarySink_put_mb_to_wc(
         /* Character set not known to Windows, so we'll have to
          * translate it ourself */
         size_t index = codepage - 65536;
+        const struct cp_list_item *cp;
+        unsigned tablebase;
         if (index >= lenof(cp_list))
             return false;
-        const struct cp_list_item *cp = &cp_list[index];
+        cp = &cp_list[index];
         if (!cp->cp_table)
             return false;
 
-        unsigned tablebase = 256 - cp->cp_size;
+        tablebase = 256 - cp->cp_size;
 
         while (mblen > 0) {
+            unsigned c;
+            wchar_t wc;
             mblen--;
-            unsigned c = 0xFF & *mbstr++;
-            wchar_t wc = (c < tablebase ? c : cp->cp_table[c - tablebase]);
+            c = 0xFF & *mbstr++;
+            wc = (c < tablebase ? c : cp->cp_table[c - tablebase]);
             put_data(bs, &wc, sizeof(wc));
         }
 
@@ -1409,7 +1427,6 @@ bool BinarySink_put_mb_to_wc(
             return true;
     }
 
-#ifdef LEGACY_WINDOWS
     /*
      * Fallback for legacy platforms too old to support UTF-8: if the
      * codepage is UTF-8, we can do the translation ourselves.
@@ -1426,13 +1443,33 @@ bool BinarySink_put_mb_to_wc(
 
         return true;
     }
-#endif
 
     /* No other fallbacks are available */
     return false;
 }
 
+/*
+ * IsDBCSLeadByteEx came with Windows NT 3.5, so look the byte up in
+ * the lead byte ranges of the code page. Those are kept for the last
+ * code page asked about, since terminal output asks for every byte.
+ */
 bool is_dbcs_leadbyte(int codepage, char byte)
 {
-    return IsDBCSLeadByteEx(codepage, byte);
+    static bool cached = false;
+    static int cached_codepage;
+    static CPINFO info;
+    unsigned char b = (unsigned char)byte;
+    int i;
+
+    if (!cached || codepage != cached_codepage) {
+        if (!GetCPInfo(codepage, &info))
+            memset(&info, 0, sizeof(info));    /* no lead bytes */
+        cached = true;
+        cached_codepage = codepage;
+    }
+
+    for (i = 0; i + 1 < MAX_LEADBYTES && info.LeadByte[i]; i += 2)
+        if (b >= info.LeadByte[i] && b <= info.LeadByte[i + 1])
+            return true;
+    return false;
 }

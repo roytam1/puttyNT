@@ -8,7 +8,9 @@
 
 void percent_decode_bs(BinarySink *bs, ptrlen data)
 {
-    for (const char *p = data.ptr, *e = ptrlen_end(data); p < e; p++) {
+    const char *p;
+    const char *e;
+    for (p = data.ptr, e = ptrlen_end(data); p < e; p++) {
         char c = *p;
         if (c == '%' && e-p >= 3 &&
             isxdigit((unsigned char)p[1]) &&

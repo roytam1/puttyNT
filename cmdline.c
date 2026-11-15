@@ -197,6 +197,7 @@ int cmdline_process_param(CmdlineArg *arg, CmdlineArg *nextarg,
     const char *p = cmdline_arg_to_str(arg);
     const char *value_utf8 = cmdline_arg_to_utf8(nextarg);
     const char *value = cmdline_arg_to_str(nextarg);
+    size_t i;
 
     if (p[0] != '-') {
         if (need_save < 0)
@@ -433,7 +434,7 @@ int cmdline_process_param(CmdlineArg *arg, CmdlineArg *nextarg,
         loaded_session = true;
         return 2;
     }
-    for (size_t i = 0; backends[i]; i++) {
+    for (i = 0; backends[i]; i++) {
         if (p[0] == '-' && !strcmp(p+1, backends[i]->id)) {
             RETURN(1);
             UNAVAILABLE_IN(TOOLTYPE_NONNETWORK);
@@ -571,6 +572,8 @@ int cmdline_process_param(CmdlineArg *arg, CmdlineArg *nextarg,
     if (!strcmp(p, "-m")) {
         Filename *filename;
         FILE *fp;
+        strbuf *command;
+        char readbuf[4096];
 
         RETURN(2);
         UNAVAILABLE_IN(TOOLTYPE_FILETRANSFER | TOOLTYPE_NONNETWORK);
@@ -586,8 +589,7 @@ int cmdline_process_param(CmdlineArg *arg, CmdlineArg *nextarg,
             return ret;
         }
         filename_free(filename);
-        strbuf *command = strbuf_new();
-        char readbuf[4096];
+        command = strbuf_new();
         while (1) {
             size_t nread = fread(readbuf, 1, sizeof(readbuf), fp);
             if (nread == 0)
@@ -759,19 +761,21 @@ int cmdline_process_param(CmdlineArg *arg, CmdlineArg *nextarg,
     }
 
     if (!strcmp(p, "-i")) {
+        Filename *fn;
         RETURN(2);
         UNAVAILABLE_IN(TOOLTYPE_NONNETWORK);
         SAVEABLE(0);
-        Filename *fn = cmdline_arg_to_filename(nextarg);
+        fn = cmdline_arg_to_filename(nextarg);
         conf_set_filename(conf, CONF_keyfile, fn);
         filename_free(fn);
     }
 
     if (!strcmp(p, "-cert")) {
+        Filename *fn;
         RETURN(2);
         UNAVAILABLE_IN(TOOLTYPE_NONNETWORK);
         SAVEABLE(0);
-        Filename *fn = cmdline_arg_to_filename(nextarg);
+        fn = cmdline_arg_to_filename(nextarg);
         conf_set_filename(conf, CONF_detached_cert, fn);
         filename_free(fn);
     }
@@ -875,11 +879,12 @@ int cmdline_process_param(CmdlineArg *arg, CmdlineArg *nextarg,
     }
 
     if (!strcmp(p, "-sessionlog")) {
+        Filename *fn;
         RETURN(2);
         UNAVAILABLE_IN(TOOLTYPE_FILETRANSFER);
         /* but available even in TOOLTYPE_NONNETWORK, cf pterm "-log" */
         SAVEABLE(0);
-        Filename *fn = cmdline_arg_to_filename(nextarg);
+        fn = cmdline_arg_to_filename(nextarg);
         conf_set_filename(conf, CONF_logfilename, fn);
         conf_set_int(conf, CONF_logtype, LGTYP_DEBUG);
         filename_free(fn);
@@ -887,10 +892,11 @@ int cmdline_process_param(CmdlineArg *arg, CmdlineArg *nextarg,
 
     if (!strcmp(p, "-sshlog") ||
         !strcmp(p, "-sshrawlog")) {
+        Filename *fn;
         RETURN(2);
         UNAVAILABLE_IN(TOOLTYPE_NONNETWORK);
         SAVEABLE(0);
-        Filename *fn = cmdline_arg_to_filename(nextarg);
+        fn = cmdline_arg_to_filename(nextarg);
         conf_set_filename(conf, CONF_logfilename, fn);
         conf_set_int(conf, CONF_logtype,
                      !strcmp(p, "-sshlog") ? LGTYP_PACKETS :
@@ -963,8 +969,10 @@ int cmdline_process_param(CmdlineArg *arg, CmdlineArg *nextarg,
 
 void cmdline_run_saved(Conf *conf)
 {
-    for (size_t pri = 0; pri < NPRIORITIES; pri++) {
-        for (size_t i = 0; i < saves[pri].nsaved; i++)
+    size_t pri;
+    for (pri = 0; pri < NPRIORITIES; pri++) {
+        size_t i;
+        for (i = 0; i < saves[pri].nsaved; i++)
             cmdline_process_param(saves[pri].params[i].p,
                                   saves[pri].params[i].value, 0, conf);
         saves[pri].nsaved = 0;

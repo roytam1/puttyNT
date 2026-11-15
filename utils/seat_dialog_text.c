@@ -16,7 +16,8 @@ SeatDialogText *seat_dialog_text_new(void)
 
 void seat_dialog_text_free(SeatDialogText *sdt)
 {
-    for (size_t i = 0; i < sdt->nitems; i++)
+    size_t i;
+    for (i = 0; i < sdt->nitems; i++)
         sfree(sdt->items[i].text);
     sfree(sdt->items);
     sfree(sdt);
@@ -25,8 +26,9 @@ void seat_dialog_text_free(SeatDialogText *sdt)
 static void seat_dialog_text_append_v(
     SeatDialogText *sdt, SeatDialogTextType type, const char *fmt, va_list ap)
 {
+    SeatDialogTextItem *item;
     sgrowarray(sdt->items, sdt->itemsize, sdt->nitems);
-    SeatDialogTextItem *item = &sdt->items[sdt->nitems++];
+    item = &sdt->items[sdt->nitems++];
     item->type = type;
     item->text = dupvprintf(fmt, ap);
 }

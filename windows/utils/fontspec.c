@@ -44,5 +44,5 @@ FontSpec *fontspec_deserialise(BinarySource *src)
     unsigned isbold = get_uint32(src);
     unsigned height = get_uint32(src);
     unsigned charset = get_uint32(src);
-    return fontspec_new(name, isbold, height, charset);
+    return fontspec_new(name, isbold != 0, height, charset);
 }

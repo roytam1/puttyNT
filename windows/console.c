@@ -75,16 +75,12 @@ static void console_write(BinarySink *bs, const void *data, size_t len);
 static ConsoleIO *conio_setup(bool utf8, DWORD fallback_output)
 {
     ConsoleIO *conio = snew(ConsoleIO);
+    DWORD dummy;
 
     conio->hin = conio->hout = INVALID_HANDLE_VALUE;
     conio->need_close_hin = conio->need_close_hout = false;
 
-    init_winver();
-    if (osPlatformId == VER_PLATFORM_WIN32_WINDOWS ||
-        osPlatformId == VER_PLATFORM_WIN32s)
-        conio->utf8 = false;           /* no Unicode support at all */
-    else
-        conio->utf8 = utf8 && conio_use_utf8;
+    conio->utf8 = utf8 && conio_use_utf8;
 
     /*
      * First try opening the console itself, so that prompts will go
@@ -128,9 +124,8 @@ static ConsoleIO *conio_setup(bool utf8, DWORD fallback_output)
     if (conio->hout == INVALID_HANDLE_VALUE)
         conio->hout = GetStdHandle(fallback_output);
 
-    DWORD dummy;
-    conio->hin_is_console = GetConsoleMode(conio->hin, &dummy);
-    conio->hout_is_console = GetConsoleMode(conio->hout, &dummy);
+    conio->hin_is_console = GetConsoleMode(conio->hin, &dummy) != 0;
+    conio->hout_is_console = GetConsoleMode(conio->hout, &dummy) != 0;
 
     BinarySink_INIT(conio, console_write);
 
@@ -206,10 +201,12 @@ static bool console_read_line_to_strbuf(ConsoleIO *conio, bool echo,
                                         strbuf *sb)
 {
     DWORD savemode;
+    bool toret;
 
     if (conio->hin_is_console) {
+        DWORD newmode;
         GetConsoleMode(conio->hin, &savemode);
-        DWORD newmode = savemode | ENABLE_PROCESSED_INPUT | ENABLE_LINE_INPUT;
+        newmode = savemode | ENABLE_PROCESSED_INPUT | ENABLE_LINE_INPUT;
         if (!echo)
             newmode &= ~ENABLE_ECHO_INPUT;
         else
@@ -218,7 +215,7 @@ static bool console_read_line_to_strbuf(ConsoleIO *conio, bool echo,
         SetConsoleMode(conio->hin, newmode);
     }
 
-    bool toret = false;
+    toret = false;
 
     while (true) {
         if (ptrlen_endswith(ptrlen_from_strbuf(sb),
@@ -249,10 +246,10 @@ static bool console_read_line_to_strbuf(ConsoleIO *conio, bool echo,
                  */
                 char buf[4096];
                 DWORD nread;
+                buffer_sink bs[1];
                 if (!ReadFile(conio->hin, buf, lenof(buf), &nread, NULL))
                     goto out;
 
-                buffer_sink bs[1];
                 buffer_sink_init(bs, wbuf, sizeof(wbuf) - sizeof(wchar_t));
                 put_mb_to_wc(bs, CP_ACP, buf, nread);
                 assert(!bs->overflowed);
@@ -306,10 +303,10 @@ typedef enum {
 
 static ResponseType parse_and_free_response(char *line)
 {
+    ResponseType toret;
     if (!line)
         return RESPONSE_ABANDON;
 
-    ResponseType toret;
     switch (line[0]) {
         /* In case of misplaced reflexes from another program,
          * recognise 'q' as 'abandon connection' as well as the
@@ -352,9 +349,10 @@ static const char *console_print_seatdialogtext(
     ConsoleIO *conio, SeatDialogText *text)
 {
     const char *prompt = NULL;
+    SeatDialogTextItem *item;
+    SeatDialogTextItem *end;
 
-    for (SeatDialogTextItem *item = text->items,
-             *end = item+text->nitems; item < end; item++) {
+    for (item = text->items, end = item+text->nitems; item < end; item++) {
         switch (item->type) {
           case SDT_PARA:
             wordwrap(BinarySink_UPCAST(conio),
@@ -362,15 +360,15 @@ static const char *console_print_seatdialogtext(
             put_byte(conio, '\n');
             break;
           case SDT_DISPLAY:
-            put_fmt(conio, "  %s\n", item->text);
+            BinarySink_put_fmt(BinarySink_UPCAST(conio), "  %s\n", item->text);
             break;
           case SDT_SCARY_HEADING:
             /* Can't change font size or weight in this context */
-            put_fmt(conio, "%s\n", item->text);
+            BinarySink_put_fmt(BinarySink_UPCAST(conio), "%s\n", item->text);
             break;
           case SDT_BATCH_ABORT:
             if (console_batch_mode) {
-                put_fmt(conio, "%s\n", item->text);
+                BinarySink_put_fmt(BinarySink_UPCAST(conio), "%s\n", item->text);
                 return NULL;
             }
             break;
@@ -394,31 +392,33 @@ SeatPromptResult console_confirm_ssh_host_key(
     SeatPromptResult result;
 
     const char *prompt = console_print_seatdialogtext(conio, text);
+    ResponseType response;
     if (!prompt) {
         result = SPR_SW_ABORT("Cannot confirm a host key in batch mode");
         goto out;
     }
 
-    ResponseType response;
 
     while (true) {
-        put_fmt(conio, "%s (y/n, Return cancels connection, i for more info) ",
-                prompt);
+        BinarySink_put_fmt(BinarySink_UPCAST(conio), "%s (y/n, Return cancels connection, i for more info) ",
+                           prompt);
 
         response = parse_and_free_response(console_read_line(conio, true));
 
         if (response == RESPONSE_INFO) {
-            for (SeatDialogTextItem *item = text->items,
-                     *end = item+text->nitems; item < end; item++) {
+            SeatDialogTextItem *item;
+            SeatDialogTextItem *end;
+            for (item = text->items, end = item+text->nitems;
+                 item < end; item++) {
                 switch (item->type) {
                   case SDT_MORE_INFO_KEY:
                     put_dataz(conio, item->text);
                     break;
                   case SDT_MORE_INFO_VALUE_SHORT:
-                    put_fmt(conio, ": %s\n", item->text);
+                    BinarySink_put_fmt(BinarySink_UPCAST(conio), ": %s\n", item->text);
                     break;
                   case SDT_MORE_INFO_VALUE_BLOB:
-                    put_fmt(conio, ":\n%s\n", item->text);
+                    BinarySink_put_fmt(BinarySink_UPCAST(conio), ":\n%s\n", item->text);
                     break;
                   default:
                     break;
@@ -450,15 +450,16 @@ SeatPromptResult console_confirm_weak_crypto_primitive(
     SeatPromptResult result;
 
     const char *prompt = console_print_seatdialogtext(conio, text);
+    ResponseType response;
     if (!prompt) {
         result = SPR_SW_ABORT("Cannot confirm a weak crypto primitive "
                               "in batch mode");
         goto out;
     }
 
-    put_fmt(conio, "%s (y/n) ", prompt);
+    BinarySink_put_fmt(BinarySink_UPCAST(conio), "%s (y/n) ", prompt);
 
-    ResponseType response = parse_and_free_response(
+    response = parse_and_free_response(
         console_read_line(conio, true));
 
     if (response == RESPONSE_YES) {
@@ -480,15 +481,16 @@ SeatPromptResult console_confirm_weak_cached_hostkey(
     SeatPromptResult result;
 
     const char *prompt = console_print_seatdialogtext(conio, text);
+    ResponseType response;
     if (!prompt) {
         result = SPR_SW_ABORT("Cannot confirm a weak cached host key "
                               "in batch mode");
         goto out;
     }
 
-    put_fmt(conio, "%s (y/n) ", prompt);
+    BinarySink_put_fmt(BinarySink_UPCAST(conio), "%s (y/n) ", prompt);
 
-    ResponseType response = parse_and_free_response(
+    response = parse_and_free_response(
         console_read_line(conio, true));
 
     if (response == RESPONSE_YES) {
@@ -570,15 +572,16 @@ int console_askappend(LogPolicy *lp, Filename *filename,
 
     ConsoleIO *conio = conio_setup(true, STD_ERROR_HANDLE);
     int result;
+    ResponseType response;
 
     if (console_batch_mode) {
-        put_fmt(conio, msgtemplate_batch, FILENAME_MAX, filename->utf8path);
+        BinarySink_put_fmt(BinarySink_UPCAST(conio), msgtemplate_batch, FILENAME_MAX, filename->utf8path);
         result = 0;
         goto out;
     }
-    put_fmt(conio, msgtemplate, FILENAME_MAX, filename->utf8path);
+    BinarySink_put_fmt(BinarySink_UPCAST(conio), msgtemplate, FILENAME_MAX, filename->utf8path);
 
-    ResponseType response = parse_and_free_response(
+    response = parse_and_free_response(
         console_read_line(conio, true));
 
     if (response == RESPONSE_YES)

@@ -88,35 +88,35 @@ static bool plink_seat_interactive(Seat *seat)
 }
 
 static const SeatVtable plink_seat_vt = {
-    .output = plink_output,
-    .eof = plink_eof,
-    .sent = nullseat_sent,
-    .banner = nullseat_banner_to_stderr,
-    .get_userpass_input = plink_get_userpass_input,
-    .notify_session_started = nullseat_notify_session_started,
-    .notify_remote_exit = nullseat_notify_remote_exit,
-    .notify_remote_disconnect = nullseat_notify_remote_disconnect,
-    .connection_fatal = console_connection_fatal,
-    .nonfatal = console_nonfatal,
-    .update_specials_menu = nullseat_update_specials_menu,
-    .get_ttymode = nullseat_get_ttymode,
-    .set_busy_status = nullseat_set_busy_status,
-    .confirm_ssh_host_key = console_confirm_ssh_host_key,
-    .confirm_weak_crypto_primitive = console_confirm_weak_crypto_primitive,
-    .confirm_weak_cached_hostkey = console_confirm_weak_cached_hostkey,
-    .prompt_descriptions = console_prompt_descriptions,
-    .is_utf8 = nullseat_is_never_utf8,
-    .echoedit_update = plink_echoedit_update,
-    .get_display = nullseat_get_display,
-    .get_windowid = nullseat_get_windowid,
-    .get_window_pixel_size = nullseat_get_window_pixel_size,
-    .stripctrl_new = console_stripctrl_new,
-    .set_trust_status = console_set_trust_status,
-    .can_set_trust_status = console_can_set_trust_status,
-    .has_mixed_input_stream = console_has_mixed_input_stream,
-    .verbose = cmdline_seat_verbose,
-    .interactive = plink_seat_interactive,
-    .get_cursor_position = nullseat_get_cursor_position,
+    /* .output = */ plink_output,
+    /* .eof = */ plink_eof,
+    /* .sent = */ nullseat_sent,
+    /* .banner = */ nullseat_banner_to_stderr,
+    /* .get_userpass_input = */ plink_get_userpass_input,
+    /* .notify_session_started = */ nullseat_notify_session_started,
+    /* .notify_remote_exit = */ nullseat_notify_remote_exit,
+    /* .notify_remote_disconnect = */ nullseat_notify_remote_disconnect,
+    /* .connection_fatal = */ console_connection_fatal,
+    /* .nonfatal = */ console_nonfatal,
+    /* .update_specials_menu = */ nullseat_update_specials_menu,
+    /* .get_ttymode = */ nullseat_get_ttymode,
+    /* .set_busy_status = */ nullseat_set_busy_status,
+    /* .confirm_ssh_host_key = */ console_confirm_ssh_host_key,
+    /* .confirm_weak_crypto_primitive = */ console_confirm_weak_crypto_primitive,
+    /* .confirm_weak_cached_hostkey = */ console_confirm_weak_cached_hostkey,
+    /* .prompt_descriptions = */ console_prompt_descriptions,
+    /* .is_utf8 = */ nullseat_is_never_utf8,
+    /* .echoedit_update = */ plink_echoedit_update,
+    /* .get_display = */ nullseat_get_display,
+    /* .get_windowid = */ nullseat_get_windowid,
+    /* .get_window_pixel_size = */ nullseat_get_window_pixel_size,
+    /* .stripctrl_new = */ console_stripctrl_new,
+    /* .set_trust_status = */ console_set_trust_status,
+    /* .can_set_trust_status = */ console_can_set_trust_status,
+    /* .has_mixed_input_stream = */ console_has_mixed_input_stream,
+    /* .verbose = */ cmdline_seat_verbose,
+    /* .interactive = */ plink_seat_interactive,
+    /* .get_cursor_position = */ nullseat_get_cursor_position,
 };
 static Seat plink_seat[1] = {{ &plink_seat_vt }};
 
@@ -296,6 +296,8 @@ int main(int argc, char **argv)
     bool just_test_share_exists = false;
     enum TriState sanitise_stdout = AUTO, sanitise_stderr = AUTO;
     const struct BackendVtable *vt;
+    CmdlineArgList *arglist;
+    size_t arglistpos;
 
     dll_hijacking_protection();
     enable_dit();
@@ -330,8 +332,8 @@ int main(int argc, char **argv)
             }
         }
     }
-    CmdlineArgList *arglist = cmdline_arg_list_from_GetCommandLineW();
-    size_t arglistpos = 0;
+    arglist = cmdline_arg_list_from_GetCommandLineW();
+    arglistpos = 0;
     while (arglist->args[arglistpos]) {
         CmdlineArg *arg = arglist->args[arglistpos++];
         CmdlineArg *nextarg = arglist->args[arglistpos];
@@ -436,10 +438,6 @@ int main(int argc, char **argv)
     }
 
     sk_init();
-    if (p_WSAEventSelect == NULL) {
-        fprintf(stderr, "Plink requires WinSock 2\n");
-        return 1;
-    }
 
     /*
      * Plink doesn't provide any way to add forwardings after the
@@ -526,7 +524,7 @@ int main(int argc, char **argv)
     /*
      * Start up the connection.
      */
-    winselcli_setup();                 /* ensure event object exists */
+    winselcli_setup();                 /* window for network events */
     {
         char *error, *realhost;
         /* nodelay is only useful if stdin is a character device (console) */

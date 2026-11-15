@@ -47,7 +47,8 @@ void pcs_require_residue_1_mod_prime(PrimeCandidateSource *s, mp_int *mod);
 
 /* Insist that generated numbers must _not_ be congruent to 'res' mod
  * 'mod'. This is used to avoid being 1 mod the RSA public exponent,
- * which is small, so it only needs ordinary integer parameters. */
+ * which is small, so it only needs ordinary integer parameters. 'mod'
+ * must be less than 2^17. */
 void pcs_avoid_residue_small(PrimeCandidateSource *s,
                              unsigned mod, unsigned res);
 

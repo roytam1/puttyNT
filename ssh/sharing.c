@@ -1755,6 +1755,7 @@ static void share_receive(Plug *plug, int urgent, const char *data, size_t len)
     static const char expected_verstring_prefix[] =
         "SSHCONNECTION@putty.projects.tartarus.org-2.0-";
     unsigned char c;
+    ptrlen verstring;
 
     crBegin(cs->crLine);
 
@@ -1789,7 +1790,7 @@ static void share_receive(Plug *plug, int urgent, const char *data, size_t len)
     }
     if (cs->recvlen > 0 && cs->recvbuf[cs->recvlen-1] == '\015')
         cs->recvlen--;                 /* trim off \r before \n */
-    ptrlen verstring = make_ptrlen(cs->recvbuf, cs->recvlen);
+    verstring = make_ptrlen(cs->recvbuf, cs->recvlen);
     log_downstream(cs, "Downstream version string: %.*s",
                    PTRLEN_PRINTF(verstring));
     cs->got_verstring = true;
@@ -1853,7 +1854,7 @@ static void share_listen_closing(Plug *plug, PlugCloseType type,
 static void share_send_verstring(ssh_sharing_connstate *cs)
 {
     char *fullstring = dupcat("SSHCONNECTION@putty.projects.tartarus.org-2.0-",
-                              cs->parent->server_verstring, "\015\012");
+                              cs->parent->server_verstring, "\015\012", NULL);
     sk_write(cs->sock, fullstring, strlen(fullstring));
     sfree(fullstring);
 
@@ -1896,10 +1897,10 @@ void share_activate(ssh_sharing_state *sharestate,
 }
 
 static const PlugVtable ssh_sharing_conn_plugvt = {
-    .closing = share_closing,
-    .receive = share_receive,
-    .sent = share_sent,
-    .log = nullplug_log,
+    /* .log = */ nullplug_log,
+    /* .closing = */ share_closing,
+    /* .receive = */ share_receive,
+    /* .sent = */ share_sent,
 };
 
 static int share_listen_accepting(Plug *plug,
@@ -2039,9 +2040,11 @@ bool ssh_share_test_for_upstream(const char *host, int port, Conf *conf)
 }
 
 static const PlugVtable ssh_sharing_listen_plugvt = {
-    .closing = share_listen_closing,
-    .accepting = share_listen_accepting,
-    .log = nullplug_log,
+    /* .log = */ nullplug_log,
+    /* .closing = */ share_listen_closing,
+    /* .receive = */ NULL,
+    /* .sent = */ NULL,
+    /* .accepting = */ share_listen_accepting,
 };
 
 void ssh_connshare_provide_connlayer(ssh_sharing_state *sharestate,

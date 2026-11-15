@@ -18,7 +18,7 @@ void seat_antispoof_msg(InteractionReadySeat iseat, const char *msg)
          * wouldn't be able to mimic it within our line-length
          * constraint.
          */
-        put_fmt(sb, "-- %s ", msg);
+        BinarySink_put_fmt(BinarySink_UPCAST(sb), "-- %s ", msg);
         while (sb->len < 78)
             put_byte(sb, '-');
     }

@@ -2,7 +2,6 @@
  * strchr-like wrapper around host_strchr_internal.
  */
 
-#include <stdbool.h>
 #include <string.h>
 
 #include "defs.h"

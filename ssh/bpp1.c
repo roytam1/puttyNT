@@ -37,12 +37,12 @@ static void ssh1_bpp_queue_disconnect(BinaryPacketProtocol *bpp,
 static PktOut *ssh1_bpp_new_pktout(int type);
 
 static const BinaryPacketProtocolVtable ssh1_bpp_vtable = {
-    .free = ssh1_bpp_free,
-    .handle_input = ssh1_bpp_handle_input,
-    .handle_output = ssh1_bpp_handle_output,
-    .new_pktout = ssh1_bpp_new_pktout,
-    .queue_disconnect = ssh1_bpp_queue_disconnect,
-    .packet_size_limit = 0xFFFFFFFF, /* no special limit for this bpp */
+    /* .free = */ ssh1_bpp_free,
+    /* .handle_input = */ ssh1_bpp_handle_input,
+    /* .handle_output = */ ssh1_bpp_handle_output,
+    /* .new_pktout = */ ssh1_bpp_new_pktout,
+    /* .queue_disconnect = */ ssh1_bpp_queue_disconnect,
+    /* .packet_size_limit = */ 0xFFFFFFFF, /* no special limit for this bpp */
 };
 
 BinaryPacketProtocol *ssh1_bpp_new(LogContext *logctx)
@@ -92,7 +92,7 @@ void ssh1_bpp_new_cipher(BinaryPacketProtocol *bpp,
         assert(!s->crcda_ctx);
         s->crcda_ctx = crcda_make_context();
 
-        bpp_logevent("Initialised %s encryption", cipher->text_name);
+        bpp_logevent(("Initialised %s encryption", cipher->text_name));
 
         memset(s->iv, 0, sizeof(s->iv));
 
@@ -114,7 +114,7 @@ void ssh1_bpp_start_compression(BinaryPacketProtocol *bpp)
     s->compctx = ssh_compressor_new(&ssh_zlib);
     s->decompctx = ssh_decompressor_new(&ssh_zlib);
 
-    bpp_logevent("Started zlib (RFC1950) compression");
+    bpp_logevent(("Started zlib (RFC1950) compression"));
 }
 
 #define BPP_READ(ptr, len) do                                           \

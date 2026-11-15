@@ -17,15 +17,7 @@
 #include "dialog.h"
 #include "licence.h"
 
-#include <commctrl.h>
-#include <commdlg.h>
 #include <shellapi.h>
-
-#ifdef MSVC4
-#define TVINSERTSTRUCT  TV_INSERTSTRUCT
-#define TVITEM          TV_ITEM
-#define ICON_BIG        1
-#endif
 
 typedef struct PortableDialogStuff {
     /*
@@ -57,6 +49,9 @@ typedef struct PortableDialogStuff {
      * setup.
      */
     bool initialised;
+
+    /* The path of the panel the configuration box shows */
+    char *panelpath;
 } PortableDialogStuff;
 
 /*
@@ -65,6 +60,7 @@ typedef struct PortableDialogStuff {
 static PortableDialogStuff *pds_new(size_t nctrltrees)
 {
     PortableDialogStuff *pds = snew(PortableDialogStuff);
+    size_t i;
     memset(pds, 0, sizeof(*pds));
 
     pds->ctrlbox = ctrl_new_box();
@@ -73,7 +69,7 @@ static PortableDialogStuff *pds_new(size_t nctrltrees)
 
     pds->nctrltrees = nctrltrees;
     pds->ctrltrees = snewn(pds->nctrltrees, struct winctrls);
-    for (size_t i = 0; i < pds->nctrltrees; i++) {
+    for (i = 0; i < pds->nctrltrees; i++) {
         winctrl_init(&pds->ctrltrees[i]);
         dp_add_tree(pds->dp, &pds->ctrltrees[i]);
     }
@@ -87,19 +83,20 @@ static PortableDialogStuff *pds_new(size_t nctrltrees)
 
 static void pds_free(PortableDialogStuff *pds)
 {
+    size_t i;
     ctrl_free_box(pds->ctrlbox);
 
     dp_cleanup(pds->dp);
 
-    for (size_t i = 0; i < pds->nctrltrees; i++)
+    for (i = 0; i < pds->nctrltrees; i++)
         winctrl_cleanup(&pds->ctrltrees[i]);
     sfree(pds->ctrltrees);
 
     sfree(pds);
 }
 
-static INT_PTR pds_default_dlgproc(PortableDialogStuff *pds, HWND hwnd,
-                                   UINT msg, WPARAM wParam, LPARAM lParam)
+static BOOL pds_default_dlgproc(PortableDialogStuff *pds, HWND hwnd,
+                                UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg) {
       case WM_LBUTTONUP:
@@ -126,13 +123,7 @@ static INT_PTR pds_default_dlgproc(PortableDialogStuff *pds, HWND hwnd,
             ret = 0;
         return ret;
       }
-      case WM_HELP:
-        if (!winctrl_context_help(pds->dp,
-                                  hwnd, ((LPHELPINFO)lParam)->iCtrlId))
-            MessageBeep(0);
-        break;
       case WM_CLOSE:
-        quit_help(hwnd);
         ShinyEndDialog(hwnd, 0);
         return 0;
 
@@ -152,20 +143,6 @@ static void pds_initdialog_start(PortableDialogStuff *pds, HWND hwnd)
 
     if (pds->dp->wintitle)     /* apply override title, if provided */
         SetWindowText(hwnd, pds->dp->wintitle);
-
-    /* The portable dialog system generally includes the ability to
-     * handle context help for particular controls. Enable the
-     * relevant window styles if we have a help file available. */
-    if (has_help()) {
-        LONG_PTR style = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
-        SetWindowLongPtr(hwnd, GWL_EXSTYLE, style | WS_EX_CONTEXTHELP);
-    } else {
-        /* If not, and if the dialog template provided a top-level
-         * Help button, delete it */
-        HWND item = GetDlgItem(hwnd, IDC_HELPBTN);
-        if (item)
-            DestroyWindow(item);
-    }
 }
 
 /*
@@ -176,10 +153,11 @@ static void pds_create_controls(
     int left, int right, int top, char *path)
 {
     struct ctlpos cp;
+    int index;
 
     ctlposinit(&cp, pds->dp->hwnd, left, right, top);
 
-    for (int index = -1; (index = ctrl_find_path(
+    for (index = -1; (index = ctrl_find_path(
                               pds->ctrlbox, path, index)) >= 0 ;) {
         struct controlset *s = pds->ctrlbox->ctrlsets[index];
         winctrl_layout(pds->dp, &pds->ctrltrees[which_tree], &cp, s, &base_id);
@@ -194,7 +172,8 @@ static void pds_initdialog_finish(PortableDialogStuff *pds)
      * containing the dialog controls likely to be used first.
      */
     struct winctrl *c;
-    for (int i = 0; (c = winctrl_findbyindex(&pds->ctrltrees[0], i)) != NULL;
+    int i;
+    for (i = 0; (c = winctrl_findbyindex(&pds->ctrltrees[0], i)) != NULL;
          i++) {
         if (c->ctrl) {
             dlg_set_focus(c->ctrl, pds->dp);
@@ -261,11 +240,12 @@ static void update_logbox_horizontal_extent(HWND logbox)
     int count = SendMessage(listbox, LB_GETCOUNT, 0, 0);
     strbuf *sb = strbuf_new();
     WPARAM maxwidth = 0;
-    for (int i = 0; i < count; i++) {
+    int i;
+    for (i = 0; i < count; i++) {
         size_t len = SendMessage(listbox, LB_GETTEXTLEN, i, 0);
+        SIZE size;
         strbuf_clear(sb);
         SendMessage(listbox, LB_GETTEXT, i, (LPARAM)strbuf_append(sb, len));
-        SIZE size;
         if (GetTextExtentPoint(hdc, sb->s, sb->len, &size)) {
             if (maxwidth < size.cx)
                 maxwidth = size.cx;
@@ -292,18 +272,18 @@ static void update_logbox_horizontal_extent(HWND logbox)
     SendMessage(listbox, LB_SETHORIZONTALEXTENT, maxwidth, 0);
 }
 
-static INT_PTR CALLBACK LogProc(HWND hwnd, UINT msg,
-                                WPARAM wParam, LPARAM lParam)
+static BOOL CALLBACK LogProc(HWND hwnd, UINT msg,
+                             WPARAM wParam, LPARAM lParam)
 {
     int i;
 
     switch (msg) {
       case WM_INITDIALOG: {
         char *str = dupprintf("%s Event Log", appname);
+        static int tabs[4] = { 78, 108 };
         SetWindowText(hwnd, str);
         sfree(str);
 
-        static int tabs[4] = { 78, 108 };
         SendDlgItemMessage(hwnd, IDN_LIST, LB_SETTABSTOPS, 2,
                            (LPARAM) tabs);
 
@@ -344,14 +324,15 @@ static INT_PTR CALLBACK LogProc(HWND hwnd, UINT msg,
                                                    selcount,
                                                    (LPARAM) selitems);
                     static const unsigned char sel_nl[] = SEL_NL;
+                    strbuf *sb;
 
                     if (count == 0) {  /* can't copy zero stuff */
                         MessageBeep(0);
                         break;
                     }
 
-                    strbuf *sb = strbuf_new();
-                    for (int i = 0; i < count; i++) {
+                    sb = strbuf_new();
+                    for (i = 0; i < count; i++) {
                         char *q = getevent(selitems[i]);
                         put_datapl(sb, ptrlen_from_asciz(q));
                         put_data(sb, sel_nl, sizeof(sel_nl));
@@ -377,8 +358,8 @@ static INT_PTR CALLBACK LogProc(HWND hwnd, UINT msg,
     return 0;
 }
 
-static INT_PTR CALLBACK LicenceProc(HWND hwnd, UINT msg,
-                                    WPARAM wParam, LPARAM lParam)
+static BOOL CALLBACK LicenceProc(HWND hwnd, UINT msg,
+                                 WPARAM wParam, LPARAM lParam)
 {
     switch (msg) {
       case WM_INITDIALOG: {
@@ -403,18 +384,20 @@ static INT_PTR CALLBACK LicenceProc(HWND hwnd, UINT msg,
     return 0;
 }
 
-static INT_PTR CALLBACK AboutProc(HWND hwnd, UINT msg,
-                                  WPARAM wParam, LPARAM lParam)
+static BOOL CALLBACK AboutProc(HWND hwnd, UINT msg,
+                               WPARAM wParam, LPARAM lParam)
 {
     char *str;
 
     switch (msg) {
       case WM_INITDIALOG: {
+        char *buildinfo_text;
+        char *text;
         str = dupprintf("About %s", appname);
         SetWindowText(hwnd, str);
         sfree(str);
-        char *buildinfo_text = buildinfo("\r\n");
-        char *text = dupprintf(
+        buildinfo_text = buildinfo("\r\n");
+        text = dupprintf(
             "%s\r\n\r\n%s\r\n\r\n%s\r\n\r\n%s",
             appname, ver, buildinfo_text,
             "\251 " SHORT_COPYRIGHT_DETAILS ". All rights reserved.");
@@ -456,72 +439,73 @@ static INT_PTR CALLBACK AboutProc(HWND hwnd, UINT msg,
 /*
  * Null dialog procedure.
  */
-static INT_PTR CALLBACK NullDlgProc(HWND hwnd, UINT msg,
-                                    WPARAM wParam, LPARAM lParam)
+static BOOL CALLBACK NullDlgProc(HWND hwnd, UINT msg,
+                                 WPARAM wParam, LPARAM lParam)
 {
     return 0;
 }
 
 enum {
     IDCX_ABOUT = IDC_ABOUT,
-    IDCX_TVSTATIC,
-    IDCX_TREEVIEW,
+    IDCX_CATSTATIC,
+    IDCX_CATLIST,
     IDCX_STDBASE,
     IDCX_PANELBASE = IDCX_STDBASE + 32
 };
 
-struct treeview_faff {
-    HWND treeview;
-    HTREEITEM lastat[4];
-};
-
-static HTREEITEM treeview_insert(struct treeview_faff *faff,
-                                 int level, char *text, char *path)
-{
-    TVINSERTSTRUCT ins;
-    int i;
-    HTREEITEM newitem;
-    ins.hParent = (level > 0 ? faff->lastat[level - 1] : TVI_ROOT);
-    ins.hInsertAfter = faff->lastat[level];
-#if _WIN32_IE >= 0x0400 && defined NONAMELESSUNION
-#define INSITEM DUMMYUNIONNAME.item
-#else
-#define INSITEM item
-#endif
-    ins.INSITEM.mask = TVIF_TEXT | TVIF_PARAM;
-    ins.INSITEM.pszText = text;
-    ins.INSITEM.cchTextMax = strlen(text)+1;
-    ins.INSITEM.lParam = (LPARAM)path;
-    newitem = TreeView_InsertItem(faff->treeview, &ins);
-    if (level > 0)
-        TreeView_Expand(faff->treeview, faff->lastat[level - 1],
-                        (level > 1 ? TVE_COLLAPSE : TVE_EXPAND));
-    faff->lastat[level] = newitem;
-    for (i = level + 1; i < 4; i++)
-        faff->lastat[i] = NULL;
-    return newitem;
-}
-
-Filename *dialog_box_demo_screenshot_filename = NULL;
-
 /* ctrltrees indices for the main dialog box */
 enum {
-    TREE_PANEL, /* things we swap out every time treeview selects a new pane */
+    TREE_PANEL, /* things we swap out every time a new panel is chosen */
     TREE_BASE, /* fixed things at the bottom like OK and Cancel buttons */
 };
+
+/*
+ * Replace the panel of controls on the right of the configuration
+ * box with the one for 'path'.
+ */
+static void pds_show_panel(PortableDialogStuff *pds, HWND hwnd, char *path)
+{
+    struct winctrl *c;
+    HWND item;
+    int k;
+
+    if (path == pds->panelpath)
+        return;                        /* already showing that one */
+    pds->panelpath = path;
+
+    SendMessage(hwnd, WM_SETREDRAW, false, 0);
+
+    /* Destroy all controls in the currently visible panel. */
+    while ((c = winctrl_findbyindex(
+                &pds->ctrltrees[TREE_PANEL], 0)) != NULL) {
+        for (k = 0; k < c->num_ids; k++) {
+            item = GetDlgItem(hwnd, c->base_id + k);
+            if (item)
+                DestroyWindow(item);
+        }
+        winctrl_rem_shortcuts(pds->dp, c);
+        winctrl_remove(&pds->ctrltrees[TREE_PANEL], c);
+        sfree(c->data);
+        sfree(c);
+    }
+    pds_create_controls(pds, TREE_PANEL, IDCX_PANELBASE, 100, 3, 13, path);
+
+    dlg_refresh(NULL, pds->dp);    /* set up control values */
+
+    SendMessage(hwnd, WM_SETREDRAW, true, 0);
+    InvalidateRect(hwnd, NULL, true);
+}
 
 /*
  * This function is the configuration box.
  * (Being a dialog procedure, in general it returns 0 if the default
  * dialog processing should be performed, and 1 if it should not.)
  */
-static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
-                                  LPARAM lParam, void *ctx)
+static BOOL GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
+                               LPARAM lParam, void *ctx)
 {
     PortableDialogStuff *pds = (PortableDialogStuff *)ctx;
-    const int DEMO_SCREENSHOT_TIMER_ID = 1230;
-    HWND treeview;
-    struct treeview_faff tvfaff;
+    HWND catlist;
 
     switch (msg) {
       case WM_INITDIALOG:
@@ -529,73 +513,71 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
 
         pds_create_controls(pds, TREE_BASE, IDCX_STDBASE, 3, 3, 235, "");
 
-        SendMessage(hwnd, WM_SETICON, (WPARAM) ICON_BIG,
-                    (LPARAM) LoadIcon(hinst, MAKEINTRESOURCE(IDI_CFGICON)));
+        SetClassLong(hwnd, GCL_HICON,
+                     (LONG)LoadIcon(hinst, MAKEINTRESOURCE(IDI_CFGICON)));
 
         centre_window(hwnd);
 
         /*
-         * Create the tree view.
+         * Create the list of panels down the left. (A tree view would
+         * need COMCTL32, which Windows NT 3.1 and 3.5 don't have.)
          */
         {
             RECT r;
             WPARAM font;
-            HWND tvstatic;
+            HWND catstatic;
 
             r.left = 3;
             r.right = r.left + 95;
             r.top = 3;
             r.bottom = r.top + 10;
             MapDialogRect(hwnd, &r);
-            tvstatic = CreateWindowEx(0, "STATIC", "Cate&gory:",
-                                      WS_CHILD | WS_VISIBLE,
-                                      r.left, r.top,
-                                      r.right - r.left, r.bottom - r.top,
-                                      hwnd, (HMENU) IDCX_TVSTATIC, hinst,
-                                      NULL);
+            catstatic = CreateWindowEx(0, "STATIC", "Cate&gory:",
+                                       WS_CHILD | WS_VISIBLE,
+                                       r.left, r.top,
+                                       r.right - r.left, r.bottom - r.top,
+                                       hwnd, (HMENU) IDCX_CATSTATIC, hinst,
+                                       NULL);
             font = SendMessage(hwnd, WM_GETFONT, 0, 0);
-            SendMessage(tvstatic, WM_SETFONT, font, MAKELPARAM(true, 0));
+            SendMessage(catstatic, WM_SETFONT, font, MAKELPARAM(true, 0));
 
             r.left = 3;
             r.right = r.left + 95;
             r.top = 13;
             r.bottom = r.top + 219;
             MapDialogRect(hwnd, &r);
-            treeview = CreateWindowEx(WS_EX_CLIENTEDGE, WC_TREEVIEW, "",
-                                      WS_CHILD | WS_VISIBLE |
-                                      WS_TABSTOP | TVS_HASLINES |
-                                      TVS_DISABLEDRAGDROP | TVS_HASBUTTONS
-                                      | TVS_LINESATROOT |
-                                      TVS_SHOWSELALWAYS, r.left, r.top,
-                                      r.right - r.left, r.bottom - r.top,
-                                      hwnd, (HMENU) IDCX_TREEVIEW, hinst,
-                                      NULL);
+            catlist = CreateWindowEx(EDGE_EXSTYLE, "LISTBOX", "",
+                                     WS_CHILD | WS_VISIBLE | WS_TABSTOP |
+                                     WS_VSCROLL | EDGE_STYLE | LBS_NOTIFY |
+                                     LBS_NOINTEGRALHEIGHT, r.left, r.top,
+                                     r.right - r.left, r.bottom - r.top,
+                                     hwnd, (HMENU) IDCX_CATLIST, hinst,
+                                     NULL);
             font = SendMessage(hwnd, WM_GETFONT, 0, 0);
-            SendMessage(treeview, WM_SETFONT, font, MAKELPARAM(true, 0));
-            tvfaff.treeview = treeview;
-            memset(tvfaff.lastat, 0, sizeof(tvfaff.lastat));
+            SendMessage(catlist, WM_SETFONT, font, MAKELPARAM(true, 0));
         }
 
         /*
-         * Set up the tree view contents.
+         * Fill in the list: one line per panel, indented by its depth
+         * in the path, with the path as the line's item data.
          */
         {
-            HTREEITEM hfirst = NULL;
             int i;
             char *path = NULL;
             char *firstpath = NULL;
 
             for (i = 0; i < pds->ctrlbox->nctrlsets; i++) {
                 struct controlset *s = pds->ctrlbox->ctrlsets[i];
-                HTREEITEM item;
                 int j;
+                LRESULT item;
                 char *c;
+                char *text;
 
                 if (!s->pathname[0])
                     continue;
                 j = path ? ctrl_path_compare(s->pathname, path) : 0;
                 if (j == INT_MAX)
-                    continue;          /* same path, nothing to add to tree */
+                    continue;          /* same path, nothing to add to list */
 
                 /*
                  * We expect never to find an implicit path
@@ -603,7 +585,7 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
                  * A/B/C followed by A/D/E, because that would
                  * _implicitly_ create A/D. All our path prefixes
                  * are expected to contain actual controls and be
-                 * selectable in the treeview; so we would expect
+                 * selectable in the list; so we would expect
                  * to see A/D _explicitly_ before encountering
                  * A/D/E.
                  */
@@ -615,106 +597,49 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
                 else
                     c++;
 
-                item = treeview_insert(&tvfaff, j, c, s->pathname);
-                if (!hfirst) {
-                    hfirst = item;
+                text = dupprintf("%*s%s", j * 4, "", c);
+                item = SendMessage(catlist, LB_ADDSTRING, 0, (LPARAM)text);
+                SendMessage(catlist, LB_SETITEMDATA, item,
+                            (LPARAM)s->pathname);
+                sfree(text);
+                if (!firstpath)
                     firstpath = s->pathname;
-                }
 
                 path = s->pathname;
             }
 
             /*
-             * Put the treeview selection on to the first panel in the
-             * ctrlbox.
+             * Select the first panel in the ctrlbox, and create the
+             * actual control set for it.
              */
-            TreeView_SelectItem(treeview, hfirst);
-
-            /*
-             * And create the actual control set for that panel, to
-             * match the initial treeview selection.
-             */
+            SendMessage(catlist, LB_SETCURSEL, 0, 0);
             assert(firstpath);   /* config.c must have given us _something_ */
+            pds->panelpath = firstpath;
             pds_create_controls(pds, TREE_PANEL, IDCX_PANELBASE,
                                 100, 3, 13, firstpath);
             dlg_refresh(NULL, pds->dp);    /* and set up control values */
         }
 
-        if (dialog_box_demo_screenshot_filename)
-            SetTimer(hwnd, DEMO_SCREENSHOT_TIMER_ID, TICKSPERSEC, NULL);
-
         pds_initdialog_finish(pds);
         return 0;
 
-      case WM_TIMER:
-        if (dialog_box_demo_screenshot_filename &&
-            (UINT_PTR)wParam == DEMO_SCREENSHOT_TIMER_ID) {
-            KillTimer(hwnd, DEMO_SCREENSHOT_TIMER_ID);
-            char *err = save_screenshot(
-                hwnd, dialog_box_demo_screenshot_filename);
-            if (err) {
-                MessageBox(hwnd, err, "Demo screenshot failure",
-                           MB_OK | MB_ICONERROR);
-                sfree(err);
+      case WM_COMMAND:
+        if (LOWORD(wParam) != IDCX_CATLIST)
+            return pds_default_dlgproc(pds, hwnd, msg, wParam, lParam);
+
+        /*
+         * Choosing a line in the list replaces the panel - but only
+         * after WM_INITDIALOG has finished.
+         */
+        if (HIWORD(wParam) == LBN_SELCHANGE && pds->initialised) {
+            LRESULT sel;
+            catlist = (HWND)lParam;
+            sel = SendMessage(catlist, LB_GETCURSEL, 0, 0);
+            if (sel != LB_ERR) {
+                pds_show_panel(pds, hwnd, (char *)SendMessage(
+                                   catlist, LB_GETITEMDATA, sel, 0));
+                SetFocus(catlist);     /* ensure focus stays */
             }
-            ShinyEndDialog(hwnd, 0);
-        }
-        return 0;
-
-      case WM_NOTIFY:
-        if (LOWORD(wParam) == IDCX_TREEVIEW &&
-            ((LPNMHDR) lParam)->code == TVN_SELCHANGED) {
-            /*
-             * Selection-change events on the treeview cause us to do
-             * a flurry of control deletion and creation - but only
-             * after WM_INITDIALOG has finished. The initial
-             * selection-change event(s) during treeview setup are
-             * ignored.
-             */
-            HTREEITEM i;
-            TVITEM item;
-            char buffer[64];
-
-            if (!pds->initialised)
-                return 0;
-
-            i = TreeView_GetSelection(((LPNMHDR) lParam)->hwndFrom);
-
-            SendMessage (hwnd, WM_SETREDRAW, false, 0);
-
-            item.hItem = i;
-            item.pszText = buffer;
-            item.cchTextMax = sizeof(buffer);
-            item.mask = TVIF_TEXT | TVIF_PARAM;
-            TreeView_GetItem(((LPNMHDR) lParam)->hwndFrom, &item);
-            {
-                /* Destroy all controls in the currently visible panel. */
-                int k;
-                HWND item;
-                struct winctrl *c;
-
-                while ((c = winctrl_findbyindex(
-                            &pds->ctrltrees[TREE_PANEL], 0)) != NULL) {
-                    for (k = 0; k < c->num_ids; k++) {
-                        item = GetDlgItem(hwnd, c->base_id + k);
-                        if (item)
-                            DestroyWindow(item);
-                    }
-                    winctrl_rem_shortcuts(pds->dp, c);
-                    winctrl_remove(&pds->ctrltrees[TREE_PANEL], c);
-                    sfree(c->data);
-                    sfree(c);
-                }
-            }
-            pds_create_controls(pds, TREE_PANEL, IDCX_PANELBASE,
-                                100, 3, 13, (char *)item.lParam);
-
-            dlg_refresh(NULL, pds->dp);    /* set up control values */
-
-            SendMessage (hwnd, WM_SETREDRAW, true, 0);
-            InvalidateRect (hwnd, NULL, true);
-
-            SetFocus(((LPNMHDR) lParam)->hwndFrom);     /* ensure focus stays */
         }
         return 0;
 
@@ -729,11 +654,6 @@ void modal_about_box(HWND hwnd)
     DialogBox(hinst, MAKEINTRESOURCE(IDD_ABOUTBOX), hwnd, AboutProc);
     EnableWindow(hwnd, 1);
     SetActiveWindow(hwnd);
-}
-
-void show_help(HWND hwnd)
-{
-    launch_help(hwnd, NULL);
 }
 
 void defuse_showwindow(void)
@@ -759,17 +679,17 @@ bool do_config(Conf *conf)
     PortableDialogStuff *pds = pds_new(2);
 
     setup_config_box(pds->ctrlbox, false, 0, 0);
-    win_setup_config_box(pds->ctrlbox, &pds->dp->hwnd, has_help(), false, 0);
+    win_setup_config_box(pds->ctrlbox, &pds->dp->hwnd, false, 0);
 
     pds->dp->wintitle = dupprintf("%s Configuration", appname);
     pds->dp->data = conf;
 
     dlg_auto_set_fixed_pitch_flag(pds->dp);
 
-    pds->dp->shortcuts['g'] = true;          /* the treeview: `Cate&gory' */
+    pds->dp->shortcuts['g'] = true;          /* the list: `Cate&gory' */
 
     ret = ShinyDialogBox(hinst, MAKEINTRESOURCE(IDD_MAINBOX), "PuTTYConfigBox",
-                         NULL, GenericMainDlgProc, pds);
+                         NULL, GenericMainDlgProc, pds) != 0;
 
     pds_free(pds);
 
@@ -787,18 +707,17 @@ bool do_reconfig(HWND hwnd, Conf *conf, int protcfginfo)
 
     protocol = conf_get_int(conf, CONF_protocol);
     setup_config_box(pds->ctrlbox, true, protocol, protcfginfo);
-    win_setup_config_box(pds->ctrlbox, &pds->dp->hwnd, has_help(),
-                         true, protocol);
+    win_setup_config_box(pds->ctrlbox, &pds->dp->hwnd, true, protocol);
 
     pds->dp->wintitle = dupprintf("%s Reconfiguration", appname);
     pds->dp->data = conf;
 
     dlg_auto_set_fixed_pitch_flag(pds->dp);
 
-    pds->dp->shortcuts['g'] = true;          /* the treeview: `Cate&gory' */
+    pds->dp->shortcuts['g'] = true;          /* the list: `Cate&gory' */
 
     ret = ShinyDialogBox(hinst, MAKEINTRESOURCE(IDD_MAINBOX), "PuTTYConfigBox",
-                         NULL, GenericMainDlgProc, pds);
+                         NULL, GenericMainDlgProc, pds) != 0;
 
     pds_free(pds);
 
@@ -826,7 +745,7 @@ static void win_gui_eventlog(LogPolicy *lp, const char *string)
 
     if (*location)
         sfree(*location);
-    *location = dupcat(timebuf, string);
+    *location = dupcat(timebuf, string, NULL);
     if (logbox) {
         int count;
         SendDlgItemMessage(logbox, IDN_LIST, LB_ADDSTRING,
@@ -875,11 +794,11 @@ void showabout(HWND hwnd)
 struct hostkey_dialog_ctx {
     SeatDialogText *text;
     bool has_title;
-    const char *helpctx;
+    HFONT title_font;
 };
 
-static INT_PTR HostKeyMoreInfoProc(HWND hwnd, UINT msg, WPARAM wParam,
-                                   LPARAM lParam, void *vctx)
+static BOOL HostKeyMoreInfoProc(HWND hwnd, UINT msg, WPARAM wParam,
+                                LPARAM lParam, void *vctx)
 {
     struct hostkey_dialog_ctx *ctx = (struct hostkey_dialog_ctx *)vctx;
 
@@ -890,8 +809,14 @@ static INT_PTR HostKeyMoreInfoProc(HWND hwnd, UINT msg, WPARAM wParam,
         WPARAM font = SendMessage(hwnd, WM_GETFONT, 0, 0);
 
         const char *key = NULL;
-        for (SeatDialogTextItem *item = ctx->text->items,
-                 *end = item + ctx->text->nitems; item < end; item++) {
+        RECT r;
+        HWND ctl;
+        int oldheight;
+        int newheight;
+        SeatDialogTextItem *item;
+        SeatDialogTextItem *end;
+        for (item = ctx->text->items, end = item + ctx->text->nitems;
+             item < end; item++) {
             switch (item->type) {
               case SDT_MORE_INFO_KEY:
                 key = item->text;
@@ -901,6 +826,7 @@ static INT_PTR HostKeyMoreInfoProc(HWND hwnd, UINT msg, WPARAM wParam,
                 RECT rk, rv;
                 DWORD editstyle = WS_CHILD | WS_VISIBLE | WS_TABSTOP |
                     ES_AUTOHSCROLL | ES_READONLY;
+                HWND ctl;
                 if (item->type == SDT_MORE_INFO_VALUE_BLOB) {
                     rk.left = 12;
                     rk.right = 376;
@@ -929,17 +855,17 @@ static INT_PTR HostKeyMoreInfoProc(HWND hwnd, UINT msg, WPARAM wParam,
                 }
 
                 MapDialogRect(hwnd, &rk);
-                HWND ctl = CreateWindowEx(
+                ctl = CreateWindowEx(
                     0, "STATIC", key, WS_CHILD | WS_VISIBLE,
                     rk.left, rk.top, rk.right, rk.bottom,
-                    hwnd, (HMENU)(ULONG_PTR)index++, hinst, NULL);
+                    hwnd, (HMENU)(UINT)index++, hinst, NULL);
                 SendMessage(ctl, WM_SETFONT, font, MAKELPARAM(true, 0));
 
                 MapDialogRect(hwnd, &rv);
                 ctl = CreateWindowEx(
-                    WS_EX_CLIENTEDGE, "EDIT", item->text, editstyle,
+                    EDGE_EXSTYLE, "EDIT", item->text, editstyle | EDGE_STYLE,
                     rv.left, rv.top, rv.right, rv.bottom,
-                    hwnd, (HMENU)(ULONG_PTR)index++, hinst, NULL);
+                    hwnd, (HMENU)(UINT)index++, hinst, NULL);
                 SendMessage(ctl, WM_SETFONT, font, MAKELPARAM(true, 0));
                 break;
               }
@@ -952,24 +878,23 @@ static INT_PTR HostKeyMoreInfoProc(HWND hwnd, UINT msg, WPARAM wParam,
          * Now resize the overall window, and move the Close button at
          * the bottom.
          */
-        RECT r;
         r.left = 176;
         r.top = y + 10;
         r.right = r.bottom = 0;
         MapDialogRect(hwnd, &r);
-        HWND ctl = GetDlgItem(hwnd, IDOK);
+        ctl = GetDlgItem(hwnd, IDOK);
         SetWindowPos(ctl, NULL, r.left, r.top, 0, 0,
                      SWP_NOSIZE | SWP_NOREDRAW | SWP_NOZORDER);
 
         r.left = r.top = r.right = 0;
         r.bottom = 300;
         MapDialogRect(hwnd, &r);
-        int oldheight = r.bottom;
+        oldheight = r.bottom;
 
         r.left = r.top = r.right = 0;
         r.bottom = y + 30;
         MapDialogRect(hwnd, &r);
-        int newheight = r.bottom;
+        newheight = r.bottom;
 
         GetWindowRect(hwnd, &r);
 
@@ -998,15 +923,16 @@ static const char *process_seatdialogtext(
     strbuf *dlg_text, const char **scary_heading, SeatDialogText *text)
 {
     const char *dlg_title = "";
+    SeatDialogTextItem *item;
+    SeatDialogTextItem *end;
 
-    for (SeatDialogTextItem *item = text->items,
-             *end = item + text->nitems; item < end; item++) {
+    for (item = text->items, end = item + text->nitems; item < end; item++) {
         switch (item->type) {
           case SDT_PARA:
-            put_fmt(dlg_text, "%s\r\n\r\n", item->text);
+            BinarySink_put_fmt(BinarySink_UPCAST(dlg_text), "%s\r\n\r\n", item->text);
             break;
           case SDT_DISPLAY:
-            put_fmt(dlg_text, "%s\r\n\r\n", item->text);
+            BinarySink_put_fmt(BinarySink_UPCAST(dlg_text), "%s\r\n\r\n", item->text);
             break;
           case SDT_SCARY_HEADING:
             assert(scary_heading != NULL && "only expect a scary heading if "
@@ -1027,22 +953,47 @@ static const char *process_seatdialogtext(
     return dlg_title;
 }
 
-static INT_PTR HostKeyDialogProc(HWND hwnd, UINT msg,
-                                 WPARAM wParam, LPARAM lParam, void *vctx)
+static BOOL HostKeyDialogProc(HWND hwnd, UINT msg,
+                              WPARAM wParam, LPARAM lParam, void *vctx)
 {
     struct hostkey_dialog_ctx *ctx = (struct hostkey_dialog_ctx *)vctx;
 
     switch (msg) {
       case WM_INITDIALOG: {
+        static const struct {
+            int id, x;
+        } buttons[] = {
+            { IDCANCEL, 288 },
+            { IDC_HK_ACCEPT, 168 },
+            { IDC_HK_ONCE, 216 },
+            { IDC_HK_MOREINFO, 60 },
+        };
         strbuf *dlg_text = strbuf_new();
         const char *scary_heading = NULL;
         const char *dlg_title = process_seatdialogtext(
             dlg_text, &scary_heading, ctx->text);
 
         LPCTSTR iconid = IDI_QUESTION;
+        int height;
+        int edittop;
+        RECT r;
+        int oldheight;
+        int newheight;
+        size_t i;
+        ctx->has_title = (scary_heading != NULL);
         if (scary_heading) {
+            /* The heading is in a larger, bold form of the system font */
+            LOGFONT lf;
             SetDlgItemText(hwnd, IDC_HK_TITLE, scary_heading);
-            iconid = IDI_WARNING;
+            if (GetObject(GetStockObject(SYSTEM_FONT), sizeof(lf), &lf)) {
+                lf.lfWeight = FW_BOLD;
+                lf.lfHeight = lf.lfHeight * 3 / 2;
+                ctx->title_font = CreateFontIndirect(&lf);
+                if (ctx->title_font)
+                    SendDlgItemMessage(hwnd, IDC_HK_TITLE, WM_SETFONT,
+                                       (WPARAM)ctx->title_font, 0);
+            }
+            iconid = IDI_EXCLAMATION;
         }
 
         SetDlgItemText(hwnd, IDC_HK_TEXT, dlg_text->s);
@@ -1062,13 +1013,12 @@ static INT_PTR HostKeyDialogProc(HWND hwnd, UINT msg,
          * up (after line wrapping), and adjust the height of the
          * whole box to match it.
          */
-        int height = SendDlgItemMessage(hwnd, IDC_HK_TEXT,
-                                        EM_GETLINECOUNT, 0, 0);
+        height = SendDlgItemMessage(hwnd, IDC_HK_TEXT,
+                                    EM_GETLINECOUNT, 0, 0);
         height *= 8; /* height of a text line, by definition of dialog units */
 
-        int edittop = ctx->has_title ? 40 : 20;
+        edittop = ctx->has_title ? 40 : 20;
 
-        RECT r;
         r.left = 40;
         r.top = edittop;
         r.right = 290;
@@ -1078,16 +1028,7 @@ static INT_PTR HostKeyDialogProc(HWND hwnd, UINT msg,
                      r.left, r.top, r.right, r.bottom,
                      SWP_NOREDRAW | SWP_NOZORDER);
 
-        static const struct {
-            int id, x;
-        } buttons[] = {
-            { IDCANCEL, 288 },
-            { IDC_HK_ACCEPT, 168 },
-            { IDC_HK_ONCE, 216 },
-            { IDC_HK_MOREINFO, 60 },
-            { IDHELP, 12 },
-        };
-        for (size_t i = 0; i < lenof(buttons); i++) {
+        for (i = 0; i < lenof(buttons); i++) {
             HWND ctl = GetDlgItem(hwnd, buttons[i].id);
             r.left = buttons[i].x;
             r.top = edittop + height + 20;
@@ -1100,12 +1041,12 @@ static INT_PTR HostKeyDialogProc(HWND hwnd, UINT msg,
         r.left = r.top = r.right = 0;
         r.bottom = 240;
         MapDialogRect(hwnd, &r);
-        int oldheight = r.bottom;
+        oldheight = r.bottom;
 
         r.left = r.top = r.right = 0;
         r.bottom = edittop + height + 40;
         MapDialogRect(hwnd, &r);
-        int newheight = r.bottom;
+        newheight = r.bottom;
 
         GetWindowRect(hwnd, &r);
 
@@ -1113,42 +1054,12 @@ static INT_PTR HostKeyDialogProc(HWND hwnd, UINT msg,
                      r.bottom - r.top + newheight - oldheight,
                      SWP_NOMOVE | SWP_NOREDRAW | SWP_NOZORDER);
 
-        HANDLE icon = LoadImage(
-            NULL, iconid, IMAGE_ICON,
-            GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON),
-            LR_SHARED);
-        SendDlgItemMessage(hwnd, IDC_HK_ICON, STM_SETICON, (WPARAM)icon, 0);
-
-        if (!has_help()) {
-            HWND item = GetDlgItem(hwnd, IDHELP);
-            if (item)
-                DestroyWindow(item);
-        }
+        SendDlgItemMessage(hwnd, IDC_HK_ICON, STM_SETICON,
+                           (WPARAM)LoadIcon(NULL, iconid), 0);
 
         ShowWindow(hwnd, SW_SHOWNORMAL);
 
         return 1;
-      }
-      case WM_CTLCOLORSTATIC: {
-        HDC hdc = (HDC)wParam;
-        HWND control = (HWND)lParam;
-
-        if (GetWindowLongPtr(control, GWLP_ID) == IDC_HK_TITLE &&
-            ctx->has_title) {
-            SetBkMode(hdc, TRANSPARENT);
-            HFONT prev_font = (HFONT)SelectObject(
-                hdc, (HFONT)GetStockObject(SYSTEM_FONT));
-            LOGFONT lf;
-            if (GetObject(prev_font, sizeof(lf), &lf)) { 
-                lf.lfWeight = FW_BOLD;
-                lf.lfHeight = lf.lfHeight * 3 / 2;
-                HFONT bold_font = CreateFontIndirect(&lf);
-                if (bold_font)
-                    SelectObject(hdc, bold_font);
-            }
-            return (INT_PTR)GetSysColorBrush(COLOR_BTNFACE);
-        }
-        return 0;
       }
       case WM_COMMAND:
         switch (LOWORD(wParam)) {
@@ -1157,10 +1068,6 @@ static INT_PTR HostKeyDialogProc(HWND hwnd, UINT msg,
           case IDCANCEL:
             ShinyEndDialog(hwnd, LOWORD(wParam));
             return 0;
-          case IDHELP: {
-            launch_help(hwnd, ctx->helpctx);
-            return 0;
-          }
           case IDC_HK_MOREINFO: {
             ShinyDialogBox(hinst, MAKEINTRESOURCE(IDD_HK_MOREINFO),
                            "PuTTYHostKeyMoreInfo", hwnd,
@@ -1178,12 +1085,12 @@ static INT_PTR HostKeyDialogProc(HWND hwnd, UINT msg,
 const SeatDialogPromptDescriptions *win_seat_prompt_descriptions(Seat *seat)
 {
     static const SeatDialogPromptDescriptions descs = {
-        .hk_accept_action = "press \"Accept\"",
-        .hk_connect_once_action = "press \"Connect Once\"",
-        .hk_cancel_action = "press \"Cancel\"",
-        .hk_cancel_action_Participle = "Pressing \"Cancel\"",
-        .weak_accept_action = "press \"Yes\"",
-        .weak_cancel_action = "press \"No\"",
+        /* .hk_accept_action = */ "press \"Accept\"",
+        /* .hk_connect_once_action = */ "press \"Connect Once\"",
+        /* .hk_cancel_action = */ "press \"Cancel\"",
+        /* .hk_cancel_action_Participle = */ "Pressing \"Cancel\"",
+        /* .weak_accept_action = */ "press \"Yes\"",
+        /* .weak_cancel_action = */ "press \"No\"",
     };
     return &descs;
 }
@@ -1196,12 +1103,16 @@ SeatPromptResult win_seat_confirm_ssh_host_key(
     WinGuiSeat *wgs = container_of(seat, WinGuiSeat, seat);
 
     struct hostkey_dialog_ctx ctx[1];
+    int mbret;
     ctx->text = text;
-    ctx->helpctx = helpctx;
+    ctx->has_title = false;
+    ctx->title_font = NULL;
 
-    int mbret = ShinyDialogBox(
+    mbret = ShinyDialogBox(
         hinst, MAKEINTRESOURCE(IDD_HOSTKEY), "PuTTYHostKeyDialog",
         wgs->term_hwnd, HostKeyDialogProc, ctx);
+    if (ctx->title_font)
+        DeleteObject(ctx->title_font);
     assert(mbret==IDC_HK_ACCEPT || mbret==IDC_HK_ONCE || mbret==IDCANCEL);
     if (mbret == IDC_HK_ACCEPT) {
         store_host_key(seat, host, port, keytype, keystr);
@@ -1293,10 +1204,10 @@ static int win_gui_askappend(LogPolicy *lp, Filename *filename,
 }
 
 const LogPolicyVtable win_gui_logpolicy_vt = {
-    .eventlog = win_gui_eventlog,
-    .askappend = win_gui_askappend,
-    .logging_error = win_gui_logging_error,
-    .verbose = null_lp_verbose_yes,
+    /* .eventlog = */ win_gui_eventlog,
+    /* .askappend = */ win_gui_askappend,
+    /* .logging_error = */ win_gui_logging_error,
+    /* .verbose = */ null_lp_verbose_yes,
 };
 
 /*
@@ -1335,8 +1246,8 @@ void old_keyfile_warning(void)
     sfree(title);
 }
 
-static INT_PTR CAConfigProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
-                            void *ctx)
+static BOOL CAConfigProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
+                         void *ctx)
 {
     PortableDialogStuff *pds = (PortableDialogStuff *)ctx;
 
@@ -1344,8 +1255,8 @@ static INT_PTR CAConfigProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
       case WM_INITDIALOG:
         pds_initdialog_start(pds, hwnd);
 
-        SendMessage(hwnd, WM_SETICON, (WPARAM) ICON_BIG,
-                    (LPARAM) LoadIcon(hinst, MAKEINTRESOURCE(IDI_CFGICON)));
+        SetClassLong(hwnd, GCL_HICON,
+                     (LONG)LoadIcon(hinst, MAKEINTRESOURCE(IDI_CFGICON)));
 
         centre_window(hwnd);
 

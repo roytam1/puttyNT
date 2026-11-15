@@ -78,8 +78,9 @@ static mp_int *generate_rsa_prime(
     pcs = pcs_new_with_firstbits(pd.bits, pd.firstbits, NFIRSTBITS);
     pcs_avoid_residue_small(pcs, RSA_EXPONENT, 1);
     if (pd.strong) {
+        mp_int *p1_minus_1;
         pcs_require_residue_1_mod_prime(pcs, m1);
-        mp_int *p1_minus_1 = mp_copy(p1);
+        p1_minus_1 = mp_copy(p1);
         mp_sub_integer_into(p1_minus_1, p1, 1);
         pcs_require_residue(pcs, p1, p1_minus_1);
         mp_free(p1_minus_1);
@@ -100,12 +101,25 @@ static mp_int *generate_rsa_prime(
 int rsa_generate(RSAKey *key, int bits, bool strong,
                  PrimeGenerationContext *pgc, ProgressReceiver *prog)
 {
+    mp_int *exponent;
+    int qbits;
+    int pbits;
+    RSAPrimeDetails pd;
+    RSAPrimeDetails qd;
+    mp_int *p;
+    mp_int *q;
+    mp_int *modulus;
+    mp_int *pm1;
+    mp_int *qm1;
+    mp_int *phi_n;
+    mp_int *private_exponent;
+    mp_int *iqmp;
     key->sshk.vt = &ssh_rsa;
 
     /*
      * We don't generate e; we just use a standard one always.
      */
-    mp_int *exponent = mp_from_integer(RSA_EXPONENT);
+    exponent = mp_from_integer(RSA_EXPONENT);
 
     /*
      * Generate p and q: primes with combined length `bits', not
@@ -120,18 +134,18 @@ int rsa_generate(RSAKey *key, int bits, bool strong,
      * more so than an attacker guessing a whole 256-bit session key -
      * but it doesn't cost much to make sure.)
      */
-    int qbits = bits / 2;
-    int pbits = bits - qbits;
+    qbits = bits / 2;
+    pbits = bits - qbits;
     assert(pbits >= qbits);
 
-    RSAPrimeDetails pd = setup_rsa_prime(pbits, strong, pgc, prog);
-    RSAPrimeDetails qd = setup_rsa_prime(qbits, strong, pgc, prog);
+    pd = setup_rsa_prime(pbits, strong, pgc, prog);
+    qd = setup_rsa_prime(qbits, strong, pgc, prog);
     progress_ready(prog);
 
     invent_firstbits(&pd.firstbits, &qd.firstbits, 2);
 
-    mp_int *p = generate_rsa_prime(pd, pgc, prog);
-    mp_int *q = generate_rsa_prime(qd, pgc, prog);
+    p = generate_rsa_prime(pd, pgc, prog);
+    q = generate_rsa_prime(qd, pgc, prog);
 
     /*
      * Ensure p > q, by swapping them if not.
@@ -151,17 +165,17 @@ int rsa_generate(RSAKey *key, int bits, bool strong,
      * the other helpful quantities: n=pq, d=e^-1 mod (p-1)(q-1),
      * and (q^-1 mod p).
      */
-    mp_int *modulus = mp_mul(p, q);
-    mp_int *pm1 = mp_copy(p);
+    modulus = mp_mul(p, q);
+    pm1 = mp_copy(p);
     mp_sub_integer_into(pm1, pm1, 1);
-    mp_int *qm1 = mp_copy(q);
+    qm1 = mp_copy(q);
     mp_sub_integer_into(qm1, qm1, 1);
-    mp_int *phi_n = mp_mul(pm1, qm1);
+    phi_n = mp_mul(pm1, qm1);
     mp_free(pm1);
     mp_free(qm1);
-    mp_int *private_exponent = mp_invert(exponent, phi_n);
+    private_exponent = mp_invert(exponent, phi_n);
     mp_free(phi_n);
-    mp_int *iqmp = mp_invert(q, p);
+    iqmp = mp_invert(q, p);
 
     /*
      * Populate the returned structure.
@@ -230,6 +244,12 @@ static void invent_firstbits(unsigned *one, unsigned *two,
      * each prefix of a.
      */
     mp_int *total = mp_new(32);
+    mp_int *mlo;
+    mp_int *mhi;
+    mp_int *randval;
+    unsigned swap;
+    unsigned diff;
+    unsigned a_candidate;
     for (a = lo; a < hi; a++) {
         unsigned b_min = firstbits_b_min(a, lo, hi, min_separation);
         mp_add_integer_into(total, total, hi - b_min);
@@ -238,9 +258,10 @@ static void invent_firstbits(unsigned *one, unsigned *two,
     /*
      * Make up a random number in the range [0,2*total).
      */
-    mp_int *mlo = mp_from_integer(0), *mhi = mp_new(32);
+    mlo = mp_from_integer(0);
+    mhi = mp_new(32);
     mp_lshift_fixed_into(mhi, total, 1);
-    mp_int *randval = mp_random_in_range(mlo, mhi);
+    randval = mp_random_in_range(mlo, mhi);
     mp_free(mlo);
     mp_free(mhi);
 
@@ -248,14 +269,14 @@ static void invent_firstbits(unsigned *one, unsigned *two,
      * Use the low bit of randval as our swap indicator, leaving the
      * rest of it in the range [0,total).
      */
-    unsigned swap = mp_get_bit(randval, 0);
+    swap = mp_get_bit(randval, 0);
     mp_rshift_fixed_into(randval, randval, 1);
 
     /*
      * Now do the same counting loop again to make the actual choice.
      */
     a = b = 0;
-    for (unsigned a_candidate = lo; a_candidate < hi; a_candidate++) {
+    for (a_candidate = lo; a_candidate < hi; a_candidate++) {
         unsigned b_min = firstbits_b_min(a_candidate, lo, hi, min_separation);
         unsigned limit = hi - b_min;
 
@@ -283,7 +304,7 @@ static void invent_firstbits(unsigned *one, unsigned *two,
     /*
      * Last-minute optional swap of a and b.
      */
-    unsigned diff = (a ^ b) & (-swap);
+    diff = (a ^ b) & (-swap);
     a ^= diff;
     b ^= diff;
 

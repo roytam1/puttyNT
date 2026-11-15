@@ -12,12 +12,12 @@ HANDLE lock_interprocess_mutex(const char *mutexname, char **error)
     PSECURITY_DESCRIPTOR psd = NULL;
     PACL acl = NULL;
     HANDLE mutex = NULL;
+    SECURITY_ATTRIBUTES sa;
 
-    if (should_have_security() && !make_private_security_descriptor(
+    if (!make_private_security_descriptor(
             MUTEX_ALL_ACCESS, &psd, &acl, error))
         goto out;
 
-    SECURITY_ATTRIBUTES sa;
     memset(&sa, 0, sizeof(sa));
     sa.nLength = sizeof(sa);
     sa.lpSecurityDescriptor = psd;
