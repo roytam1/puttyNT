@@ -2,7 +2,14 @@
 # and PowerPC. It works with the Win32 SDK for Windows NT 3.1, with
 # Visual C++ 2.0, and with Visual C++ 4.x and the Win32 SDK of 1996.
 #
+# The same Makefile also builds the Win32s port, for the 32-bit Windows
+# subsystem on Windows 3.1 and Windows for Workgroups 3.11. That needs
+# the Visual C++ 1.0 for Win32s toolchain, whose own ntwin32.mak
+# provides the same set of macros the SDK's one does, so the only
+# extra thing needed is the WIN32S_COMPAT define:
+#
 #   nmake          builds the eight programs
+#   nmake WIN32S=1 builds the eight programs for Win32s
 #   nmake clean    deletes what nmake made
 #
 # The SDK's environment variable CPU (i386, MIPS, ALPHA or PPC) picks
@@ -30,11 +37,20 @@ OPTIMISE = $(cdebug:-Ox=-Od)
 OPTIMISE = $(cdebug)
 !ENDIF
 
+# Building for Win32s rather than for Windows NT. The two are separate
+# operating systems with different APIs, so the source needs to know
+# which one it is being compiled for.
+!IF "$(WIN32S)" == "1"
+DEFINES = -DWIN32S_COMPAT
+!ELSE
+DEFINES =
+!ENDIF
+
 # nmake 1.12 empties a macro that a definition uses when the two names
 # differ only in case (it takes it for a reference to itself): so no
 # CFLAGS = $(cflags) here.
-COMPILE = $(cc) $(cflags) $(cvarsmt) $(OPTIMISE) -D_WINDOWS -I. -Iwindows -Iterminal
-COMPILE_OPT = $(cc) $(cflags) $(cvarsmt) $(cdebug) -D_WINDOWS -I. -Iwindows -Iterminal
+COMPILE = $(cc) $(cflags) $(cvarsmt) $(OPTIMISE) $(DEFINES) -D_WINDOWS -I. -Iwindows -Iterminal
+COMPILE_OPT = $(cc) $(cflags) $(cvarsmt) $(cdebug) $(DEFINES) -D_WINDOWS -I. -Iwindows -Iterminal
 CONSOLE_LIBS = $(conlibsmt) advapi32.lib user32.lib
 GUI_LIBS = $(guilibsmt) advapi32.lib shell32.lib
 
