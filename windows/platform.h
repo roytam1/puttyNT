@@ -265,7 +265,10 @@ void write_aclip(HWND hwnd, int clipboard, char *, int);
  */
 /* Report an event notification from WSA*Select */
 void select_result(WPARAM, LPARAM);
-bool sk_poll(void);
+/* Look at the sockets with select() (see network.c). The event loops
+ * do it this often, in milliseconds, in case WinSock missed an event. */
+#define SK_POLL_INTERVAL 200
+bool sk_poll(bool all);
 /* Enumerate all currently live OS-level SOCKETs */
 SOCKET first_socket(int *);
 SOCKET next_socket(int *);

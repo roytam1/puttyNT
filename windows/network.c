@@ -1272,8 +1272,27 @@ void select_result(WPARAM wParam, LPARAM lParam)
             sk_addr_free(s->addr);
             s->addr = NULL;
         }
+
+        /*
+         * Send what was written before the connection was made.
+         * Other WinSocks post an FD_WRITE for that after
+         * FD_CONNECT, but Windows NT 3.1's doesn't, and then the
+         * SSH version string would wait for ever.
+         */
+        {
+            size_t bufsize_before, bufsize_after;
+            bufsize_before = s->sending_oob + bufchain_size(&s->output_data);
+            try_send(s);
+            bufsize_after = s->sending_oob + bufchain_size(&s->output_data);
+            if (bufsize_after < bufsize_before)
+                plug_sent(s->plug, bufsize_after);
+        }
         break;
       case FD_READ:
+        /* Reported already: sk_poll and a message can both find the end */
+        if (s->incomingeof)
+            break;
+
         /* In the case the socket is still frozen, we don't even bother */
         if (s->frozen) {
             s->frozen_readable = true;
@@ -1344,6 +1363,10 @@ void select_result(WPARAM wParam, LPARAM lParam)
         break;
       }
       case FD_CLOSE:
+        /* Reported already, if sk_poll found the end as FD_READ */
+        if (s->incomingeof)
+            return;
+
         /* Signal a close on the socket. First read any outstanding data. */
         do {
             ret = p_recv(s->s, buf, sizeof(buf), 0);
@@ -1373,7 +1396,9 @@ void select_result(WPARAM wParam, LPARAM lParam)
         t = p_accept(s->s,(struct sockaddr *)&isa,&addrlen);
         if (t == INVALID_SOCKET) {
             err = p_WSAGetLastError();
-            if (err == WSATRY_AGAIN)
+            /* WSAEWOULDBLOCK: sk_poll and a message both reported
+             * the same connection, and it was accepted already */
+            if (err == WSATRY_AGAIN || err == WSAEWOULDBLOCK)
                 break;
         }
 
@@ -1400,13 +1425,21 @@ static bool fd_in(SOCKET skt, const fd_set *set)
 }
 
 /*
- * The console tools' way to find network activity when they have no
- * window for WSAAsyncSelect to send it to (see select-cli.c): look at
- * the sockets (the first FD_SETSIZE of them) with select(), and pass
- * what it finds to select_result as the events WSAAsyncSelect would
- * have sent. Returns true if there was any.
+ * Look at the sockets (the first FD_SETSIZE of them) with select(),
+ * and pass what it finds to select_result as the events
+ * WSAAsyncSelect would have sent. Returns true if there was any.
+ *
+ * With 'all', this is how the console tools find network activity
+ * when they have no window for WSAAsyncSelect to send it to (see
+ * select-cli.c). Without, it is a safety net that the event loops run
+ * every SK_POLL_INTERVAL milliseconds. Windows NT 3.1's WinSock
+ * sometimes never sends an event, such as FD_READ for the first data
+ * after a connect that didn't finish at once, and then the connection
+ * would wait for ever. The messages still come as well, so an event
+ * can be reported twice. That does no harm, except for urgent data,
+ * which the safety net leaves out.
  */
-bool sk_poll(void)
+bool sk_poll(bool all)
 {
     fd_set rfds, wfds, efds;
     struct timeval tv;
@@ -1419,7 +1452,7 @@ bool sk_poll(void)
     FD_ZERO(&wfds);
     FD_ZERO(&efds);
     for (k = 0; (s = index234(sktree, k)) != NULL; k++) {
-        if (s->s == INVALID_SOCKET || s->error)
+        if (s->s == INVALID_SOCKET || s->error || s->pending_error)
             continue;
         if (s->listener) {
             FD_SET(s->s, &rfds);         /* FD_ACCEPT */
@@ -1431,7 +1464,7 @@ bool sk_poll(void)
                 FD_SET(s->s, &rfds);     /* FD_READ */
             if (!s->writable)
                 FD_SET(s->s, &wfds);     /* FD_WRITE */
-            if (!s->oobinline && !s->incomingeof)
+            if (all && !s->oobinline && !s->incomingeof)
                 FD_SET(s->s, &efds);     /* FD_OOB */
         }
     }

@@ -450,6 +450,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     MSG msg;
     int guess_width, guess_height;
     WinGuiSeat *wgs;
+    unsigned long lastpoll;
 
     dll_hijacking_protection();
     enable_dit();
@@ -762,10 +763,17 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     term_set_focus(wgs->term, GetForegroundWindow() == wgs->term_hwnd);
     UpdateWindow(wgs->term_hwnd);
 
+    lastpoll = GETTICKCOUNT();
     while (1) {
         int n;
         DWORD timeout;
         HandleWaitList *hwl;
+
+        /* In case WinSock missed a network event (see sk_poll) */
+        if (GETTICKCOUNT() - lastpoll >= SK_POLL_INTERVAL) {
+            sk_poll(false);
+            lastpoll = GETTICKCOUNT();
+        }
 
         if (toplevel_callback_pending() ||
             PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE)) {
@@ -788,7 +796,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
              */
             timeout = 0;
         } else {
-            timeout = INFINITE;
+            timeout = SK_POLL_INTERVAL;    /* for sk_poll, above */
             /* The messages seem unreliable; especially if we're being tricky */
             term_set_focus(wgs->term, GetForegroundWindow() == wgs->term_hwnd);
         }

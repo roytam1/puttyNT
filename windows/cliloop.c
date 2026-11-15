@@ -8,9 +8,10 @@
 
 void cli_main_loop(cliloop_pre_t pre, cliloop_post_t post, void *ctx)
 {
-    unsigned long now, next, then;
+    unsigned long now, next, then, lastpoll;
     bool polling = winselcli_polling();
     now = GETTICKCOUNT();
+    lastpoll = now;
 
     while (true) {
         DWORD n;
@@ -28,10 +29,17 @@ void cli_main_loop(cliloop_pre_t pre, cliloop_post_t post, void *ctx)
         if (!pre(ctx, &extra_handles, &n_extra_handles))
             break;
 
-        /* Without a window for network events (see select-cli.c),
-         * look at the sockets now, before taking the handle list,
-         * which the events can change */
-        netbusy = polling && sk_poll();
+        /* Look at the sockets now, before taking the handle list,
+         * which the events can change: every time without a window
+         * for network events (see select-cli.c), and now and then
+         * with one, in case WinSock missed an event (see sk_poll) */
+        netbusy = false;
+        if (polling) {
+            netbusy = sk_poll(true);
+        } else if (GETTICKCOUNT() - lastpoll >= SK_POLL_INTERVAL) {
+            sk_poll(false);
+            lastpoll = GETTICKCOUNT();
+        }
 
         if (toplevel_callback_pending()) {
             ticks = 0;
@@ -58,8 +66,8 @@ void cli_main_loop(cliloop_pre_t pre, cliloop_post_t post, void *ctx)
 
         if (!polling) {
             /* Network activity arrives as window messages (see
-             * select-cli.c) */
-            wait = ticks;
+             * select-cli.c). Wake up for the check above too. */
+            wait = ticks < SK_POLL_INTERVAL ? ticks : SK_POLL_INTERVAL;
             n = MsgWaitForMultipleObjects(total_handles, hwl->handles,
                                           false, wait, QS_ALLINPUT);
         } else {

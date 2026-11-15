@@ -23,7 +23,7 @@ NODEBUG = 1
 # short values at once, such as the AES S-box: a value is read back
 # from a stack slot that was never written. NT 3.1's compiler does it
 # with every -O option, Visual C++ 4.x with -Og. So MIPS builds are
-# not optimised.
+# not optimised, apart from the few files that use COMPILE_OPT below.
 !IF "$(CPU)" == "MIPS"
 OPTIMISE = $(cdebug:-Ox=-Od)
 !ELSE
@@ -34,6 +34,7 @@ OPTIMISE = $(cdebug)
 # differ only in case (it takes it for a reference to itself): so no
 # CFLAGS = $(cflags) here.
 COMPILE = $(cc) $(cflags) $(cvarsmt) $(OPTIMISE) -D_WINDOWS -I. -Iwindows -Iterminal
+COMPILE_OPT = $(cc) $(cflags) $(cvarsmt) $(cdebug) -D_WINDOWS -I. -Iwindows -Iterminal
 CONSOLE_LIBS = $(conlibsmt) advapi32.lib user32.lib
 GUI_LIBS = $(guilibsmt) advapi32.lib shell32.lib
 
@@ -76,6 +77,29 @@ be_pscp.obj: be_list.c
 
 be_psftp.obj: be_list.c
 	$(COMPILE) -DAPPNAME=PSFTP -DSSH=1 -DSERIAL=0 -DOTHERBACKENDS=0 -Fobe_psftp.obj be_list.c
+
+# The bignum, elliptic curve, NTRU, ML-KEM and Argon2 code does most of
+# the work when PuTTY connects or unlocks a key. It is optimised on
+# MIPS too: for these files both MIPS compilers make the right code
+# (PuTTY's testcrypt tests pass), and connecting takes half the time.
+
+crypto\mpint.obj: crypto\mpint.c
+	$(COMPILE_OPT) -Focrypto\mpint.obj crypto\mpint.c
+
+crypto\ecc-arithmetic.obj: crypto\ecc-arithmetic.c
+	$(COMPILE_OPT) -Focrypto\ecc-arithmetic.obj crypto\ecc-arithmetic.c
+
+crypto\ntru.obj: crypto\ntru.c
+	$(COMPILE_OPT) -Focrypto\ntru.obj crypto\ntru.c
+
+crypto\mlkem.obj: crypto\mlkem.c
+	$(COMPILE_OPT) -Focrypto\mlkem.obj crypto\mlkem.c
+
+crypto\argon2.obj: crypto\argon2.c
+	$(COMPILE_OPT) -Focrypto\argon2.obj crypto\argon2.c
+
+crypto\blake2.obj: crypto\blake2.c
+	$(COMPILE_OPT) -Focrypto\blake2.obj crypto\blake2.c
 
 PUTTY = \
 	be_putty.obj callback.obj cmdline.obj config.obj \

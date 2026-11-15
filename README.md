@@ -20,8 +20,9 @@ NT 3.1 has no PowerPC version. Each set was built on its own NT version and CPU,
 
 - No Kerberos (GSSAPI), no IPv6 and no help file. NT 3.x and 4.0 don't have them.
 - Bignum arithmetic uses 16-bit words, because the compilers of 1993 have no 64-bit integer type. So key exchange and key generation are slower.
-- The MIPS programs are not optimised. Both MIPS compilers (NT 3.1 SDK and Visual C++ 4.x) make wrong code for some functions when they optimise, the AES S-box among them. So the MIPS programs are about twice as big, and slower.
+- On MIPS, only six files are optimised: the big-number, key exchange and key file code (`crypto/mpint.c`, `ecc-arithmetic.c`, `ntru.c`, `mlkem.c`, `argon2.c` and `blake2.c`). Both MIPS compilers (NT 3.1 SDK and Visual C++ 4.x) make wrong code for some other functions when they optimise, the AES S-box among them. So the MIPS programs are bigger and slower than the others.
 - Both MIPS compilers also lose the cast in `(unsigned short)(-x)` and `(unsigned short)(~x)`. `crypto/mpint.c` and `crypto/mpint_i.h` work around it.
+- The WinSock of Windows NT 3.1 sometimes doesn't report network events, such as the server's first data after a slow connect. A login could then wait for ever. So the programs also check their connections with `select()` every 200 ms.
 
 ## Build
 
@@ -38,7 +39,9 @@ The `CPU` environment variable (`i386`, `MIPS`, `ALPHA` or `PPC`) picks the proc
 ## Testing
 
 - PuTTY's own crypto tests (testcrypt): 222,037 tests recorded on x86, then run with each of the 7 compilers. All results match. (A few BLAKE2b answers differ only in buffer bytes that the test reads without filling.)
-- Pageant unlocks a passphrase-protected Ed25519 key on all 11 builds.
+- Pageant unlocks a passphrase-protected Ed25519 key on all 11 builds (tested with v0.85).
+- SSH: on all 11 builds, Plink, PSCP and PSFTP log in to OpenSSH 10.3 and copy a file both ways, with SFTP and SCP. The files arrive unchanged.
+- NT 3.1 MIPS: 40 Plink logins and 4 PuTTY logins in a row, and none hung. Before the WinSock fix, 2 of 7 Plink logins hung.
 
 ## Source
 
