@@ -370,6 +370,42 @@ const char *winsock_error_string(int error)
         return "Network error: Resource temporarily unavailable";
       case WSAEDISCON:
         return "Network error: Graceful shutdown in progress";
+
+      /*
+       * Windows NT 3.1 has no text for any WinSock error, so for these
+       * FormatMessage fails there too.
+       */
+      case WSAEBADF:
+        return "Network error: Bad file descriptor";
+      case WSAETOOMANYREFS:
+        return "Network error: Too many references";
+      case WSAELOOP:
+        return "Network error: Cannot translate name";
+      case WSAENAMETOOLONG:
+        return "Network error: Name too long";
+      case WSAENOTEMPTY:
+        return "Network error: Directory not empty";
+      case WSAEUSERS:
+        return "Network error: User quota exceeded";
+      case WSAEDQUOT:
+        return "Network error: Disk quota exceeded";
+      case WSAESTALE:
+        return "Network error: Stale file handle reference";
+      case WSAEREMOTE:
+        return "Network error: Item is remote";
+      case WSASYSNOTREADY:
+        return "Network error: Network subsystem is unavailable";
+      case WSAVERNOTSUPPORTED:
+        return "Network error: WinSock version not supported";
+      case WSANOTINITIALISED:
+        return "Network error: WinSock is not initialised";
+      case WSAHOST_NOT_FOUND:
+        return "Network error: Host does not exist";
+      case WSATRY_AGAIN:
+      case WSANO_DATA:
+        return "Network error: Host not found";
+      case WSANO_RECOVERY:
+        return "Network error: Name lookup failed";
     }
 
     /*
@@ -381,11 +417,14 @@ const char *winsock_error_string(int error)
 static inline const char *namelookup_strerror(DWORD err)
 {
     /* PuTTY has traditionally translated a few of the likely error
-     * messages into more concise strings than the standard Windows ones */
+     * messages into more concise strings than the standard Windows ones.
+     * Windows NT 3.1 gives WSANO_DATA for every name it can't find: one
+     * that doesn't exist, and any name at all when TCP/IP is set to use
+     * the hosts file only. */
     return (err == WSAENETDOWN ? "Network is down" :
             err == WSAHOST_NOT_FOUND ? "Host does not exist" :
-            err == WSATRY_AGAIN ? "Host not found" :
-            win_strerror(err));
+            err == WSATRY_AGAIN || err == WSANO_DATA ? "Host not found" :
+            winsock_error_string(err));
 }
 
 SockAddr *sk_namelookup(const char *host, char **canonicalname,
