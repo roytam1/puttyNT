@@ -4,6 +4,8 @@
 
 Upstream PuTTY needs CMake, a C99 compiler and a newer Windows. This port is C89 with one nmake Makefile. It builds with the original NT compilers of 1993 to 1996 and runs on the first versions of Windows NT.
 
+![PuTTY 0.85 on Windows NT 3.1 on MIPS](puttyNT.png)
+
 ## Download
 
 Get the zip for your NT version and CPU from [Releases](https://github.com/tenox7/puttyNT/releases). Each zip has all eight programs: PuTTY, PuTTYtel, Plink, PSCP, PSFTP, PSOCKS, Pageant and PuTTYgen.
