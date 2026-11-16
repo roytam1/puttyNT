@@ -57,6 +57,7 @@ struct WinGuiSeat {
     int extra_width, extra_height;
     int font_width, font_height;
     bool font_dualwidth, font_varpitch;
+    bool font_oem_bitmap;          /* see do_text_internal */
     int offset_width, offset_height;
     bool was_zoomed;
     int prev_rows, prev_cols; /* FIXME I don't think these are even used */

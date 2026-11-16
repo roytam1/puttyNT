@@ -1410,6 +1410,9 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
     if (!GetCPInfo(wgs->ucsdata.font_codepage, &cpinfo))
         cpinfo.MaxCharSize = 1;
     wgs->ucsdata.dbcs_screenfont = (cpinfo.MaxCharSize > 1);
+    wgs->font_oem_bitmap =
+        tm.tmCharSet == OEM_CHARSET && !wgs->ucsdata.dbcs_screenfont &&
+        !(tm.tmPitchAndFamily & (TMPF_VECTOR | TMPF_TRUETYPE));
 
     f(FONT_UNDERLINE, font->charset, fw_dontcare, true);
 
@@ -3361,6 +3364,34 @@ static void do_text_internal(
         int i;
         for (i = 0; i < len; i++)
             text[i] = 0xFFFD;
+    }
+
+    /*
+     * Windows NT draws Unicode text in a bitmap font as if the font
+     * were in code page 1252, whatever its own character set. So the
+     * Terminal font, which is in the OEM code page, would show box
+     * drawing and block characters as blanks, and accented letters as
+     * other characters. Text in such a font goes to the font's own
+     * code page instead, and is drawn directly, like the line drawing
+     * characters that unicode.c links to the font. A character that
+     * the code page lacks becomes what WideCharToMultiByte makes of
+     * it: a similar one, or '?'. Surrogates and variation selectors
+     * would then take a column each, so text with them is left alone.
+     */
+    if (wgs->font_oem_bitmap && !DIRECT_FONT(text[0]) &&
+        !(attr & TATTR_COMBINING)) {
+        int i;
+        for (i = 0; i < len; i++)
+            if (IS_SURROGATE(text[i]) || IS_LOW_VARSEL(text[i]))
+                break;
+        if (i == len) {
+            sgrowarray(cbuf, cbuflen, len);
+            if (WideCharToMultiByte(wgs->ucsdata.font_codepage, 0, text,
+                                    len, cbuf, len, NULL, NULL) == len) {
+                for (i = 0; i < len; i++)
+                    text[i] = (wchar_t)(CSET_ACP + (unsigned char)cbuf[i]);
+            }
+        }
     }
 
     /* OEM CP */
