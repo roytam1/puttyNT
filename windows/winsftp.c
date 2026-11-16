@@ -823,9 +823,9 @@ static void tab_complete(void)
             /* Completion stores the dir_part prefix so the token is
              * reconstructed correctly for both relative and absolute paths. */
             if (is_dir)
-                entry = dupcat(dir_part, name, "\\");
+                entry = dupcat(dir_part, name, "\\", NULL);
             else
-                entry = dupcat(dir_part, name);
+                entry = dupcat(dir_part, name, NULL);
             matches[n_matches++] = entry;
         } while (FindNextFile(hFind, &fd));
         FindClose(hFind);
@@ -889,7 +889,7 @@ static void tab_complete(void)
     /* Extend the input field if the common prefix is longer than what
      * was already typed */
     if (common_len > (int)strlen(prefix_part)) {
-        char *completed = dupcat(dir_part, common);
+        char *completed = dupcat(dir_part, common, NULL);
         int clen = (int)strlen(completed);
         int tail_len = (int)strlen(tail);
         int new_cursor = token_offset + clen;

@@ -527,7 +527,7 @@ void store_host_key(Seat *seat, const char *hostname, int port,
                     const char *keytype, const char *key)
 {
     char *filename = make_filename(INDEX_HOSTKEYS, NULL);
-    char *tmpfilename = dupcat(filename, ".tmp");
+    char *tmpfilename = dupcat(filename, ".tmp", NULL);
     char *dir;
     FILE *rfp, *wfp;
     strbuf *expected;
