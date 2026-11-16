@@ -23,11 +23,16 @@ static const struct keyvalwhere ciphernames[] = {
 
 /* The default order here is sometimes overridden by the backward-
  * compatibility warts in load_open_settings(), and should be kept
- * in sync with those. */
+ * in sync with those.
+ *
+ * ML-KEM comes before NTRU Prime here: on a slow machine, such as a
+ * MIPS one with Windows NT 3.1, NTRU Prime makes the key exchange
+ * take twice as long, and some servers close a connection that hasn't
+ * logged in within 20 seconds or so. */
 static const struct keyvalwhere kexnames[] = {
-    { "ntru-curve25519",    KEX_NTRU_HYBRID, -1, +1 },
-    { "mlkem-curve25519",   KEX_MLKEM_25519_HYBRID, KEX_NTRU_HYBRID, +1 },
-    { "mlkem-nist",         KEX_MLKEM_NIST_HYBRID, KEX_MLKEM_25519_HYBRID, +1 },
+    { "mlkem-curve25519",   KEX_MLKEM_25519_HYBRID, -1, +1 },
+    { "ntru-curve25519",    KEX_NTRU_HYBRID, KEX_MLKEM_25519_HYBRID, +1 },
+    { "mlkem-nist",         KEX_MLKEM_NIST_HYBRID, KEX_NTRU_HYBRID, +1 },
     { "ecdh",               KEX_ECDH,       -1, +1 },
     /* This name is misleading: it covers both SHA-256 and SHA-1 variants */
     { "dh-gex-sha1",        KEX_DHGEX,      -1, -1 },
