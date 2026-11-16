@@ -1220,6 +1220,22 @@ static void sk_net_write_eof(Socket *sock)
         try_send(s);
 }
 
+/*
+ * Whether recv() on a socket would find data. Windows NT 3.1's
+ * WinSock gives a socket no more data once recv() on it has failed
+ * with WSAEWOULDBLOCK: recv() goes on failing, and neither select()
+ * nor WSAAsyncSelect reports what comes, although FIONREAD counts
+ * it. So call recv() only when FIONREAD counts something.
+ */
+static bool sk_net_readable(SOCKET skt)
+{
+    u_long avail = 0;
+
+    if (p_ioctlsocket(skt, FIONREAD, &avail) == SOCKET_ERROR)
+        return true;                   /* can't tell, so try recv() */
+    return avail != 0;
+}
+
 void select_result(WPARAM wParam, LPARAM lParam)
 {
     int ret;
@@ -1294,7 +1310,7 @@ void select_result(WPARAM wParam, LPARAM lParam)
         }
         break;
       case FD_READ:
-        /* Reported already: sk_poll and a message can both find the end */
+        /* The end has been reported already */
         if (s->incomingeof)
             break;
 
@@ -1303,6 +1319,15 @@ void select_result(WPARAM wParam, LPARAM lParam)
             s->frozen_readable = true;
             break;
         }
+
+        /*
+         * A message can come when there is nothing to read, if
+         * sk_poll has read its data already. recv() would then fail
+         * with WSAEWOULDBLOCK, which Windows NT 3.1 doesn't survive
+         * (see sk_net_readable).
+         */
+        if (!sk_net_readable(s->s))
+            break;
 
         /*
          * We have received data on the socket. For an oobinline
@@ -1368,7 +1393,7 @@ void select_result(WPARAM wParam, LPARAM lParam)
         break;
       }
       case FD_CLOSE:
-        /* Reported already, if sk_poll found the end as FD_READ */
+        /* Reported already, if sk_poll found the end first */
         if (s->incomingeof)
             return;
 
@@ -1441,8 +1466,10 @@ static bool fd_in(SOCKET skt, const fd_set *set)
  * sometimes never sends an event, such as FD_READ for the first data
  * after a connect that didn't finish at once, and then the connection
  * would wait for ever. The messages still come as well, so an event
- * can be reported twice. That does no harm, except for urgent data,
- * which the safety net leaves out.
+ * can be reported twice. That does no harm, as select_result reads
+ * only what FIONREAD counts, except for urgent data, which the safety
+ * net leaves out. A socket that select() finds readable with nothing
+ * to read has reached its end, so it gets FD_CLOSE.
  */
 bool sk_poll(bool all)
 {
@@ -1518,7 +1545,9 @@ bool sk_poll(bool all)
                 select_result((WPARAM)skt, WSAMAKESELECTREPLY(FD_WRITE, 0));
             if (fd_in(skt, &rfds) &&
                 find234(sktree, (void *)skt, cmpforsearch) == s0)
-                select_result((WPARAM)skt, WSAMAKESELECTREPLY(FD_READ, 0));
+                select_result((WPARAM)skt, WSAMAKESELECTREPLY(
+                                  sk_net_readable(skt) ? FD_READ : FD_CLOSE,
+                                  0));
         }
     }
     return true;
@@ -1584,7 +1613,7 @@ static void sk_net_set_frozen(Socket *sock, bool is_frozen)
     s->frozen = is_frozen;
     if (!is_frozen) {
         do_select(s->s, true);
-        if (s->frozen_readable) {
+        if (s->frozen_readable && sk_net_readable(s->s)) {
             char c;
             p_recv(s->s, &c, 1, MSG_PEEK);
         }

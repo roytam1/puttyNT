@@ -42,13 +42,14 @@
 #endif
 
 /*
- * Edit boxes, list boxes and combo boxes get a sunken 3-D edge with
- * the SDK for Windows NT 4.0, and a plain border (edit boxes and list
- * boxes; combo boxes draw their own) with the older SDKs.
+ * Edit boxes, list boxes and combo boxes get a sunken 3-D edge on
+ * Windows NT 4.0, and a plain border (edit boxes and list boxes; combo
+ * boxes draw their own) on NT 3.x, which draws no 3-D edges. The SDKs
+ * older than NT 4.0's don't know the 3-D edge.
  */
 #ifdef WS_EX_CLIENTEDGE
-#define EDGE_STYLE 0
-#define EDGE_EXSTYLE WS_EX_CLIENTEDGE
+#define EDGE_STYLE (osMajorVersion < 4 ? WS_BORDER : 0)
+#define EDGE_EXSTYLE (osMajorVersion < 4 ? 0 : WS_EX_CLIENTEDGE)
 #else
 #define EDGE_STYLE WS_BORDER
 #define EDGE_EXSTYLE 0

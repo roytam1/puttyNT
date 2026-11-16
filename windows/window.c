@@ -1108,10 +1108,19 @@ static void win_seat_update_specials_menu(Seat *seat)
 
     for (j = 0; j < lenof(wgs->popup_menus); j++) {
         if (wgs->specials_menu) {
-            /* XXX does this free up all submenus? */
-            DeleteMenu(wgs->popup_menus[j].menu, (UINT)wgs->specials_menu,
-                       MF_BYCOMMAND);
-            DeleteMenu(wgs->popup_menus[j].menu, IDM_SPECIALSEP, MF_BYCOMMAND);
+            /*
+             * Windows NT 3.x doesn't find a submenu by its handle
+             * with MF_BYCOMMAND, so the old one is found by position.
+             * It is in both menus, so it is destroyed after the loop.
+             */
+            HMENU menu = wgs->popup_menus[j].menu;
+            int k, n = GetMenuItemCount(menu);
+            for (k = 0; k < n; k++)
+                if (GetSubMenu(menu, k) == wgs->specials_menu) {
+                    RemoveMenu(menu, k, MF_BYPOSITION);
+                    break;
+                }
+            DeleteMenu(menu, IDM_SPECIALSEP, MF_BYCOMMAND);
         }
         if (new_menu) {
             InsertMenu(wgs->popup_menus[j].menu, IDM_SHOWLOG,
@@ -1121,6 +1130,8 @@ static void win_seat_update_specials_menu(Seat *seat)
                        MF_BYCOMMAND | MF_SEPARATOR, IDM_SPECIALSEP, 0);
         }
     }
+    if (wgs->specials_menu)
+        DestroyMenu(wgs->specials_menu);   /* and its submenus */
     wgs->specials_menu = new_menu;
 }
 
@@ -1463,6 +1474,9 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
     if (!GetCPInfo(wgs->ucsdata.font_codepage, &cpinfo))
         cpinfo.MaxCharSize = 1;
     wgs->ucsdata.dbcs_screenfont = (cpinfo.MaxCharSize > 1);
+    wgs->font_oem_bitmap =
+        tm.tmCharSet == OEM_CHARSET && !wgs->ucsdata.dbcs_screenfont &&
+        !(tm.tmPitchAndFamily & (TMPF_VECTOR | TMPF_TRUETYPE));
 
     f(FONT_UNDERLINE, font->charset, fw_dontcare, true);
 
@@ -3423,6 +3437,34 @@ static void do_text_internal(
         int i;
         for (i = 0; i < len; i++)
             text[i] = 0xFFFD;
+    }
+
+    /*
+     * Windows NT draws Unicode text in a bitmap font as if the font
+     * were in code page 1252, whatever its own character set. So the
+     * Terminal font, which is in the OEM code page, would show box
+     * drawing and block characters as blanks, and accented letters as
+     * other characters. Text in such a font goes to the font's own
+     * code page instead, and is drawn directly, like the line drawing
+     * characters that unicode.c links to the font. A character that
+     * the code page lacks becomes what WideCharToMultiByte makes of
+     * it: a similar one, or '?'. Surrogates and variation selectors
+     * would then take a column each, so text with them is left alone.
+     */
+    if (wgs->font_oem_bitmap && !DIRECT_FONT(text[0]) &&
+        !(attr & TATTR_COMBINING)) {
+        int i;
+        for (i = 0; i < len; i++)
+            if (IS_SURROGATE(text[i]) || IS_LOW_VARSEL(text[i]))
+                break;
+        if (i == len) {
+            sgrowarray(cbuf, cbuflen, len);
+            if (WideCharToMultiByte(wgs->ucsdata.font_codepage, 0, text,
+                                    len, cbuf, len, NULL, NULL) == len) {
+                for (i = 0; i < len; i++)
+                    text[i] = (wchar_t)(CSET_ACP + (unsigned char)cbuf[i]);
+            }
+        }
     }
 
     /* OEM CP */
