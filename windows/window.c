@@ -1068,10 +1068,19 @@ static void win_seat_update_specials_menu(Seat *seat)
 
     for (j = 0; j < lenof(wgs->popup_menus); j++) {
         if (wgs->specials_menu) {
-            /* XXX does this free up all submenus? */
-            DeleteMenu(wgs->popup_menus[j].menu, (UINT)wgs->specials_menu,
-                       MF_BYCOMMAND);
-            DeleteMenu(wgs->popup_menus[j].menu, IDM_SPECIALSEP, MF_BYCOMMAND);
+            /*
+             * Windows NT 3.x doesn't find a submenu by its handle
+             * with MF_BYCOMMAND, so the old one is found by position.
+             * It is in both menus, so it is destroyed after the loop.
+             */
+            HMENU menu = wgs->popup_menus[j].menu;
+            int k, n = GetMenuItemCount(menu);
+            for (k = 0; k < n; k++)
+                if (GetSubMenu(menu, k) == wgs->specials_menu) {
+                    RemoveMenu(menu, k, MF_BYPOSITION);
+                    break;
+                }
+            DeleteMenu(menu, IDM_SPECIALSEP, MF_BYCOMMAND);
         }
         if (new_menu) {
             InsertMenu(wgs->popup_menus[j].menu, IDM_SHOWLOG,
@@ -1081,6 +1090,8 @@ static void win_seat_update_specials_menu(Seat *seat)
                        MF_BYCOMMAND | MF_SEPARATOR, IDM_SPECIALSEP, 0);
         }
     }
+    if (wgs->specials_menu)
+        DestroyMenu(wgs->specials_menu);   /* and its submenus */
     wgs->specials_menu = new_menu;
 }
 
