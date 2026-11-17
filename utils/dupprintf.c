@@ -47,11 +47,13 @@
         memcpy(&a, &b, sizeof(va_list)))
 #endif
 
-/* Also lack of vsnprintf before VS2015 */
+/* Also lack of vsnprintf before VS2015, and on ARM: PINT (Windows NT
+ * on the Raspberry Pi) has the C run-time of Windows NT 3.5 or 4.0,
+ * with a compiler of today. Every Microsoft run-time has _vsnprintf. */
 #if defined _WINDOWS && \
     !defined __MINGW32__ && \
     !defined __WINE__ && \
-    _MSC_VER < 1900
+    (_MSC_VER < 1900 || defined _M_ARM)
 #define vsnprintf _vsnprintf
 #endif
 

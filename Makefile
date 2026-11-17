@@ -1,13 +1,14 @@
 # Makefile for PuTTY on Windows NT 3.1, 3.51 and 4.0: x86, MIPS, Alpha
-# and PowerPC. It works with the Win32 SDK for Windows NT 3.1, with
-# Visual C++ 2.0, and with Visual C++ 4.x and the Win32 SDK of 1996.
+# and PowerPC; and ARM, PINT 3.5 and 4.0. It works with the Win32 SDK
+# for Windows NT 3.1, with Visual C++ 2.0, with Visual C++ 4.x and the
+# Win32 SDK of 1996, and with the PINT SDKs.
 #
 #   nmake          builds the eight programs
 #   nmake clean    deletes what nmake made
 #
-# The SDK's environment variable CPU (i386, MIPS, ALPHA or PPC) picks
-# the processor. With the SDK of 1996, APPVER=3.51 marks the programs
-# for Windows NT 3.51; without it they need NT 4.0.
+# The SDK's environment variable CPU (i386, MIPS, ALPHA, PPC or ARM)
+# picks the processor. With the SDK of 1996, APPVER=3.51 marks the
+# programs for Windows NT 3.51; without it they need NT 4.0.
 #
 # Object files don't depend on header files here: after changing a
 # header file, run "nmake clean" first.

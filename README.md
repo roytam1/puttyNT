@@ -1,6 +1,6 @@
 # PuTTY NT
 
-[PuTTY](https://www.chiark.greenend.org.uk/~sgtatham/putty/) 0.85, the SSH and Telnet client, for Windows NT 3.1, 3.51 and 4.0 on Intel x86, MIPS, Alpha and PowerPC.
+[PuTTY](https://www.chiark.greenend.org.uk/~sgtatham/putty/) 0.85, the SSH and Telnet client, for Windows NT 3.1, 3.51 and 4.0 on Intel x86, MIPS, Alpha and PowerPC, and for [PINT](https://github.com/tenox7/pint), Windows NT 3.5 and 4.0 on ARM (the Raspberry Pi).
 
 Upstream PuTTY needs CMake, a C99 compiler and a newer Windows. This port is C89 with one nmake Makefile. It builds with the original NT compilers of 1993 to 1996 and runs on the first versions of Windows NT.
 
@@ -17,6 +17,8 @@ Get the zip for your NT version and CPU from [Releases](https://github.com/tenox
 | NT 4.0 | `nt40-x86` | `nt40-mips` | `nt40-alpha` | `nt40-ppc` |
 
 NT 3.1 has no PowerPC version. Each set was built on its own NT version and CPU, and tested there, in emulators.
+
+For PINT: `pint35-arm` for PINT 3.5, `pint40-arm` for PINT 4.0. These two were built with the PINT SDKs and tested in QEMU.
 
 ## Differences from upstream PuTTY
 
@@ -38,8 +40,16 @@ Open a command prompt set up for your compiler, go to the source folder and run 
 | 3.1 | Win32 SDK for Windows NT 3.1 (cl386, mcl, claxp) | `nmake` |
 | 3.51 | Visual C++ 4.x | `nmake APPVER=3.51` |
 | 4.0 | Visual C++ 4.x | `nmake` |
+| PINT 3.5 | [PINT 3.5 SDK](https://hub.docker.com/r/tenox7/pint35sdk) | `nmake` |
+| PINT 4.0 | [PINT 4.0 SDK](https://hub.docker.com/r/tenox7/pint40sdk) | `nmake` |
 
-The `CPU` environment variable (`i386`, `MIPS`, `ALPHA` or `PPC`) picks the processor. `nmake clean` deletes what nmake made. Visual C++ 2.0 builds it too.
+The `CPU` environment variable (`i386`, `MIPS`, `ALPHA`, `PPC` or `ARM`) picks the processor. `nmake clean` deletes what nmake made. Visual C++ 2.0 builds it too.
+
+The PINT SDKs run in Docker and set `CPU=ARM` (their pages tell how to set them up once):
+
+```
+docker run --rm -v msvc-arm32:/opt/msvc -v "$PWD":/src tenox7/pint40sdk nmake
+```
 
 ## Testing
 
@@ -50,6 +60,7 @@ The `CPU` environment variable (`i386`, `MIPS`, `ALPHA` or `PPC`) picks the proc
 - NT 3.1 MIPS: Plink logs in to sdf.org (OpenSSH 10.4) in 5.6 s; v0.85-2 took 10.9 s. sdf.org closes a connection that hasn't logged in after about 18 seconds.
 - NT 3.1 MIPS, PuTTY over Telnet: all 45 KB from mapscii.me arrived, and PuTTY saw at once that the server closed the connection. ASCII Star Wars from towel.blinkenlights.nl ran for over 500 KB without a stop. v0.85-1 stopped reading part way.
 - Terminal font, UTF-8 text over SSH: box drawing, block, accented, Greek and math characters show right on NT 3.1 MIPS, NT 3.51 x86 and NT 4.0 x86, and MapSCII draws its map. v0.85-1 showed them as blanks or other characters.
+- PINT 3.5 and 4.0 (ARM, in QEMU): Plink stores the host key and runs a command, PSCP copies a file from OpenSSH 10.3, and PuTTY logs in and runs a command.
 
 ## Source
 
