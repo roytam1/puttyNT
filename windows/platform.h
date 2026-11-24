@@ -291,9 +291,12 @@ DECL_WINDOWS_FUNCTION(extern, int, WSAAsyncSelect,
                       (SOCKET, HWND, u_int, LONG));
 DECL_WINDOWS_FUNCTION(extern, int, WSAGetLastError, (void));
 DECL_WINDOWS_FUNCTION(extern, int, ioctlsocket, (SOCKET, LONG, ULONG FAR *));
+#ifdef WIN32S_COMPAT
+/* winsftp.exe drives the network with select() directly */
 DECL_WINDOWS_FUNCTION(extern, int, select,
                       (int, fd_set *, fd_set *, fd_set *,
                        const struct timeval *));
+#endif
 
 /*
  * Implemented differently depending on the client of network.c, and
@@ -309,7 +312,9 @@ void done_with_socket(SOCKET skt);
 void winselgui_set_hwnd(HWND hwnd);
 void winselgui_clear_hwnd(void);
 void winselgui_response(UINT message, WPARAM wParam, LPARAM lParam);
-SOCKET winselcli_unique_socket(void);
+#ifdef WIN32S_COMPAT
+SOCKET winselcli_unique_socket(void);   /* used only by winsftp.exe */
+#endif
 
 void winselcli_setup(void);
 bool winselcli_polling(void);

@@ -484,7 +484,12 @@ bool sftp_get_file(char *fname, char *outfname, bool recurse, bool restart)
         offset = uint64_make(0, 0);
     }
 
-#ifdef WINSFTP_BUILD
+#ifndef WINSFTP_BUILD
+    with_stripctrl(san, fname) {
+        with_stripctrl(sano, outfname)
+            printf("remote:%s => local:%s\n", san, sano);
+    }
+#else
     sftp_progress_init(fname,
         (attrs.flags & SSH_FILEXFER_ATTR_SIZE) ? attrs.size : uint64_make(0, 0));
     {
@@ -750,7 +755,9 @@ bool sftp_put_file(char *fname, char *outfname, bool recurse, bool restart)
         offset = uint64_make(0, 0);
     }
 
-#ifdef WINSFTP_BUILD
+#ifndef WINSFTP_BUILD
+    printf("local:%s => remote:%s\n", fname, outfname);
+#else
     sftp_progress_init(fname, local_file_size);
     {
         uint64 bytes_sent = offset;
@@ -1957,21 +1964,16 @@ static int sftp_cmd_pling(struct sftp_command *cmd)
 
 #ifdef WINSFTP_BUILD
 /*
- * Local filesystem commands ??Windows/winsftp.exe only.
+ * Local filesystem commands --Windows/winsftp.exe only.
  * printf() is redirected to winsftp_printf() via -Dprintf=... so all
  * output goes to the GUI output area.
  */
 static void win_local_perror(const char *op, const char *path)
 {
-    DWORD err = GetLastError();
-    char buf[256];
-    int len;
-    FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                  NULL, err, 0, buf, (DWORD)sizeof(buf), NULL);
-    len = (int)strlen(buf);
-    while (len > 0 && (buf[len-1] == '\r' || buf[len-1] == '\n'))
-        buf[--len] = '\0';
-    printf("%s: %s: %s\n", op, path, buf);
+    /* FormatMessage is not supported on Win32s; win_strerror() knows
+     * how to fall back to an error number there. */
+    printf("%s: %s: %s\n", op, path,
+           win_strerror(GetLastError()));
 }
 
 /*
@@ -2206,6 +2208,10 @@ static void scp_shell_quote_glob(char *out, size_t outsz, const char *s)
             if (in_quote) { *p++ = '\''; in_quote = false; }
             *p++ = *s;
         } else if (*s == '\'') {
+            /* Worst case: close the current quote (1), emit the
+             * escaped quote (4), close the new quote (1) and the NUL
+             * (1). Do not write past the buffer. */
+            if (p + (in_quote ? 7 : 6) > out + outsz) break;
             if (in_quote) { *p++ = '\''; in_quote = false; }
             *p++ = '\''; *p++ = '\\'; *p++ = '\''; *p++ = '\'';
             in_quote = true;
@@ -2283,7 +2289,7 @@ static bool scp_recv_loop(const char *localdir, bool recursive)
             break;
         }
         if (type == 'T') {
-            /* Timestamp ??ACK and ignore */
+            /* Timestamp --ACK and ignore */
             scp_readline(rest, sizeof(rest));
             backend_send(backend, &nul, 1);
             continue;
@@ -2299,6 +2305,13 @@ static bool scp_recv_loop(const char *localdir, bool recursive)
             if (sscanf(rest, "%lo 0 %255s", &perms, fname) != 2) {
                 printf("scp: malformed directory header\n");
                 backend_send(backend, "\x01scp: protocol error\n", 21);
+                ok = false;
+                break;
+            }
+            if (!vet_filename(fname)) {
+                printf("scp: dangerous directory name from server: %s\n",
+                       fname);
+                backend_send(backend, "\x01scp: invalid filename\n", 23);
                 ok = false;
                 break;
             }
@@ -2349,6 +2362,12 @@ static bool scp_recv_loop(const char *localdir, bool recursive)
             }
             perms = strtoul(perms_s, NULL, 8);
             uint64_from_decimal(size_s, &size);
+        }
+        if (!vet_filename(fname)) {
+            printf("scp: dangerous file name from server: %s\n", fname);
+            backend_send(backend, "\x01scp: invalid filename\n", 23);
+            ok = false;
+            break;
         }
 
         /* Decide where to write */
@@ -3748,7 +3767,7 @@ int psftp_main(CmdlineArgList *arglist)
     do_defaults(NULL, conf);
 #ifdef WINSFTP_BUILD
     /*
-     * winsftp.exe: always start fresh ??no command-line parsing and no
+     * winsftp.exe: always start fresh --no command-line parsing and no
      * Default Settings auto-connect.  sent_eof must be cleared so that
      * psftp_eof() works correctly for the new session.
      */

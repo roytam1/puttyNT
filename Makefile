@@ -8,8 +8,9 @@
 # provides the same set of macros the SDK's one does, so the only
 # extra thing needed is the WIN32S_COMPAT define:
 #
-#   nmake          builds the eight programs
-#   nmake WIN32S=1 builds the eight programs for Win32s
+#   nmake          builds the eight programs for Windows NT
+#   nmake WIN32S=1 builds the four programs that work on Win32s:
+#                  PuTTY, PuTTYtel, PuTTYgen and WinSFTP
 #   nmake clean    deletes what nmake made
 #
 # The SDK's environment variable CPU (i386, MIPS, ALPHA or PPC) picks
@@ -817,14 +818,13 @@ PAGEANT = \
 	utils\seat_dialog_text.obj utils\sk_free_peer_info.obj \
 	utils\smemclr.obj utils\smemeq.obj utils\ssh2_pick_fingerprint.obj \
 	utils\strbuf.obj utils\string_length_for_printf.obj \
-	utils\base64_decode.obj utils\cert-expr.obj utils\host_ca_new_free.obj utils\percent_decode.obj utils\percent_encode.obj utils\wildcard.obj windows\no-jump-list.obj \
-	utils\fgetline.obj utils\tree234.obj utils\uint64.obj utils\version.obj \
+	utils\tree234.obj utils\uint64.obj utils\version.obj \
 	utils\write_c_string_literal.obj windows\agent-client.obj \
 	windows\commitid.obj windows\handle-io.obj \
 	windows\handle-socket.obj windows\handle-wait.obj \
 	windows\named-pipe-client.obj windows\named-pipe-server.obj \
 	windows\network.obj windows\pageant.obj windows\select-gui.obj \
-	windows\unicode.obj $(STORAGE_OBJ) \
+	windows\unicode.obj \
 	windows\utils\agent_mutex_name.obj \
 	windows\utils\agent_named_pipe_name.obj \
 	windows\utils\aux_match_opt.obj windows\utils\cmdline_arg.obj \

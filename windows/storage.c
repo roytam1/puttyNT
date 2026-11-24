@@ -538,8 +538,8 @@ static bool try_random_seed(char const *path, int action, HANDLE *ret)
 {
     if (action == DEL) {
         if (!DeleteFile(path) && GetLastError() != ERROR_FILE_NOT_FOUND) {
-            /* best-effort cleanup; nonfatal() is not available in every */
-            /* program that links this storage backend */
+            nonfatal("Unable to delete '%s': %s", path,
+                     win_strerror(GetLastError()));
         }
         *ret = INVALID_HANDLE_VALUE;
         return false;                  /* so we'll do the next ones too */

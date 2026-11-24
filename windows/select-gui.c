@@ -11,6 +11,9 @@ static void wm_netevent_callback(void *vctx);
 
 static HWND winsel_hwnd = NULL;
 static tree234 *moribund_sockets = NULL;
+#ifdef WIN32S_COMPAT
+/* Only winsftp.exe (built for Win32s) drives the network with select()
+ * directly and needs to retrieve the current socket. */
 static tree234 *cli_sockets = NULL;
 static int socket_cmp(void *av, void *bv)
 {
@@ -18,9 +21,7 @@ static int socket_cmp(void *av, void *bv)
     return a < b ? -1 : a > b ? +1 : 0;
 }
 
-/* Return the one live socket, for front ends that drive the network
- * with WinSock's select() directly (winsftp.exe). INVALID_SOCKET when
- * none, or more than one. */
+/* Return the one live socket. INVALID_SOCKET when none, or more than one. */
 SOCKET winselcli_unique_socket(void)
 {
     uintptr_t sk;
@@ -30,6 +31,7 @@ SOCKET winselcli_unique_socket(void)
     sk = (uintptr_t)index234(cli_sockets, 0);
     return sk ? (SOCKET)sk : INVALID_SOCKET;
 }
+#endif /* WIN32S_COMPAT */
 
 static int moribund_socket_cmp(void *av, void *bv)
 {
@@ -51,6 +53,7 @@ const char *do_select(SOCKET skt, bool enable)
 {
     int msg, events;
 
+#ifdef WIN32S_COMPAT
     if (enable) {
         if (!cli_sockets)
             cli_sockets = newtree234(socket_cmp);
@@ -59,6 +62,7 @@ const char *do_select(SOCKET skt, bool enable)
         if (cli_sockets)
             del234(cli_sockets, (void *)(uintptr_t)skt);
     }
+#endif
 
     if (!winsel_hwnd) {
         /*
