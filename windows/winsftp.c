@@ -1,5 +1,5 @@
 /*
- * winsftp.c ??Windows GUI wrapper for PSFTP (winsftp.exe).
+ * winsftp.c --Windows GUI wrapper for PSFTP (winsftp.exe).
  *
  * Provides a simple window with:
  *   - a read-only multiline EDIT for output
@@ -122,7 +122,7 @@ static void winsftp_append(const char *text)
     if (!g_output)
         return;
 
-    /* Convert lone \n ??\r\n for the EDIT control */
+    /* Convert lone \n --\r\n for the EDIT control */
     buf = snewn(2 * strlen(text) + 1, char);
     for (p = text, q = buf; *p; p++) {
         if (*p == '\n' && (p == text || p[-1] != '\r'))
@@ -153,28 +153,34 @@ static void winsftp_append(const char *text)
     sfree(buf);
 }
 
-/* These are called as printf/fprintf by psftp.c via -D macros */
+/* These are called as printf/fprintf by psftp.c via -D macros.
+ * Format allocation must not use a fixed-size stack buffer: server-
+ * supplied names and messages can be arbitrarily long. */
 int winsftp_printf(const char *fmt, ...)
 {
-    char buf[4096];
+    char *text;
     int r;
     va_list ap;
     va_start(ap, fmt);
-    r = vsprintf(buf, fmt, ap);
+    text = dupvprintf(fmt, ap);
     va_end(ap);
-    if (r > 0) winsftp_append(buf);
+    r = strlen(text);
+    winsftp_append(text);
+    sfree(text);
     return r;
 }
 
 int winsftp_fprintf(FILE *f, const char *fmt, ...)
 {
-    char buf[4096];
+    char *text;
     int r;
     va_list ap;
     va_start(ap, fmt);
-    r = vsprintf(buf, fmt, ap);
+    text = dupvprintf(fmt, ap);
     va_end(ap);
-    if (r > 0) winsftp_append(buf);
+    r = strlen(text);
+    winsftp_append(text);
+    sfree(text);
     return r;
 }
 
@@ -247,17 +253,18 @@ extern Conf *conf; /* psftp.c */
 
 void platform_psftp_pre_conn_setup(LogPolicy *lp)
 {
-    char buf[256];
     const char *host = conf_get_str(conf, CONF_host);
     bool user_utf8;
     const char *user = conf_get_str_ambi(conf, CONF_username, &user_utf8);
     int port = conf_get_int(conf, CONF_port);
+    char *text;
 
     if (user && user[0])
-        sprintf(buf, "Connecting to %s@%s port %d...\r\n", user, host, port);
+        text = dupprintf("Connecting to %s@%s port %d...\r\n", user, host, port);
     else
-        sprintf(buf, "Connecting to %s port %d...\r\n", host, port);
-    winsftp_append(buf);
+        text = dupprintf("Connecting to %s port %d...\r\n", host, port);
+    winsftp_append(text);
+    sfree(text);
     if (g_status) SetWindowText(g_status, "Connecting...");
 
     if (restricted_acl())
@@ -349,9 +356,9 @@ void cleanup_exit(int code)
 
 void console_print_error_msg(const char *prefix, const char *msg)
 {
-    char buf[1024];
-    sprintf(buf, "%s: %s\r\n", prefix, msg);
-    winsftp_append(buf);
+    char *text = dupprintf("%s: %s\r\n", prefix, msg);
+    winsftp_append(text);
+    sfree(text);
     MessageBox(g_hwnd, msg, prefix, MB_OK | MB_ICONERROR);
 }
 
@@ -378,12 +385,13 @@ void modalfatalbox(const char *fmt, ...)
     va_start(ap, fmt);
     msg = dupvprintf(fmt, ap);
     va_end(ap);
-    /* Don't exit ??show in the output area and let psftp_main unwind
-     * cleanly so WinMain can restart the session. */
     winsftp_append("Connection error: ");
     winsftp_append(msg);
     winsftp_append("\r\n");
     sfree(msg);
+    /* modalfatalbox is NORETURN; callers assume we never come back
+     * (e.g. out-of-memory in snew). */
+    cleanup_exit(1);
 }
 
 void nonfatal(const char *fmt, ...)
@@ -448,11 +456,13 @@ SeatPromptResult console_confirm_ssh_host_key(
 {
     char *msg = sdt_to_string(text);
     int r = MessageBox(g_hwnd, msg, "Host Key Verification",
-                       MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+                       MB_YESNOCANCEL | MB_ICONWARNING | MB_DEFBUTTON3);
     sfree(msg);
     if (r == IDYES) {
         store_host_key(seat, host, port, keytype, keystr);
         return SPR_OK;
+    } else if (r == IDNO) {
+        return SPR_OK;                 /* connect once, without storing */
     }
     return SPR_USER_ABORT;
 }
@@ -484,8 +494,8 @@ const SeatDialogPromptDescriptions *console_prompt_descriptions(Seat *seat)
     static const SeatDialogPromptDescriptions descs = {
         /* .hk_accept_action = */ "click Yes",
         /* .hk_connect_once_action = */ "click No",
-        /* .hk_cancel_action = */ "click No",
-        /* .hk_cancel_action_Participle = */ "Clicking No",
+        /* .hk_cancel_action = */ "click Cancel",
+        /* .hk_cancel_action_Participle = */ "Clicking Cancel",
         /* .weak_accept_action = */ "click Yes",
         /* .weak_cancel_action = */ "click No",
     };
@@ -494,7 +504,7 @@ const SeatDialogPromptDescriptions *console_prompt_descriptions(Seat *seat)
 
 void console_connection_fatal(Seat *seat, const char *msg)
 {
-    /* Don't exit ??let psftp_main unwind cleanly and WinMain restart
+    /* Don't exit --let psftp_main unwind cleanly and WinMain restart
      * the session, just like after a normal disconnection. */
     winsftp_append("Connection error: ");
     winsftp_append(msg);
@@ -513,12 +523,11 @@ bool console_has_mixed_input_stream(Seat *seat) { return false; }
 int console_askappend(LogPolicy *lp, Filename *filename,
                       void (*callback)(void *ctx, int result), void *ctx)
 {
-    char buf[512];
-    int r;
-    sprintf(buf, "Log file \"%s\" already exists.\n"
-            "Append to it?", filename_to_str(filename));
-    r = MessageBox(g_hwnd, buf, "WinSFTP",
-                   MB_YESNOCANCEL | MB_ICONQUESTION);
+    char *text = dupprintf("Log file \"%s\" already exists.\n"
+                           "Append to it?", filename_to_str(filename));
+    int r = MessageBox(g_hwnd, text, "WinSFTP",
+                       MB_YESNOCANCEL | MB_ICONQUESTION);
+    sfree(text);
     if (r == IDYES)   return 1;  /* append */
     if (r == IDNO)    return 2;  /* overwrite */
     return 0;                    /* cancel logging */
@@ -526,9 +535,9 @@ int console_askappend(LogPolicy *lp, Filename *filename,
 
 void console_logging_error(LogPolicy *lp, const char *msg)
 {
-    char buf[512];
-    sprintf(buf, "Log error: %s\r\n", msg);
-    winsftp_append(buf);
+    char *text = dupprintf("Log error: %s\r\n", msg);
+    winsftp_append(text);
+    sfree(text);
 }
 
 void console_eventlog(LogPolicy *lp, const char *msg)
@@ -1067,7 +1076,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg,
         /* Subclass input EDIT to intercept Tab for completion */
         g_input_orig_proc = (WNDPROC)SetWindowLong(
             g_input, GWL_WNDPROC, (LONG)InputSubclassProc);
-        /* Send button ??ID = IDOK so IsDialogMessage routes Enter here */
+        /* Send button --ID = IDOK so IsDialogMessage routes Enter here */
         g_send   = CreateWindow("BUTTON", "Send",
                                 WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
                                 0, 0, 0, 0,
@@ -1199,7 +1208,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev,
     }
 
     /* psftp_main already calls sk_cleanup() and random_save_seed().
-     * wc.hIcon is a shared resource (LoadIcon) ??do NOT DestroyIcon it.
+     * wc.hIcon is a shared resource (LoadIcon) --do NOT DestroyIcon it.
      * Only the window class needs unregistering here. */
     if (!hPrev)
         UnregisterClass("WinSFTP", hInst);
