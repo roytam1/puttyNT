@@ -66,22 +66,34 @@ static void make_dir_path(const char *path)
 }
 
 /*
- * Convert a session name to a file name. On FAT filesystems a file
- * name has to fit in the 8.3 format, so we reduce the session name to
- * eight uppercase characters made only of characters that are legal
- * in a file name.
+ * Convert a session name to a file name. On FAT filesystems a file name
+ * has to fit in 8.3 format. Short names keep their readable uppercase
+ * form; anything that would be truncated (or that maps to the reserved
+ * DEFAULT name) gets a hash suffix so two different long session names
+ * cannot silently share one file.
  */
+static uint32_t session_name_hash(const char *s)
+{
+    uint32_t h = 2166136261UL;         /* FNV-1a */
+    while (*s) {
+        h ^= (unsigned char)*s++;
+        h *= 16777619UL;
+    }
+    return h;
+}
+
 static char *make_session_filename(const char *in)
 {
     strbuf *sb;
     const char *p;
-    int count = 0;
+    bool truncated = false;
+    char *ret;
 
     if (!strcmp(in, DEFAULT_SESSION_NAME))
         return dupstr(DEFAULT_SESSION_NAME);
 
     sb = strbuf_new();
-    for (p = in; *p && count < 8; p++) {
+    for (p = in; *p && sb->len < 8; p++) {
         unsigned char c = (unsigned char)*p;
 
         if (c >= 'a' && c <= 'z')
@@ -89,17 +101,35 @@ static char *make_session_filename(const char *in)
 
         if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
             put_byte(sb, c);
-            count++;
         } else if (c == ' ' || c == '-' || c == '.') {
             put_byte(sb, '_');
-            count++;
+        } else {
+            truncated = true;          /* dropped an illegal character */
         }
-        /* Anything else is dropped. */
     }
-    if (sb->len == 0)
-        put_datapl(sb, PTRLEN_LITERAL("_SESS"));
+    if (*p)
+        truncated = true;              /* ran out of room */
 
-    return strbuf_to_str(sb);
+    if (sb->len == 0)
+        put_datapl(sb, PTRLEN_LITERAL("SESS"));
+
+    if (truncated || !strcmp(sb->s, DEFAULT_SESSION_NAME)) {
+        static const char hex[] = "0123456789ABCDEF";
+        char buf[16];
+        size_t n = sb->len > 5 ? 5 : sb->len;
+        unsigned h = (unsigned)(session_name_hash(in) & 0xFFF);
+        memcpy(buf, sb->s, n);
+        buf[n++] = hex[(h >> 8) & 0xF];
+        buf[n++] = hex[(h >> 4) & 0xF];
+        buf[n++] = hex[h & 0xF];
+        buf[n] = '\0';
+        ret = dupstr(buf);
+    } else {
+        ret = strbuf_to_str(sb);
+        return ret;
+    }
+    strbuf_free(sb);
+    return ret;
 }
 
 /*
@@ -507,6 +537,7 @@ int check_stored_host_key(const char *hostname, int port,
                     ret = 0;     /* key matches */
                 else
                     ret = 2;     /* key is different */
+                sfree(line);
                 break;
             }
         }
