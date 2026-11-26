@@ -27,7 +27,7 @@ settings_w *open_settings_w(const char *sessionname, char **errmsg)
     *errmsg = NULL;
 
     if (!sessionname || !*sessionname)
-        sessionname = "Default Settings";
+        sessionname = DEFAULT_SESSION_NAME;
 
     sb = strbuf_new();
     escape_registry_key(sessionname, sb);
@@ -74,7 +74,7 @@ settings_r *open_settings_r(const char *sessionname)
     HKEY sesskey;
     settings_r *handle;
     if (!sessionname || !*sessionname)
-        sessionname = "Default Settings";
+        sessionname = DEFAULT_SESSION_NAME;
 
     sb = strbuf_new();
     escape_registry_key(sessionname, sb);
